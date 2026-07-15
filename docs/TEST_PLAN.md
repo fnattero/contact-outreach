@@ -22,7 +22,10 @@ make check      # lint + typecheck + test + migraciones pendientes
 - Exclusión de noreply/no-reply/abuse/privacy y patrones configurados.
 - MX válido, null MX, NXDOMAIN, fallback A/AAAA, timeout y SERVFAIL.
 - Selección principal por flag, dominio, rol y orden; cero o un primario.
-- Claves de dedupe: email, provider ID, dominio empresarial y nombre+dirección; excluir dominios gratuitos/compartidos.
+- Claves de dedupe: todos los emails validados, provider ID, dominio empresarial y
+  nombre+dirección; excluir dominios gratuitos/compartidos y cubrir emails secundarios compartidos.
+- Recovery reconstruye desde campaña/query la siguiente extracción si se perdió el mensaje Redis;
+  pausa/cancelación serializan submit/poll y no permiten efectos posteriores.
 - Reglas de recontacto: contacto previo, override consumible, baja y bounce no anulables.
 - Todas las transiciones válidas e inválidas de las cuatro máquinas.
 - Contadores derivados y clasificación de respuesta humana/automática.

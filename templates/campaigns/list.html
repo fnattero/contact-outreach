@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Campañas · Contact Outreach{% endblock %}
+
+{% block content %}
+<div class="actions"><h1>Campañas</h1><a class="button" href="{% url 'campaign-create' %}">Crear campaña</a></div>
+<table>
+    <thead><tr><th>Nombre</th><th>Estado</th><th>Objetivo</th><th>Crudos máx.</th><th>Catálogo</th></tr></thead>
+    <tbody>
+    {% for campaign in campaigns %}
+        <tr>
+            <td><a href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a></td>
+            <td>{{ campaign.get_state_display }}</td>
+            <td>{{ campaign.objective }}</td>
+            <td>{{ campaign.max_raw_records }}</td>
+            <td>{{ campaign.catalog }}</td>
+        </tr>
+    {% empty %}<tr><td colspan="5">Todavía no hay campañas.</td></tr>{% endfor %}
+    </tbody>
+</table>
+{% endblock %}

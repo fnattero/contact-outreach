@@ -4,7 +4,13 @@
 
 {% block content %}
 <h1>Dashboard</h1>
-<p class="muted">Infraestructura base lista. Las campañas se incorporarán en las próximas fases.</p>
+<p class="muted">Configurá el perfil, el catálogo y una campaña. Esta etapa no realiza llamadas externas.</p>
+
+{% if not profile_configured %}
+<p class="card">Antes de iniciar una campaña, <a href="{% url 'business-profile' %}">completá el perfil comercial</a>.</p>
+{% endif %}
+
+<p><a class="button" href="{% url 'campaign-create' %}">Crear campaña</a></p>
 
 <section class="grid" aria-label="Estado de la aplicación">
     <article class="card">
@@ -13,9 +19,9 @@
         <p class="muted">El kill switch está {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}.</p>
     </article>
     <article class="card">
-        <h2>Servicios</h2>
-        <p>PostgreSQL · Redis · Celery</p>
-        <p class="muted">La readiness verifica base y cache.</p>
+        <h2>Configuración</h2>
+        <p>{{ summary.categories }} rubros · {{ summary.zones }} zonas</p>
+        <p>{{ summary.catalogs }} catálogos · {{ summary.suppressions }} supresiones</p>
     </article>
     <article class="card">
         <h2>Proveedores</h2>
@@ -26,4 +32,21 @@
         </ul>
     </article>
 </section>
+
+<h2>Campañas recientes</h2>
+{% if recent_campaigns %}
+<table>
+    <thead><tr><th>Nombre</th><th>Estado</th><th>Objetivo</th><th>Catálogo</th></tr></thead>
+    <tbody>
+    {% for campaign in recent_campaigns %}
+        <tr>
+            <td><a href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a></td>
+            <td>{{ campaign.get_state_display }}</td>
+            <td>{{ campaign.objective }}</td>
+            <td>{{ campaign.catalog }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}<p class="muted">Todavía no hay campañas.</p>{% endif %}
 {% endblock %}

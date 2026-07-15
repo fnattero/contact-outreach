@@ -8,17 +8,31 @@
         :root { color-scheme: light; font-family: system-ui, sans-serif; }
         body { margin: 0; background: #f5f7fb; color: #172033; }
         header { background: #172033; color: white; padding: 0.9rem 1.5rem; }
-        nav { max-width: 68rem; margin: auto; display: flex; align-items: center; gap: 1rem; }
+        nav { max-width: 76rem; margin: auto; display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
         nav a { color: white; text-decoration: none; font-weight: 700; }
         nav form { margin-left: auto; }
-        main { max-width: 68rem; margin: 2rem auto; padding: 0 1.25rem; }
+        main { max-width: 76rem; margin: 2rem auto; padding: 0 1.25rem; }
         .pill { border-radius: 99px; padding: 0.25rem 0.65rem; background: #fff3cd; color: #6a4b00; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
         .card { background: white; border: 1px solid #dce2ec; border-radius: 0.75rem; padding: 1.1rem; }
         .muted { color: #5f6b7a; }
         button { border: 0; border-radius: 0.4rem; padding: 0.55rem 0.8rem; cursor: pointer; }
         nav button { background: transparent; color: white; text-decoration: underline; }
-        input { width: 100%; box-sizing: border-box; padding: 0.65rem; margin-top: 0.3rem; }
+        input:not([type="checkbox"]):not([type="radio"]), select, textarea { width: 100%; box-sizing: border-box; padding: 0.65rem; margin-top: 0.3rem; }
+        label { font-weight: 650; }
+        form p { margin: 0 0 1rem; }
+        button, .button { background: #2457d6; color: white; text-decoration: none; display: inline-block; }
+        .danger { background: #a52626; }
+        .secondary { background: #576273; }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th, td { text-align: left; padding: 0.7rem; border-bottom: 1px solid #dce2ec; vertical-align: top; }
+        .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .actions form { margin: 0; }
+        .messages { padding: 0; list-style: none; }
+        .messages li { background: #e4f3e8; border: 1px solid #aad1b3; padding: 0.7rem; border-radius: 0.4rem; }
+        .messages li.error { background: #fae7e7; border-color: #dda9a9; }
+        .form-card { max-width: 45rem; }
+        .checkbox-list ul { columns: 2; list-style: none; padding: 0; }
         .auth { max-width: 25rem; margin: 4rem auto; }
         .errorlist { color: #9d1c1c; }
     </style>
@@ -28,6 +42,13 @@
         <nav aria-label="Navegación principal">
             <a href="{% url 'dashboard' %}">Contact Outreach</a>
             {% if user.is_authenticated %}
+                <a href="{% url 'campaigns' %}">Campañas</a>
+                <a href="{% url 'business-profile' %}">Perfil</a>
+                <a href="{% url 'categories' %}">Rubros</a>
+                <a href="{% url 'zones' %}">Zonas</a>
+                <a href="{% url 'catalogs' %}">Catálogos</a>
+                <a href="{% url 'suppressions' %}">Supresiones</a>
+                <a href="{% url 'audit-log' %}">Auditoría</a>
                 <span class="pill">{{ runtime_send_mode }} · kill switch {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}</span>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
@@ -36,6 +57,13 @@
             {% endif %}
         </nav>
     </header>
-    <main>{% block content %}{% endblock %}</main>
+    <main>
+        {% if messages %}
+            <ul class="messages">
+                {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+            </ul>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
 </body>
 </html>

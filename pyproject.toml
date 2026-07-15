@@ -12,6 +12,8 @@ dependencies = [
   "argon2-cffi==25.1.0",
   "celery[redis]==5.6.3",
   "Django==5.2.16",
+  "dnspython==2.8.0",
+  "email-validator==2.3.0",
   "gunicorn==23.0.0",
   "psycopg[binary]==3.3.4",
 ]
@@ -43,6 +45,9 @@ select = ["E", "F", "I", "B", "UP", "DJ", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/contact_outreach/settings*.py" = ["F403", "F405"]
+"**/migrations/*.py" = ["E501", "I001", "RUF012"]
+"src/apps/**/forms.py" = ["RUF012"]
+"src/apps/**/models.py" = ["RUF012"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -55,7 +60,7 @@ exclude = ["src/.*/migrations/"]
 django_settings_module = "contact_outreach.settings_test"
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*"]
+module = ["celery", "celery.*", "dns", "dns.*", "email_validator"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

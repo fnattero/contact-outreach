@@ -15,6 +15,7 @@ from apps.integrations.fakes import (
     FakeLLMProvider,
     FakeWebsiteFetcher,
 )
+from apps.integrations.outscraper import OutscraperProvider
 
 
 def _require_fake(setting_name: str) -> None:
@@ -25,9 +26,16 @@ def _require_fake(setting_name: str) -> None:
         )
 
 
-def get_extractor_provider() -> ExtractorProvider:
-    _require_fake("EXTRACTOR_PROVIDER")
-    return FakeExtractorProvider()
+def get_extractor_provider(provider_name: str | None = None) -> ExtractorProvider:
+    selected = provider_name or settings.EXTRACTOR_PROVIDER
+    if selected == "fake":
+        return FakeExtractorProvider()
+    if selected == "outscraper":
+        return OutscraperProvider(
+            api_key=settings.OUTSCRAPER_API_KEY,
+            base_url=settings.OUTSCRAPER_BASE_URL,
+        )
+    raise ImproperlyConfigured(f"Extractor provider {selected!r} is not supported")
 
 
 def get_website_fetcher() -> WebsiteFetcher:

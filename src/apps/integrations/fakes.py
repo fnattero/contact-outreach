@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from typing import Any
 from urllib.parse import urlencode
 
 from apps.integrations.contracts import (
     AIAnalysisResult,
     AnalysisRequest,
     ExtractedBusiness,
+    ExtractedEmail,
     ExtractionBatch,
     GmailAccountInfo,
     GmailConnectionData,
@@ -32,29 +34,82 @@ FAKE_GMAIL_SCOPES = (
 )
 
 
-class FakeExtractorProvider:
+class MockExtractorProvider:
     """Deterministic fixture provider; it never opens a socket."""
 
-    def extract(self, request: SearchRequest) -> ExtractionBatch:
+    def submit(self, request: SearchRequest) -> ExtractionBatch:
         request_hash = sha256(request.idempotency_key.encode()).hexdigest()[:12]
+        request_id = f"fake-request-{request_hash}"
+        raw_payload: dict[str, Any] = {
+            "id": request_id,
+            "status": "Success",
+            "data": [
+                [
+                    {
+                        "place_id": f"fake-{request_hash}-1",
+                        "name": "Taller Electromecánico Demo",
+                        "full_address": "CABA, Argentina",
+                        "site": "https://taller-demo.example",
+                        "emails": ["ventas@taller-demo.example"],
+                        "category": "Taller electromecánico",
+                    },
+                    {
+                        "place_id": f"fake-{request_hash}-2",
+                        "name": "Negocio sin email",
+                        "full_address": "CABA, Argentina",
+                    },
+                ]
+            ],
+            "fixture_unknown": {"schema_can_change": True},
+        }
         return ExtractionBatch(
-            records=(
-                ExtractedBusiness(
-                    provider_id=f"fake-{request_hash}-1",
-                    name="Taller Electromecánico Demo",
-                    address="CABA, Argentina",
-                    email_candidates=("ventas@example.invalid",),
-                    website="https://example.invalid",
-                ),
-                ExtractedBusiness(
-                    provider_id=f"fake-{request_hash}-2",
-                    name="Negocio sin email",
-                    address="CABA, Argentina",
-                    email_candidates=(),
-                ),
-            ),
-            request_id=f"fake-request-{request_hash}",
+            status="SUCCEEDED",
+            request_id=request_id,
+            raw_payload=raw_payload,
+            records=self.parse_response(raw_payload),
         )
+
+    def extract(self, request: SearchRequest) -> ExtractionBatch:
+        return self.submit(request)
+
+    def poll(self, *, request_id: str, timeout_seconds: float = 30.0) -> ExtractionBatch:
+        del timeout_seconds
+        return ExtractionBatch(
+            status="SUCCEEDED",
+            request_id=request_id,
+            raw_payload={"id": request_id, "status": "Success", "data": []},
+        )
+
+    def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]:
+        groups = raw_payload.get("data", [])
+        if not isinstance(groups, list):
+            return ()
+        rows = [row for group in groups if isinstance(group, list) for row in group]
+        records: list[ExtractedBusiness] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            emails = row.get("emails", [])
+            email_values = emails if isinstance(emails, list) else []
+            records.append(
+                ExtractedBusiness(
+                    provider_id=str(row.get("place_id", "")),
+                    name=str(row.get("name", "")),
+                    address=str(row.get("full_address", "")),
+                    email_candidates=tuple(
+                        ExtractedEmail(value=str(value), order=index)
+                        for index, value in enumerate(email_values)
+                    ),
+                    website=str(row["site"]) if row.get("site") else None,
+                    category=str(row["category"]) if row.get("category") else None,
+                    provider_data={"place_id": row.get("place_id")},
+                )
+            )
+        return tuple(records)
+
+
+# Backward-compatible name for existing imports; documentation calls this provider Mock.
+FakeExtractorProvider = MockExtractorProvider
 
 
 class FakeWebsiteFetcher:

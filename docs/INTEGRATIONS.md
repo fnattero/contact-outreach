@@ -6,7 +6,9 @@ Los contratos viven en dominio Python y no exponen SDKs externos:
 
 ```python
 class ExtractorProvider(Protocol):
-    def extract(self, request: SearchRequest) -> ExtractionBatch: ...
+    def submit(self, request: SearchRequest) -> ExtractionBatch: ...
+    def poll(self, request_id: str) -> ExtractionBatch: ...
+    def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]: ...
 
 class WebsiteFetcher(Protocol):
     def fetch(self, request: WebsiteRequest) -> WebsiteResult: ...
@@ -27,11 +29,26 @@ class GmailProvider(Protocol):
 
 Requests/results son dataclasses o modelos Pydantic inmutables. Todo adaptador acepta timeout, correlation/idempotency key y configuración explícita. Excepciones comunes: `RetryableProviderError`, `RateLimitError(retry_after)`, `AuthenticationError`, `ValidationProviderError`, `CostLimitError` y `PermanentProviderError`.
 
+`submit` y `poll` devuelven estado, request ID, payload crudo y uso/costo cuando el proveedor lo
+informa. El servicio persiste ese payload antes de llamar `parse_response`; así un reinicio puede
+reanudar desde PostgreSQL sin depender de Redis ni volver a crear el trabajo externo. `extract`
+permanece como alias de compatibilidad para proveedores síncronos y fixtures, pero la orquestación
+durable usa las tres operaciones explícitas.
+
 ## 2. Outscraper
 
 `OutscraperProvider` implementa `ExtractorProvider`; no existe cliente propio de Google Maps. Construye consultas con rubro, zona y ubicación snapshot, solicita email/contact enrichment y conserva la respuesta JSON exacta antes de mapearla. El parser versionado tolera campos faltantes y registra desconocidos sin incorporarlos automáticamente al dominio.
 
+El adaptador vigente usa `GET /google-maps-search` con `async=true`, enrichment
+`contacts_n_leads`, región `AR` e idioma `es-419`; autentica exclusivamente con `X-API-KEY` y
+recupera trabajos con `GET /requests/{requestId}`. El transport HTTP es inyectable para impedir red
+en tests. La API key proviene sólo de `OUTSCRAPER_API_KEY`.
+
 Si la API devuelve un request asíncrono, `SearchRun` persiste el request ID y el polling es idempotente. Un run no se repite con una nueva solicitud después de timeout si puede consultarse el request existente. Se respetan 429/403, `Retry-After`, estado de cuenta y errores permanentes.
+
+Las campañas Outscraper se expresan exclusivamente en USD hasta que exista conversión de moneda.
+Las unidades informadas por el proveedor se conservan; sólo se infieren desde la cantidad cruda
+cuando la respuesta no trae unidades.
 
 **COSTO:** precios/unidades cambian y no se codifican. El adaptador recibe costo máximo por unidad configurado, reserva un upper bound antes de llamar y guarda costo real cuando esté disponible. No inicia un lote que pueda superar el cap restante. Referencia: [API oficial](https://docs.outscraper.com/) y [precios](https://outscraper.com/pricing/).
 
@@ -44,6 +61,8 @@ La sintaxis se valida con `email-validator`; se normaliza dominio IDNA y se cons
 Un resolver inyectable basado en `dnspython` consulta MX con timeout. Null MX significa inválido; NXDOMAIN/sin MX es inválido después de considerar fallback A/AAAA conforme política documentada; timeout/SERVFAIL es transitorio y se reintenta. No se intenta handshake SMTP ni se contrata verificador externo.
 
 Selección: email marcado principal por proveedor, luego mismo dominio empresarial, luego rol comercial (`ventas`, `info`, `contacto`), luego orden original. Candidatos excluidos o inválidos nunca se seleccionan. Gmail/Hotmail pueden aceptarse para pequeños negocios, pero su dominio no deduplica empresas.
+Todas las direcciones validadas, no sólo la principal seleccionada, participan en el lock y las
+identidades globales de deduplicación.
 
 ## 4. WebsiteFetcher
 

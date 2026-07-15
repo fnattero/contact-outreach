@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Catálogos · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Catálogos PDF</h1>
+<p class="muted">Cada carga crea una versión inmutable. Máximo 15 MiB; almacenamiento privado.</p>
+<div class="grid">
+    <form method="post" enctype="multipart/form-data" class="card">
+        <h2>Cargar catálogo</h2>
+        {% csrf_token %}{{ form.as_p }}
+        <button type="submit">Cargar PDF</button>
+    </form>
+    <section>
+        <table>
+            <thead><tr><th>Catálogo</th><th>Tamaño</th><th>SHA-256</th><th></th></tr></thead>
+            <tbody>
+            {% for catalog in catalogs %}
+                <tr>
+                    <td>{{ catalog.name }} v{{ catalog.version }}<br><small>{{ catalog.original_filename }}</small></td>
+                    <td>{{ catalog.byte_size|filesizeformat }}</td>
+                    <td><code>{{ catalog.sha256|slice:":12" }}…</code></td>
+                    <td><a href="{% url 'catalog-download' catalog.pk %}">Descargar</a></td>
+                </tr>
+            {% empty %}<tr><td colspan="4">No hay catálogos.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}

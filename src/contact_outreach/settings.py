@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -41,6 +42,12 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "apps.accounts.apps.AccountsConfig",
+    "apps.audit.apps.AuditConfig",
+    "apps.configuration.apps.ConfigurationConfig",
+    "apps.catalogs.apps.CatalogsConfig",
+    "apps.campaigns.apps.CampaignsConfig",
+    "apps.prospects.apps.ProspectsConfig",
+    "apps.compliance.apps.ComplianceConfig",
     "apps.dashboard.apps.DashboardConfig",
     "apps.health.apps.HealthConfig",
     "apps.integrations.apps.IntegrationsConfig",
@@ -126,6 +133,8 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+PRIVATE_STORAGE_ROOT = Path(os.getenv("PRIVATE_STORAGE_ROOT", str(BASE_DIR / "private")))
+CATALOG_MAX_BYTES = 15 * 1024 * 1024
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "login"
@@ -149,13 +158,27 @@ if SEND_MODE not in {"dry-run", "live"}:
     raise ImproperlyConfigured("SEND_MODE must be dry-run or live")
 
 EXTRACTOR_PROVIDER = os.getenv("EXTRACTOR_PROVIDER", "fake")
+OUTSCRAPER_API_KEY = os.getenv("OUTSCRAPER_API_KEY", "")
+OUTSCRAPER_BASE_URL = os.getenv("OUTSCRAPER_BASE_URL", "https://api.outscraper.cloud")
+try:
+    OUTSCRAPER_MAX_COST_PER_RESULT = Decimal(
+        os.getenv("OUTSCRAPER_MAX_COST_PER_RESULT", "0.010000")
+    )
+except InvalidOperation as exc:
+    raise ImproperlyConfigured("OUTSCRAPER_MAX_COST_PER_RESULT must be a decimal") from exc
+if OUTSCRAPER_MAX_COST_PER_RESULT < 0:
+    raise ImproperlyConfigured("OUTSCRAPER_MAX_COST_PER_RESULT must not be negative")
+OUTSCRAPER_BATCH_SIZE = int(os.getenv("OUTSCRAPER_BATCH_SIZE", "20"))
+OUTSCRAPER_POLL_SECONDS = int(os.getenv("OUTSCRAPER_POLL_SECONDS", "30"))
+if OUTSCRAPER_BATCH_SIZE <= 0 or OUTSCRAPER_POLL_SECONDS <= 0:
+    raise ImproperlyConfigured("Outscraper batch and polling values must be positive")
 WEBSITE_FETCHER = os.getenv("WEBSITE_FETCHER", "fake")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "fake")
 GMAIL_PROVIDER = os.getenv("GMAIL_PROVIDER", "fake")
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_IMPORTS = ("contact_outreach.tasks",)
+CELERY_IMPORTS = ("contact_outreach.tasks", "apps.campaigns.tasks")
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -164,6 +187,12 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TASK_SOFT_TIME_LIMIT = 30
 CELERY_TASK_TIME_LIMIT = 45
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "recover-extraction-runs": {
+        "task": "campaigns.recover_extraction_runs",
+        "schedule": 60.0,
+    }
+}
 
 LOGGING = {
     "version": 1,

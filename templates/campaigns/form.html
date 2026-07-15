@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Nueva campaña · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Nueva campaña</h1>
+<p class="muted">El objetivo inicial es 300. Podés ajustar todos los límites antes de crear el borrador.</p>
+<form method="post" class="card form-card checkbox-list">
+    {% csrf_token %}{{ form.as_p }}
+    <p class="muted">SEND_MODE y kill switch son controles de despliegue de sólo lectura: {{ runtime_send_mode }} / {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}.</p>
+    <button type="submit">Crear borrador</button>
+</form>
+{% endblock %}

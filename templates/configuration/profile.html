@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Perfil comercial · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Perfil comercial</h1>
+<p class="muted">Estos datos se congelan en cada campaña al iniciarla. Versión actual: {{ profile.profile_version|default:"sin guardar" }}.</p>
+<form method="post" class="card form-card">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Guardar perfil</button>
+</form>
+{% endblock %}

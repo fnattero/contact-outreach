@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Auditoría · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Audit log</h1>
+<p class="muted">Eventos append-only; se muestran los 200 más recientes.</p>
+<table>
+    <thead><tr><th>Fecha</th><th>Actor</th><th>Acción</th><th>Entidad</th><th>Después</th></tr></thead>
+    <tbody>
+    {% for event in events %}
+        <tr>
+            <td>{{ event.created_at }}</td>
+            <td>{{ event.actor.username|default:event.actor_type }}</td>
+            <td>{{ event.action }}</td>
+            <td>{{ event.entity_type }} · {{ event.entity_id }}</td>
+            <td><code>{{ event.after }}</code></td>
+        </tr>
+    {% empty %}<tr><td colspan="5">No hay eventos.</td></tr>{% endfor %}
+    </tbody>
+</table>
+{% endblock %}

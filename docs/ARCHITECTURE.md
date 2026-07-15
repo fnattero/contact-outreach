@@ -37,7 +37,8 @@ La lógica de negocio vive en servicios/comandos de dominio. Models preservan in
 
 1. Una transacción valida campaña, perfil, consultas, catálogo, límites y proveedor; congela snapshots y cambia `DRAFT -> RUNNING`.
 2. Un orquestador toma la siguiente `SearchQuery` pendiente, reserva costo y crea `SearchRun` con idempotency key.
-3. El extractor devuelve un lote; la respuesta cruda se persiste antes de normalizar.
+3. El extractor devuelve un lote; submit/poll y la persistencia cruda se serializan con el lock de
+   campaña para que pausa/cancelación no puedan confirmar durante un efecto pago.
 4. Cada registro produce o vincula un `Prospect` mediante identidades deduplicables. Se selecciona un email después de sintaxis, exclusiones y MX.
 5. Se programan enriquecimiento web y análisis sólo para prospectos elegibles. Los slots de objetivo se reservan transaccionalmente para limitar sobreprocesamiento.
 
@@ -66,12 +67,15 @@ Al iniciar worker o en un barrido periódico:
 - `SENDING`/`RECONCILING` vencidos se reconcilian, no se reenvían a ciegas.
 - jobs `RUNNING` sin heartbeat vuelven a pendiente sólo si su operación es interna o idempotente.
 - campañas pausadas/canceladas no entregan nuevas tareas.
+- campañas activas sin `SearchRun` recuperable reconstruyen su siguiente query desde PostgreSQL.
 - mensajes preparados sobreviven porque la cola se reconstruye desde PostgreSQL.
 
 ## 5. Consistencia e idempotencia
 
 - Restricciones únicas protegen emails normalizados, identidades de proveedor, hashes de negocio, resultados de IA, mensajes Gmail e idempotency keys.
-- Locks por campaña serializan el objetivo/costo; locks por prospecto impiden pipelines dobles; un `ContactLedger` único por email serializa la autorización de primer contacto; lock por conexión Gmail serializa sync.
+- Locks por campaña serializan objetivo/costo y efectos del extractor; todas las identidades de email
+  validado se bloquean antes de deduplicar; locks por prospecto impiden pipelines dobles; un
+  `ContactLedger` único por email serializa la autorización de primer contacto; lock por conexión Gmail serializa sync.
 - El contador diario se calcula sobre mensajes live confirmados en la zona configurada.
 - Redis puede perderse sin perder estado de negocio. Cachés se reconstruyen y nunca autorizan un envío por sí solos.
 - Audit y uso de proveedor se escriben en la misma transacción que el cambio local relevante.

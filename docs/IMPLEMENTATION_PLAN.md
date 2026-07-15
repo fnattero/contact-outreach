@@ -4,6 +4,19 @@
 
 Cada fase debe entrar como cambio verificable y dejar `main` ejecutable. No se habilita live hasta completar la fase 12. Las migraciones se agregan en la fase que introduce el modelo y nunca se reescriben después de integrarse. Tests no acceden a Internet ni requieren credenciales.
 
+## Estado del incremento de configuración
+
+El dashboard implementa la fase 2, el audit log append-only de fase 1 y el corte vertical de
+campaña borrador/supresión/máquinas de estado. El incremento de extracción aporta la fase 3 y la
+parte de email/deduplicación de fase 4: `SearchRun`, payload crudo, uso/costo, polling durable,
+Outscraper opt-in, mock determinístico, prospectos, identidades globales, sintaxis/MX y email
+principal. Esto aporta evidencia de FR-01, FR-02, FR-03, FR-06, FR-07, FR-09, FR-12, FR-14,
+FR-15, FR-16 y FR-17. La fase 4 completa todavía requiere ledger/override concurrentes en el
+pipeline de entrega; las fases 5–10 (web, IA, orquestación integral, Gmail, delivery y mailbox)
+siguen pendientes. El objetivo calificado ya corta sobre prospectos `QUEUED`, estado que poblarán
+las fases 6–7; nunca se cuenta `EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch
+permanecen como controles de despliegue de sólo lectura.
+
 ## Fase 0 - Scaffold reproducible y aplicación base
 
 - **Objetivo:** crear proyecto Python/Django, quality gates y runtime Compose sin modelos de dominio. Incluye el shell mínimo solicitado para operar la instalación: login del propietario built-in, navegación y dashboard inicial; la auditoría y el hardening completo permanecen en fase 1.
@@ -42,7 +55,8 @@ Cada fase debe entrar como cambio verificable y dejar `main` ejecutable. No se h
 - **Objetivo:** crear campañas/consultas y ejecutar extracción fake/Outscraper bajo límites.
 - **Archivos/módulos:** `campaigns`, `prospects`, contratos/adapter extractor, tasks `extraction` y dashboard inicial de progreso.
 - **Migraciones:** `Campaign` con estado operativo/descubrimiento, `CampaignSelection`, `SearchQuery`, `SearchRun`, `Prospect`, `ProspectIdentity`, `ProspectEmail`, `ProviderUsage` e índices/uniques.
-- **Pruebas:** snapshots, orden de queries, payload crudo antes de parser, async polling, 429/403, máximo crudo, cap/costo y proveedor fake.
+- **Pruebas:** snapshots, orden de queries, payload crudo antes de parser, async polling, recuperación
+  de campaña sin mensaje Redis, serialización de cancelación, 429/403, máximo crudo, cap/costo y proveedor fake.
 - **Verificación:** `make check`; E2E fake de campaña a registros `DISCOVERED`; revisar queries SQL críticas.
 - **Terminado:** extracción sólo ocurre tras Iniciar y respeta queries, raw cap, costo y errores permanentes; el corte por objetivo calificado se integra en fase 7 cuando existe el pipeline completo.
 - **Dependencias:** fase 2.

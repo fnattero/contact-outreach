@@ -3,13 +3,13 @@ from __future__ import annotations
 import socket
 
 import pytest
-from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 from pytest_socket import SocketBlockedError
 
 from apps.integrations.contracts import (
     AnalysisFact,
     AnalysisRequest,
+    AuthenticationError,
     GmailCursor,
     GmailReplyRequest,
     GmailSendRequest,
@@ -100,6 +100,6 @@ def test_fake_gmail_deduplicates_message_id_and_keeps_reply_thread() -> None:
 
 
 @override_settings(EXTRACTOR_PROVIDER="outscraper")
-def test_real_provider_selection_is_unavailable_in_this_phase() -> None:
-    with pytest.raises(ImproperlyConfigured, match="unavailable in this phase"):
+def test_real_provider_requires_environment_credential() -> None:
+    with pytest.raises(AuthenticationError, match="OUTSCRAPER_API_KEY"):
         get_extractor_provider()

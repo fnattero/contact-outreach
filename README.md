@@ -1,8 +1,9 @@
 # Contact Outreach
 
-Aplicación local Django para outreach B2B de un único propietario. Esta primera fase deja la
-infraestructura ejecutable, autenticación, dashboard, health checks, Celery y proveedores fake.
-No incluye integraciones reales ni permite seleccionarlas.
+Aplicación local Django para outreach B2B de un único propietario. El incremento actual incluye
+autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría y
+extracción durable. El proveedor mock es el default sin red; Outscraper es opt-in y queda aislado
+por el contrato interno de extracción.
 
 ## Requisitos
 
@@ -17,8 +18,8 @@ No incluye integraciones reales ni permite seleccionarlas.
    cp .env.example .env
    ```
 
-2. Reemplazar en `.env` `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD` y `OWNER_PASSWORD`. No usar
-   credenciales reales de Gmail, Outscraper o IA; esta fase sólo acepta proveedores `fake`.
+2. Reemplazar en `.env` `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD` y `OWNER_PASSWORD`. Gmail e IA
+   siguen fake; Outscraper sólo se habilita explícitamente como se describe más abajo.
 
 3. Construir e iniciar todos los servicios:
 
@@ -60,7 +61,42 @@ make demo
 ```
 
 El comando requiere además la habilitación explícita que agrega el target `demo`; producción nunca
-lo ejecuta automáticamente. En esta fase sin modelos de dominio, el propietario es el único dato demo.
+lo ejecuta automáticamente. Los seeds de las migraciones crean 23 rubros y los 48 barrios oficiales
+de CABA; el comando demo continúa creando únicamente el propietario.
+
+## Configurar una campaña
+
+Después de iniciar sesión:
+
+1. Completar el perfil comercial.
+2. Revisar o editar rubros y zonas.
+3. Cargar un PDF válido de hasta 15 MiB en Catálogos.
+4. Crear una campaña, seleccionando al menos un rubro, una zona y una versión de catálogo.
+5. Ajustar objetivo, máximo crudo, costo, límite diario, intervalo, horario, zona horaria y umbral.
+6. Iniciar el borrador para congelar perfil, configuración, selecciones, catálogo y consultas.
+
+El objetivo inicial es 300. `SEND_MODE` y `SEND_KILL_SWITCH` se muestran en el dashboard pero sólo
+se configuran por entorno. Con los defaults, cualquier campaña es dry-run y el kill switch está
+activo. No hay envío, fetch web ni llamada de IA real en este incremento. La extracción mock usa
+también un resolver MX determinístico; la extracción Outscraper usa DNS MX real desde el worker.
+
+## Habilitar Outscraper
+
+Revisar primero el precio vigente y ajustar la reserva conservadora. Luego definir sólo por entorno:
+
+```bash
+EXTRACTOR_PROVIDER=outscraper
+OUTSCRAPER_API_KEY=replace-with-your-key
+OUTSCRAPER_MAX_COST_PER_RESULT=0.010000
+OUTSCRAPER_BATCH_SIZE=20
+OUTSCRAPER_POLL_SECONDS=30
+```
+
+Al crear la campaña, seleccionar `Outscraper`. Iniciar crea un `SearchRun` durable; el worker envía
+la consulta asíncrona con enrichment de contactos, guarda el ID y el JSON crudo, y Beat reanuda el
+polling después de reinicios. Los errores y el uso/costo estimado aparecen en el detalle de campaña.
+La API key no se guarda en base, no se incluye en la URL y no aparece en auditoría. No existe
+fallback de scraping directo.
 
 ## Detener y limpiar
 
@@ -99,5 +135,6 @@ bloquea sockets y usa exclusivamente los proveedores fake.
 - `HOST_BIND=127.0.0.1`
 - `SEND_MODE=dry-run`
 - `SEND_KILL_SWITCH=true`
-- extractor, web, IA y Gmail en `fake`
+- extractor mock, web, IA y Gmail en `fake`
+- catálogos fuera de static/media público, bajo `PRIVATE_STORAGE_ROOT`
 - sin API keys, OAuth, SMTP, scraping ni llamadas de red de proveedores

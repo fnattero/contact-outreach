@@ -28,6 +28,7 @@ Este registro fija alternativas simples para detalles no bloqueantes. Todos los 
 | A-022 | No se implementa borrado administrativo de mensajes en v1; sí retención automática de raw/snapshots. | Privacidad / alcance |
 | A-023 | La revisión legal y políticas de Google son prerrequisitos operativos externos, no una aprobación individual dentro de la app. | **LEGAL / ENTREGABILIDAD** |
 | A-024 | Un `ContactLedger` único por email serializa primeros contactos live; cada override consumido incrementa `contact_sequence`; dry-run no consume ni reserva secuencia. | **INTEGRIDAD DE DATOS** |
+| A-025 | Outscraper reserva por defecto un máximo conservador de USD 0,01 por resultado (`OUTSCRAPER_MAX_COST_PER_RESULT`), configurable por entorno y revisable contra precios vigentes; nunca se usa como precio contractual. | **COSTO** |
 
 ## Seeds de rubros
 

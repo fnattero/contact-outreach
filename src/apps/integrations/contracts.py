@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from decimal import Decimal
+from typing import Any, Protocol
 
 
 class ProviderError(RuntimeError):
@@ -39,7 +40,16 @@ class SearchRequest:
     query: str
     correlation_id: str
     idempotency_key: str
+    limit: int = 20
     timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedEmail:
+    value: str
+    source: str = "provider"
+    is_primary: bool = False
+    order: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,15 +57,26 @@ class ExtractedBusiness:
     provider_id: str
     name: str
     address: str
-    email_candidates: tuple[str, ...]
+    email_candidates: tuple[ExtractedEmail, ...]
     website: str | None = None
+    phone: str | None = None
+    category: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    provider_data: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ExtractionBatch:
-    records: tuple[ExtractedBusiness, ...]
+    status: str
     request_id: str
-    next_cursor: str | None = None
+    raw_payload: dict[str, Any]
+    units: Decimal | None = None
+    estimated_cost: Decimal | None = None
+    actual_cost: Decimal | None = None
+    currency: str | None = None
+    usage_metadata: dict[str, Any] | None = None
+    records: tuple[ExtractedBusiness, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +196,12 @@ class GmailSyncBatch:
 
 class ExtractorProvider(Protocol):
     def extract(self, request: SearchRequest) -> ExtractionBatch: ...
+
+    def submit(self, request: SearchRequest) -> ExtractionBatch: ...
+
+    def poll(self, *, request_id: str, timeout_seconds: float = 30.0) -> ExtractionBatch: ...
+
+    def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]: ...
 
 
 class WebsiteFetcher(Protocol):

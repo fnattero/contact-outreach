@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}{{ campaign.name }} · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>{{ campaign.name }}</h1>
+<p><strong>{{ campaign.get_state_display }}</strong> · descubrimiento: {{ campaign.get_discovery_state_display }}</p>
+{% if campaign.status_reason %}<p class="card">{{ campaign.status_reason }}</p>{% endif %}
+
+<div class="actions">
+    {% if campaign.state == "DRAFT" %}
+        <form method="post" action="{% url 'campaign-action' campaign.pk 'start' %}">{% csrf_token %}<button type="submit">Iniciar</button></form>
+    {% elif campaign.state == "RUNNING" %}
+        <form method="post" action="{% url 'campaign-action' campaign.pk 'pause' %}">{% csrf_token %}<button type="submit">Pausar</button></form>
+    {% elif campaign.state == "PAUSED" %}
+        <form method="post" action="{% url 'campaign-action' campaign.pk 'resume' %}">{% csrf_token %}<button type="submit">Reanudar</button></form>
+    {% endif %}
+    {% if campaign.state == "DRAFT" or campaign.state == "RUNNING" or campaign.state == "PAUSED" %}
+        <form method="post" action="{% url 'campaign-action' campaign.pk 'cancel' %}">{% csrf_token %}<button class="danger" type="submit">Cancelar</button></form>
+    {% endif %}
+</div>
+
+<section class="grid">
+    <article class="card"><h2>Objetivo y extracción</h2><p>Objetivo: {{ campaign.objective }}</p><p>Máximo crudo: {{ campaign.max_raw_records }}</p><p>Cap: {{ campaign.cost_currency }} {{ campaign.cost_limit }}</p></article>
+    <article class="card"><h2>Entrega</h2><p>{{ campaign.daily_limit }} por día · cada {{ campaign.message_interval_minutes }} min</p><p>{{ campaign.window_start }}–{{ campaign.window_end }}</p><p>{{ campaign.timezone_name }}</p></article>
+    <article class="card"><h2>Análisis</h2><p>Umbral: {{ campaign.relevance_threshold }}</p><p>Extractor: {{ campaign.extractor_provider }}</p><p>IA: {{ campaign.llm_provider }} / {{ campaign.llm_model }}</p></article>
+    <article class="card"><h2>Catálogo</h2><p>{{ campaign.catalog }}</p><p><code>{{ campaign.catalog.sha256|slice:":16" }}…</code></p></article>
+</section>
+
+<section class="card">
+    <h2>Ejecuciones de extracción</h2>
+    {% if campaign.search_runs.all %}
+    <table>
+        <thead><tr><th>Estado</th><th>Trabajo</th><th>Crudos</th><th>Con email</th><th>Sin email</th><th>Duplicados</th><th>Uso / costo</th><th>Error</th></tr></thead>
+        <tbody>
+        {% for run in campaign.search_runs.all %}
+            <tr>
+                <td>{{ run.get_state_display }}</td>
+                <td>{{ run.provider_request_id|default:"—" }}</td>
+                <td>{{ run.raw_count }}</td>
+                <td>{{ run.email_count }}</td>
+                <td>{{ run.no_email_count }}</td>
+                <td>{{ run.duplicate_count }}</td>
+                <td>{% if run.cost_actual != None %}{{ run.currency }} {{ run.cost_actual }} real{% elif run.cost_estimated != None %}{{ run.currency }} {{ run.cost_estimated }} estimado{% else %}—{% endif %}</td>
+                <td>{{ run.error|default:"—" }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p>Todavía no hay ejecuciones.</p>{% endif %}
+</section>
+
+<div class="grid">
+    <section><h2>Rubros</h2><ul>{% for item in campaign.category_selections.all %}<li>{{ item.name_snapshot }}</li>{% endfor %}</ul></section>
+    <section><h2>Zonas</h2><ul>{% for item in campaign.zone_selections.all %}<li>{{ item.name_snapshot }}</li>{% endfor %}</ul></section>
+    <section><h2>Consultas congeladas</h2><p>{{ campaign.search_queries.count }}</p></section>
+</div>
+{% endblock %}

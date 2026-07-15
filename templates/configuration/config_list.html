@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="grid">
+    <section class="card">
+        <h2>{% if selected %}Editar{% else %}Crear{% endif %}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% if selected %}<input type="hidden" name="item_id" value="{{ selected.pk }}">{% endif %}
+            {{ form.as_p }}
+            <button type="submit">Guardar</button>
+            {% if selected %}<a class="button secondary" href="{% url request.resolver_match.url_name %}">Cancelar</a>{% endif %}
+        </form>
+    </section>
+    <section>
+        <table>
+            <thead><tr><th>Nombre</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+            {% for item in items %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{% if item.active %}Activo{% else %}Inactivo{% endif %}</td>
+                    <td class="actions">
+                        <a class="button secondary" href="?edit={{ item.pk }}">Editar</a>
+                        <form method="post" action="{% url 'config-toggle' kind item.pk %}">
+                            {% csrf_token %}<button type="submit">{% if item.active %}Desactivar{% else %}Activar{% endif %}</button>
+                        </form>
+                        <form method="post" action="{% url 'config-delete' kind item.pk %}">
+                            {% csrf_token %}<button class="danger" type="submit">Eliminar</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}<tr><td colspan="3">No hay elementos.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}

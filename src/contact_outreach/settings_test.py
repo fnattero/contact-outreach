@@ -11,6 +11,7 @@ ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
 SEND_MODE = "dry-run"
 SEND_KILL_SWITCH = True
 EXTRACTOR_PROVIDER = "fake"
+OUTSCRAPER_API_KEY = ""
 WEBSITE_FETCHER = "fake"
 LLM_PROVIDER = "fake"
 GMAIL_PROVIDER = "fake"
@@ -21,6 +22,8 @@ DATABASES = {
         "NAME": ":memory:",
     }
 }
+
+PRIVATE_STORAGE_ROOT = BASE_DIR / ".test-private"
 
 CACHES = {
     "default": {
