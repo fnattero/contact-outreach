@@ -4,14 +4,14 @@
 
 Cada fase debe entrar como cambio verificable y dejar `main` ejecutable. No se habilita live hasta completar la fase 12. Las migraciones se agregan en la fase que introduce el modelo y nunca se reescriben después de integrarse. Tests no acceden a Internet ni requieren credenciales.
 
-## Fase 0 - Scaffold reproducible
+## Fase 0 - Scaffold reproducible y aplicación base
 
-- **Objetivo:** crear proyecto Python/Django, quality gates y runtime Compose sin dominio.
-- **Archivos/módulos:** `pyproject.toml`, `Makefile`, `Dockerfile`, `docker-compose.yml`, `.env.example`, `src/contact_outreach/`, `tests/`, `.gitignore`.
+- **Objetivo:** crear proyecto Python/Django, quality gates y runtime Compose sin modelos de dominio. Incluye el shell mínimo solicitado para operar la instalación: login del propietario built-in, navegación y dashboard inicial; la auditoría y el hardening completo permanecen en fase 1.
+- **Archivos/módulos:** `pyproject.toml`, `Makefile`, `Dockerfile`, `docker-compose.yml`, `.env.example`, `src/contact_outreach/`, shell mínimo de `accounts`, `dashboard`, `health` e `integrations`, `tests/`, `.gitignore`.
 - **Migraciones:** sólo migraciones built-in de Django en la base local; ninguna propia.
-- **Pruebas:** settings, página health mínima, Celery importable, red bloqueada en pytest.
+- **Pruebas:** settings, liveness/readiness, login/dashboard mínimo, Celery importable y tarea smoke, contratos con proveedores fake, red bloqueada en pytest.
 - **Verificación:** `docker compose config`, `docker compose build`, `make lint typecheck test`, `docker compose up --wait`.
-- **Terminado:** web/worker/beat/postgres/redis saludables; web ligada a 127.0.0.1; dry-run y fakes por defecto.
+- **Terminado:** web/worker/beat/postgres/redis saludables; web ligada a 127.0.0.1; migración segura desde vacío; propietario y dashboard operativos; datos demo opt-in separados; dry-run y fakes por defecto.
 - **Dependencias:** ninguna.
 - **Riesgos:** permisos de volumen, imágenes no fijadas y health checks que oculten fallos.
 

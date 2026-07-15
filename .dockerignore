@@ -1,0 +1,15 @@
+.git
+.env
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+build
+__pycache__
+*.py[cod]
+*.egg-info
+.venv
+postgres_data
+redis_data
+private

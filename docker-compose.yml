@@ -1,0 +1,130 @@
+name: contact-outreach
+
+x-app: &app
+  image: contact-outreach:local
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-environment
+    APP_ENV: ${APP_ENV:-development}
+    DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-development-only-change-me}
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    POSTGRES_DB: ${POSTGRES_DB:-contact_outreach}
+    POSTGRES_USER: ${POSTGRES_USER:-contact_outreach}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only-change-me}
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    REDIS_URL: redis://redis:6379/0
+    SEND_MODE: ${SEND_MODE:-dry-run}
+    SEND_KILL_SWITCH: ${SEND_KILL_SWITCH:-true}
+    EXTRACTOR_PROVIDER: ${EXTRACTOR_PROVIDER:-fake}
+    WEBSITE_FETCHER: ${WEBSITE_FETCHER:-fake}
+    LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+    GMAIL_PROVIDER: ${GMAIL_PROVIDER:-fake}
+    OWNER_USERNAME: ${OWNER_USERNAME:-}
+    OWNER_EMAIL: ${OWNER_EMAIL:-}
+    OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *app
+    build:
+      context: .
+    command: ["web"]
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8000"
+    volumes:
+      - private_catalogs:/app/private
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready/', timeout=3).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    depends_on:
+      web:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A contact_outreach inspect ping --destination worker@$$HOSTNAME --timeout 5 | grep -q pong",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 15s
+
+  beat:
+    <<: *app
+    command: ["beat"]
+    depends_on:
+      web:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -s /tmp/celerybeat.pid && kill -0 $$(cat /tmp/celerybeat.pid)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+
+  postgres:
+    image: postgres:17.5-bookworm@sha256:fbcea1bd13b6a882cd6caa6b58db3ae5c102efe50ec625b3e2a5cbc50db5bfe4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-contact_outreach}
+      POSTGRES_USER: ${POSTGRES_USER:-contact_outreach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.4-bookworm@sha256:7b5ee51c14cf5febd4adde3a4b6cced72efdf154df7e9a0383163b13e16e9091
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  private_catalogs:

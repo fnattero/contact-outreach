@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+<p class="muted">Infraestructura base lista. Las campañas se incorporarán en las próximas fases.</p>
+
+<section class="grid" aria-label="Estado de la aplicación">
+    <article class="card">
+        <h2>Modo de envío</h2>
+        <p><strong>{{ runtime_send_mode }}</strong></p>
+        <p class="muted">El kill switch está {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}.</p>
+    </article>
+    <article class="card">
+        <h2>Servicios</h2>
+        <p>PostgreSQL · Redis · Celery</p>
+        <p class="muted">La readiness verifica base y cache.</p>
+    </article>
+    <article class="card">
+        <h2>Proveedores</h2>
+        <ul>
+            {% for label, provider in providers.items %}
+                <li>{{ label }}: <strong>{{ provider }}</strong></li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+{% endblock %}

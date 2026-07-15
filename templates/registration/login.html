@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Ingresar · Contact Outreach{% endblock %}
+
+{% block content %}
+<section class="card auth">
+    <h1>Ingresar</h1>
+    <p class="muted">Acceso local del propietario.</p>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <p>
+            <label for="{{ form.username.id_for_label }}">Usuario</label>
+            {{ form.username }}
+        </p>
+        <p>
+            <label for="{{ form.password.id_for_label }}">Contraseña</label>
+            {{ form.password }}
+        </p>
+        <button type="submit">Iniciar sesión</button>
+    </form>
+</section>
+{% endblock %}

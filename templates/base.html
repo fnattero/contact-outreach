@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Contact Outreach{% endblock %}</title>
+    <style>
+        :root { color-scheme: light; font-family: system-ui, sans-serif; }
+        body { margin: 0; background: #f5f7fb; color: #172033; }
+        header { background: #172033; color: white; padding: 0.9rem 1.5rem; }
+        nav { max-width: 68rem; margin: auto; display: flex; align-items: center; gap: 1rem; }
+        nav a { color: white; text-decoration: none; font-weight: 700; }
+        nav form { margin-left: auto; }
+        main { max-width: 68rem; margin: 2rem auto; padding: 0 1.25rem; }
+        .pill { border-radius: 99px; padding: 0.25rem 0.65rem; background: #fff3cd; color: #6a4b00; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
+        .card { background: white; border: 1px solid #dce2ec; border-radius: 0.75rem; padding: 1.1rem; }
+        .muted { color: #5f6b7a; }
+        button { border: 0; border-radius: 0.4rem; padding: 0.55rem 0.8rem; cursor: pointer; }
+        nav button { background: transparent; color: white; text-decoration: underline; }
+        input { width: 100%; box-sizing: border-box; padding: 0.65rem; margin-top: 0.3rem; }
+        .auth { max-width: 25rem; margin: 4rem auto; }
+        .errorlist { color: #9d1c1c; }
+    </style>
+</head>
+<body>
+    <header>
+        <nav aria-label="Navegación principal">
+            <a href="{% url 'dashboard' %}">Contact Outreach</a>
+            {% if user.is_authenticated %}
+                <span class="pill">{{ runtime_send_mode }} · kill switch {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}</span>
+                <form method="post" action="{% url 'logout' %}">
+                    {% csrf_token %}
+                    <button type="submit">Cerrar sesión</button>
+                </form>
+            {% endif %}
+        </nav>
+    </header>
+    <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+from contact_outreach.settings import *
+
+DEBUG = False
+SECRET_KEY = "test-secret-key-not-used-outside-tests"
+ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
+
+# Tests must remain incapable of selecting live delivery or network-backed providers,
+# regardless of the environment that invoked pytest.
+SEND_MODE = "dry-run"
+SEND_KILL_SWITCH = True
+EXTRACTOR_PROVIDER = "fake"
+WEBSITE_FETCHER = "fake"
+LLM_PROVIDER = "fake"
+GMAIL_PROVIDER = "fake"
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": ":memory:",
+    }
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "contact-outreach-tests",
+    }
+}
+
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.Argon2PasswordHasher"]
+
+CELERY_BROKER_URL = "memory://"
+CELERY_RESULT_BACKEND = "cache+memory://"
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
