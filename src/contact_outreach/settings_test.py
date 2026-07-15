@@ -15,6 +15,8 @@ OUTSCRAPER_API_KEY = ""
 WEBSITE_FETCHER = "fake"
 LLM_PROVIDER = "fake"
 GMAIL_PROVIDER = "fake"
+GMAIL_FAKE_ACCOUNT_EMAIL = "owner@example.invalid"
+FIELD_ENCRYPTION_KEY = "test-only-field-encryption-key"
 
 DATABASES = {
     "default": {

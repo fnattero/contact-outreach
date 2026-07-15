@@ -23,6 +23,13 @@ from apps.configuration.views import (
 )
 from apps.dashboard.views import dashboard
 from apps.health.views import liveness, readiness
+from apps.mailbox.views import (
+    gmail_connect,
+    gmail_disconnect,
+    gmail_oauth_callback,
+    gmail_settings,
+    gmail_test,
+)
 
 urlpatterns = [
     path("login/", ThrottledLoginView.as_view(), name="login"),
@@ -46,6 +53,11 @@ urlpatterns = [
     path("campanas/<uuid:campaign_id>/<str:action>/", campaign_action, name="campaign-action"),
     path("supresiones/", suppression_list, name="suppressions"),
     path("auditoria/", audit_log, name="audit-log"),
+    path("gmail/", gmail_settings, name="gmail-settings"),
+    path("gmail/conectar/", gmail_connect, name="gmail-connect"),
+    path("gmail/oauth/callback/", gmail_oauth_callback, name="gmail-oauth-callback"),
+    path("gmail/probar/", gmail_test, name="gmail-test"),
+    path("gmail/desconectar/", gmail_disconnect, name="gmail-disconnect"),
     path("health/", liveness, name="health"),
     path("health/live/", liveness, name="health-live"),
     path("health/ready/", readiness, name="health-ready"),

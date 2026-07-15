@@ -5,6 +5,7 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 from apps.core.models import TimestampedUUIDModel
 
@@ -54,3 +55,34 @@ class AuditEvent(TimestampedUUIDModel):
 
     def __str__(self) -> str:
         return f"{self.action} · {self.entity_type}:{self.entity_id}"
+
+
+class BackgroundJob(TimestampedUUIDModel):
+    class State(models.TextChoices):
+        PENDING = "PENDING", "Pendiente"
+        RUNNING = "RUNNING", "En curso"
+        SUCCEEDED = "SUCCEEDED", "Completado"
+        RETRY_WAIT = "RETRY_WAIT", "Esperando reintento"
+        FAILED = "FAILED", "Falló"
+        CANCELLED = "CANCELLED", "Cancelado"
+
+    task_name = models.CharField(max_length=150)
+    celery_task_id = models.CharField(max_length=255, blank=True)
+    idempotency_key = models.CharField(max_length=255, unique=True)
+    entity_type = models.CharField(max_length=100)
+    entity_id = models.CharField(max_length=64)
+    queue = models.CharField(max_length=50, default="delivery")
+    state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    heartbeat_at = models.DateTimeField(blank=True, null=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    finished_at = models.DateTimeField(blank=True, null=True)
+    next_retry_at = models.DateTimeField(blank=True, null=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("state", "next_retry_at"))]
+        constraints = [
+            models.CheckConstraint(condition=Q(attempts__gte=0), name="job_attempts_nonnegative")
+        ]

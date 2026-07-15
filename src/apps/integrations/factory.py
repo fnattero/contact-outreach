@@ -14,6 +14,7 @@ from apps.integrations.fakes import (
     FakeGmailProvider,
     FakeWebsiteFetcher,
 )
+from apps.integrations.gmail import GmailAPIProvider
 from apps.integrations.llm import MockLLMProvider, OllamaProvider, OpenAICompatibleProvider
 from apps.integrations.outscraper import OutscraperProvider
 from apps.integrations.website import HttpWebsiteFetcher
@@ -72,6 +73,24 @@ def get_llm_provider(
     raise ImproperlyConfigured(f"LLM provider {selected!r} is not supported")
 
 
-def get_gmail_provider() -> GmailProvider:
-    _require_fake("GMAIL_PROVIDER")
-    return FakeGmailProvider()
+def get_gmail_provider(
+    *,
+    refresh_token: str = "",
+    code_verifier: str = "",
+    code_challenge: str = "",
+    persist_fake: bool = False,
+) -> GmailProvider:
+    if settings.GMAIL_PROVIDER == "fake":
+        return FakeGmailProvider(
+            account_email=settings.GMAIL_FAKE_ACCOUNT_EMAIL,
+            persist=persist_fake,
+        )
+    if settings.GMAIL_PROVIDER == "api":
+        return GmailAPIProvider(
+            client_id=settings.GMAIL_OAUTH_CLIENT_ID,
+            client_secret=settings.GMAIL_OAUTH_CLIENT_SECRET,
+            refresh_token=refresh_token,
+            code_verifier=code_verifier,
+            code_challenge=code_challenge,
+        )
+    raise ImproperlyConfigured(f"Gmail provider {settings.GMAIL_PROVIDER!r} is not supported")

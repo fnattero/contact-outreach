@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "apps.dashboard.apps.DashboardConfig",
     "apps.health.apps.HealthConfig",
     "apps.integrations.apps.IntegrationsConfig",
+    "apps.mailbox.apps.MailboxConfig",
 ]
 
 MIDDLEWARE = [
@@ -179,6 +180,11 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OPENAI_COMPATIBLE_BASE_URL = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "")
 GMAIL_PROVIDER = os.getenv("GMAIL_PROVIDER", "fake")
+GMAIL_OAUTH_CLIENT_ID = os.getenv("GMAIL_OAUTH_CLIENT_ID", "")
+GMAIL_OAUTH_CLIENT_SECRET = os.getenv("GMAIL_OAUTH_CLIENT_SECRET", "")
+GMAIL_OAUTH_REDIRECT_URI = os.getenv("GMAIL_OAUTH_REDIRECT_URI", "")
+GMAIL_FAKE_ACCOUNT_EMAIL = os.getenv("GMAIL_FAKE_ACCOUNT_EMAIL", "owner@example.invalid")
+FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
@@ -186,6 +192,7 @@ CELERY_IMPORTS = (
     "contact_outreach.tasks",
     "apps.campaigns.tasks",
     "apps.prospects.tasks",
+    "apps.mailbox.tasks",
 )
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -202,6 +209,14 @@ CELERY_BEAT_SCHEDULE = {
     },
     "recover-prospect-pipeline": {
         "task": "prospects.recover_pipeline",
+        "schedule": 60.0,
+    },
+    "deliver-outbound-messages": {
+        "task": "mailbox.deliver_outbound_messages",
+        "schedule": 60.0,
+    },
+    "recover-ambiguous-gmail-sends": {
+        "task": "mailbox.recover_ambiguous_sends",
         "schedule": 60.0,
     },
 }

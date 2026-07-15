@@ -154,9 +154,16 @@ def _preflight(campaign: Campaign) -> BusinessProfile:
     if campaign.delivery_mode == Campaign.DeliveryMode.LIVE:
         if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
             raise ValidationError("El modo live está bloqueado por los controles de despliegue.")
-        raise ValidationError(
-            "El modo live no está disponible hasta implementar y verificar la conexión Gmail."
-        )
+        from apps.integrations.gmail import GMAIL_SCOPES
+        from apps.mailbox.models import GmailConnection
+
+        connection = GmailConnection.objects.filter(owner=campaign.created_by).first()
+        if (
+            connection is None
+            or not connection.is_ready
+            or set(connection.scopes) != set(GMAIL_SCOPES)
+        ):
+            raise ValidationError("La conexión Gmail debe estar conectada y probada.")
     return profile
 
 
@@ -257,6 +264,12 @@ def transition_campaign(
                 SearchQuery.State.RETRY_WAIT,
             ),
         ).update(state=SearchQuery.State.CANCELLED)
+        from apps.campaigns.models import OutboundMessage
+
+        OutboundMessage.objects.filter(
+            campaign=campaign,
+            state__in=(OutboundMessage.State.PREPARED, OutboundMessage.State.QUEUED),
+        ).update(state=OutboundMessage.State.CANCELLED, error=campaign.status_reason)
     elif target_state == Campaign.State.COMPLETED:
         if campaign.discovery_state not in TERMINAL_DISCOVERY_STATES:
             raise InvalidCampaignTransition("No se puede completar con descubrimiento activo.")

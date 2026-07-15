@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Gmail · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Gmail</h1>
+<p class="muted">OAuth usa únicamente gmail.send y gmail.readonly. No se guarda ninguna contraseña.</p>
+
+<section class="card form-card">
+    {% if connection and connection.status == "CONNECTED" %}
+        <h2>{{ connection.email }}</h2>
+        <p>Estado: {{ connection.get_status_display }}</p>
+        <p>Última prueba: {{ connection.last_tested_at|default:"Todavía no probada" }}</p>
+        {% if connection.error %}<p class="errorlist">{{ connection.error }}</p>{% endif %}
+        <div class="actions">
+            <form method="post" action="{% url 'gmail-test' %}">
+                {% csrf_token %}<button type="submit">Enviar prueba a mi Gmail</button>
+            </form>
+            <form method="post" action="{% url 'gmail-disconnect' %}">
+                {% csrf_token %}<button class="danger" type="submit">Desconectar</button>
+            </form>
+        </div>
+    {% else %}
+        <p>No hay una cuenta Gmail conectada.</p>
+        {% if connection.error %}<p class="errorlist">{{ connection.error }}</p>{% endif %}
+        <form method="post" action="{% url 'gmail-connect' %}">
+            {% csrf_token %}<button type="submit">Conectar Gmail</button>
+        </form>
+    {% endif %}
+</section>
+{% endblock %}

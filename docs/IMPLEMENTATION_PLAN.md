@@ -14,10 +14,13 @@ principal. Los incrementos de web e IA aportan las fases 5–6 para ese corte: f
 fijada y defensa SSRF, snapshots de hasta cuatro páginas, proveedores mock/Ollama/OpenAI
 compatible, prompt y schema versionados, validación y retry acotado/durable, caché persistente,
 `AIAnalysis`, `OutboundMessage` preparado, reserva idempotente por prospecto y regeneración manual
-con generación monotónica, sin entrega. Esto aporta evidencia
-de FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-09, FR-12, FR-14, FR-15, FR-16 y FR-17.
-La fase 4 completa todavía requiere ledger/override concurrentes en el pipeline de entrega; las
-fases 7–10 (orquestación integral, Gmail, delivery y mailbox) siguen pendientes. El objetivo
+con generación monotónica. Los incrementos de fases 7–9 agregan `BackgroundJob`, recuperación
+desde PostgreSQL, ledger/override global, OAuth Gmail con PKCE y token cifrado, MIME texto+PDF,
+proveedor API/fake, scheduler de entrega, cuota/calendario/intervalo, pausa/cancelación/kill switch,
+backoff acotado y reconciliación por Message-ID. Esto aporta evidencia
+de FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-08, FR-09, FR-10, FR-12, FR-14, FR-15,
+FR-16 y FR-17. La sincronización de respuestas y la respuesta manual de fase 10 siguen pendientes.
+El objetivo
 calificado corta sobre prospectos `QUEUED` creados por el análisis sobre umbral; nunca se cuenta
 `EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch permanecen como controles de
 despliegue de sólo lectura.

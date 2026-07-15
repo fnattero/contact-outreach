@@ -30,3 +30,58 @@ class SuppressionEntry(TimestampedUUIDModel):
 
     def __str__(self) -> str:
         return f"{self.normalized_email} ({self.get_reason_display()})"
+
+
+class ContactLedger(TimestampedUUIDModel):
+    normalized_email = models.CharField(max_length=320, unique=True)
+    reserved_message = models.ForeignKey(
+        "campaigns.OutboundMessage",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_reservations",
+    )
+    reserved_at = models.DateTimeField(blank=True, null=True)
+    last_sent_message = models.ForeignKey(
+        "campaigns.OutboundMessage",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_confirmations",
+    )
+    last_sent_at = models.DateTimeField(blank=True, null=True)
+    next_sequence = models.PositiveIntegerField(default=1)
+
+
+class ContactOverride(TimestampedUUIDModel):
+    ledger = models.ForeignKey(ContactLedger, on_delete=models.PROTECT, related_name="overrides")
+    campaign = models.ForeignKey(
+        "campaigns.Campaign", on_delete=models.PROTECT, related_name="contact_overrides"
+    )
+    reason = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="contact_overrides",
+    )
+    consumed_at = models.DateTimeField(blank=True, null=True)
+    consumed_by_message = models.OneToOneField(
+        "campaigns.OutboundMessage",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="consumed_override",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(reason=""),
+                name="contact_override_reason_required",
+            ),
+            models.UniqueConstraint(
+                fields=("ledger", "campaign"),
+                condition=models.Q(consumed_at__isnull=True),
+                name="active_contact_override_unique",
+            ),
+        ]

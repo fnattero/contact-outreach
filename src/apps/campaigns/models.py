@@ -360,15 +360,39 @@ class OutboundMessage(TimestampedUUIDModel):
     delivery_mode = models.CharField(max_length=20, choices=Campaign.DeliveryMode.choices)
     idempotency_key = models.CharField(max_length=200, unique=True)
     contact_sequence = models.PositiveIntegerField(blank=True, null=True)
+    message_id = models.CharField(max_length=255, blank=True)
+    mime_sha256 = models.CharField(max_length=64, blank=True)
+    gmail_message_id = models.CharField(max_length=255, blank=True)
+    gmail_thread_id = models.CharField(max_length=255, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(blank=True, null=True)
+    delivery_reserved_at = models.DateTimeField(blank=True, null=True)
+    sending_started_at = models.DateTimeField(blank=True, null=True)
+    last_attempt_at = models.DateTimeField(blank=True, null=True)
+    sent_at = models.DateTimeField(blank=True, null=True)
+    simulated_at = models.DateTimeField(blank=True, null=True)
     error = models.TextField(blank=True)
 
     class Meta:
         ordering = ("-created_at",)
-        indexes = [models.Index(fields=("campaign", "state"))]
+        indexes = [
+            models.Index(fields=("campaign", "state")),
+            models.Index(fields=("state", "next_attempt_at")),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=("recipient_normalized", "contact_sequence"),
                 condition=Q(kind="FIRST_CONTACT", contact_sequence__isnull=False),
                 name="first_contact_email_sequence_unique",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=("message_id",),
+                condition=~Q(message_id=""),
+                name="outbound_rfc_message_id_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("gmail_message_id",),
+                condition=~Q(gmail_message_id=""),
+                name="outbound_gmail_message_id_unique",
+            ),
         ]

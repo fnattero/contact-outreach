@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from apps.integrations.contracts import (
     ExtractedBusiness,
@@ -136,14 +136,19 @@ FakeLLMProvider = MockLLMProvider
 class FakeGmailProvider:
     """In-memory Gmail contract implementation with Message-ID deduplication."""
 
-    def __init__(self, account_email: str = "owner@example.invalid") -> None:
+    def __init__(
+        self, account_email: str = "owner@example.invalid", *, persist: bool = False
+    ) -> None:
         self.account_email = account_email
+        self.persist = persist
         self.revoked = False
         self._sent: dict[str, GmailSendResult] = {}
 
     def authorization_url(self, state: str, redirect_uri: str) -> str:
-        query = urlencode({"state": state, "redirect_uri": redirect_uri})
-        return f"https://fake-gmail.invalid/authorize?{query}"
+        parts = urlsplit(redirect_uri)
+        query = dict(parse_qsl(parts.query))
+        query.update({"state": state, "code": "fake-code"})
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
     def exchange_code(self, code: str, redirect_uri: str) -> GmailConnectionData:
         del code, redirect_uri
@@ -161,6 +166,17 @@ class FakeGmailProvider:
         return GmailAccountInfo(email=self.account_email)
 
     def send(self, request: GmailSendRequest) -> GmailSendResult:
+        if self.persist:
+            from apps.mailbox.models import FakeGmailMessage
+
+            existing_record = FakeGmailMessage.objects.filter(
+                rfc_message_id=request.message_id
+            ).first()
+            if existing_record is not None:
+                return GmailSendResult(
+                    message_id=existing_record.gmail_message_id,
+                    thread_id=existing_record.gmail_thread_id,
+                )
         existing = self._sent.get(request.message_id)
         if existing is not None:
             return existing
@@ -169,7 +185,28 @@ class FakeGmailProvider:
             message_id=f"fake-message-{digest}", thread_id=f"fake-thread-{digest}"
         )
         self._sent[request.message_id] = result
+        if self.persist:
+            FakeGmailMessage.objects.create(
+                rfc_message_id=request.message_id,
+                gmail_message_id=result.message_id,
+                gmail_thread_id=result.thread_id,
+                recipient=request.recipient,
+                raw_message=request.raw_message,
+                idempotency_key=request.idempotency_key,
+            )
         return result
+
+    def find_by_message_id(self, message_id: str) -> GmailSendResult | None:
+        if self.persist:
+            from apps.mailbox.models import FakeGmailMessage
+
+            record = FakeGmailMessage.objects.filter(rfc_message_id=message_id).first()
+            if record is not None:
+                return GmailSendResult(
+                    message_id=record.gmail_message_id,
+                    thread_id=record.gmail_thread_id,
+                )
+        return self._sent.get(message_id)
 
     def reply(self, request: GmailReplyRequest) -> GmailSendResult:
         existing = self._sent.get(request.message_id)

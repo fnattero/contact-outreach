@@ -14,6 +14,10 @@ class RetryableProviderError(ProviderError):
     pass
 
 
+class AmbiguousProviderError(RetryableProviderError):
+    """The provider may have accepted the effect; reconciliation is mandatory."""
+
+
 class RateLimitError(RetryableProviderError):
     def __init__(self, message: str, *, retry_after: float | None = None) -> None:
         super().__init__(message)
@@ -254,6 +258,8 @@ class GmailProvider(Protocol):
     def test_connection(self) -> GmailAccountInfo: ...
 
     def send(self, request: GmailSendRequest) -> GmailSendResult: ...
+
+    def find_by_message_id(self, message_id: str) -> GmailSendResult | None: ...
 
     def reply(self, request: GmailReplyRequest) -> GmailSendResult: ...
 

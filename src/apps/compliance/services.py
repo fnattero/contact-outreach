@@ -25,13 +25,19 @@ def normalize_email(value: str) -> str:
     return normalized
 
 
-def _lock_suppression_key(normalized_email: str) -> None:
+def lock_email_eligibility(normalized_email: str) -> None:
+    """Serialize final delivery authorization with suppression/invalidation writes."""
     if connection.vendor != "postgresql":
         return
     digest = hashlib.sha256(normalized_email.encode()).digest()
     lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_id])
+
+
+def _lock_suppression_key(normalized_email: str) -> None:
+    """Backward-compatible name for the shared eligibility lock."""
+    lock_email_eligibility(normalized_email)
 
 
 def _merge_existing_suppression(
@@ -72,7 +78,7 @@ def suppress_email(
     normalized = normalize_email(email)
     if reason not in SuppressionEntry.Reason.values:
         raise ValidationError("El motivo de supresión no es válido.")
-    _lock_suppression_key(normalized)
+    lock_email_eligibility(normalized)
     if reason == SuppressionEntry.Reason.BOUNCE:
         from apps.prospects.models import ProspectEmail
 

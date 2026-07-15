@@ -2,7 +2,8 @@
 
 Aplicación local Django para outreach B2B de un único propietario. El incremento actual incluye
 autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría,
-extracción durable, enriquecimiento web seguro y generación personalizada. Los proveedores mock
+extracción durable, enriquecimiento web seguro, generación personalizada, OAuth Gmail y entrega
+controlada de primeros mensajes. Los proveedores mock
 son el default sin red; Outscraper, el fetch HTTP y los proveedores IA quedan aislados por
 contratos internos y son opt-in.
 
@@ -19,8 +20,9 @@ contratos internos y son opt-in.
    cp .env.example .env
    ```
 
-2. Reemplazar en `.env` `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD` y `OWNER_PASSWORD`. Gmail e IA
-   siguen fake; Outscraper sólo se habilita explícitamente como se describe más abajo.
+2. Reemplazar en `.env` `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, `OWNER_PASSWORD` y
+   `FIELD_ENCRYPTION_KEY`. Gmail e IA siguen fake; las integraciones de red sólo se habilitan
+   explícitamente como se describe más abajo.
 
 3. Construir e iniciar todos los servicios:
 
@@ -83,8 +85,38 @@ determinístico; la extracción Outscraper usa DNS MX real desde el worker.
 
 Cada prospecto con email obtiene un snapshot de la home y hasta tres páginas internas. Luego una
 única llamada lógica evalúa relevancia y redacta JSON estructurado. Sólo un resultado enteramente
-válido y sobre el umbral crea un mensaje `PREPARED`; no existe fallback de copy. Desde el detalle
-de campaña se puede regenerar un candidato preparado. Esa acción no lo aprueba ni lo envía.
+válido y sobre el umbral crea un mensaje `PREPARED`; no existe fallback de copy. Beat reconstruye
+la cola desde PostgreSQL: en dry-run genera y hashea el MIME sin llamar Gmail; en live sólo entrega
+si pasan modo, kill switch, conexión probada, cuota, intervalo, horario, catálogo, supresión y
+ledger global. Desde el detalle se puede regenerar únicamente un candidato que todavía no entró
+en entrega.
+
+## Conectar Gmail
+
+El proveedor fake permite probar todo el flujo sin red desde la pantalla Gmail. Para OAuth real:
+
+1. Crear credenciales OAuth de aplicación web en Google Cloud.
+2. Registrar exactamente `GMAIL_OAUTH_REDIRECT_URI` (por defecto,
+   `http://127.0.0.1:8000/gmail/oauth/callback/`).
+3. Configurar fuera del repositorio:
+
+   ```bash
+   GMAIL_PROVIDER=api
+   GMAIL_OAUTH_CLIENT_ID=replace-with-client-id
+   GMAIL_OAUTH_CLIENT_SECRET=replace-with-client-secret
+   GMAIL_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/gmail/oauth/callback/
+   FIELD_ENCRYPTION_KEY=replace-with-an-independent-random-secret
+   ```
+
+La autorización solicita sólo `gmail.send` y `gmail.readonly`, valida state y PKCE, y cifra el
+refresh token. Después de conectar es obligatorio usar “Enviar prueba a mi Gmail”; el servidor
+fija el destinatario a la misma cuenta conectada y no acepta uno enviado por el formulario. Como
+esa prueba es un envío real, también exige `SEND_MODE=live` y `SEND_KILL_SWITCH=false`.
+
+Para habilitar una campaña live deben configurarse además `SEND_MODE=live` y
+`SEND_KILL_SWITCH=false`. El scheduler envía un destinatario por MIME, sin CC/BCC, HTML ni tracking,
+y adjunta la versión PDF congelada. Un timeout ambiguo pasa a reconciliación por `Message-ID`; un
+reinicio de web/worker reconstruye pendientes y reconciliaciones desde la base.
 
 ## Habilitar enriquecimiento web e IA
 
@@ -166,4 +198,4 @@ bloquea sockets y usa exclusivamente los proveedores fake.
 - `SEND_KILL_SWITCH=true`
 - extractor, web, IA y Gmail en `fake`
 - catálogos fuera de static/media público, bajo `PRIVATE_STORAGE_ROOT`
-- sin API keys, OAuth, SMTP, scraping ni llamadas de red de proveedores
+- sin API keys, OAuth real, SMTP, scraping ni llamadas de red de proveedores

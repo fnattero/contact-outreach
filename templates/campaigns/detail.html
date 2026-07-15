@@ -54,7 +54,7 @@
     <h2>Prospectos y mensajes preparados</h2>
     {% if campaign.prospects.all %}
     <table>
-        <thead><tr><th>Prospecto</th><th>Pipeline</th><th>Web</th><th>Score / razón</th><th>Mensaje</th><th>Acción</th></tr></thead>
+        <thead><tr><th>Prospecto</th><th>Pipeline</th><th>Web</th><th>Score / razón</th><th>Mensaje</th><th>Error / IDs</th><th>Acción</th></tr></thead>
         <tbody>
         {% for prospect in campaign.prospects.all %}
             {% with snapshot=prospect.web_snapshots.first analysis=prospect.analyses.first message=prospect.outbound_messages.first %}
@@ -64,6 +64,7 @@
                 <td>{% if snapshot %}{{ snapshot.get_status_display }} · {{ snapshot.pages|length }} pág.{% else %}—{% endif %}</td>
                 <td>{% if analysis and analysis.status == "VALID" %}{{ analysis.relevance_score }} · {{ analysis.relevance_reason }}{% elif analysis %}Error: {{ analysis.error }}{% else %}—{% endif %}</td>
                 <td>{% if message %}<strong>{{ message.subject }}</strong><br><small>{{ message.get_state_display }}</small>{% else %}—{% endif %}</td>
+                <td>{% if message %}{{ message.error|default:"—" }}{% if message.gmail_message_id %}<br><small>{{ message.gmail_message_id }} · {{ message.gmail_thread_id }}</small>{% endif %}{% else %}—{% endif %}</td>
                 <td>
                     {% if snapshot and not message or message.state == "PREPARED" or message.state == "CANCELLED" %}
                     <form method="post" action="{% url 'prospect-regenerate' campaign.pk prospect.pk %}">
