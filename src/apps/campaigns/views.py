@@ -13,6 +13,9 @@ from apps.campaigns.models import Campaign
 from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.configuration.models import BusinessProfile
+from apps.prospects.models import Prospect
+from apps.prospects.pipeline import request_manual_regeneration
+from apps.prospects.tasks import process_prospect_pipeline
 
 CAMPAIGN_VALUE_FIELDS = (
     "name",
@@ -78,7 +81,14 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
 def campaign_detail(request: HttpRequest, campaign_id: str) -> HttpResponse:
     campaign = get_object_or_404(
         Campaign.objects.select_related("catalog", "created_by").prefetch_related(
-            "category_selections", "zone_selections", "search_queries", "search_runs"
+            "category_selections",
+            "zone_selections",
+            "search_queries",
+            "search_runs",
+            "prospects__emails",
+            "prospects__analyses",
+            "prospects__outbound_messages",
+            "prospects__web_snapshots",
         ),
         pk=campaign_id,
         created_by=request.user,
@@ -115,4 +125,36 @@ def campaign_action(request: HttpRequest, campaign_id: str, action: str) -> Http
         messages.success(request, "Estado de campaña actualizado.")
         if targets[action] == Campaign.State.RUNNING:
             orchestrate_extraction.delay(str(campaign.pk))
+    return redirect("campaign-detail", campaign_id=campaign_id)
+
+
+@login_required
+@require_POST
+def regenerate_prospect_message(
+    request: HttpRequest, campaign_id: str, prospect_id: str
+) -> HttpResponse:
+    owner = request.user
+    assert isinstance(owner, User)
+    prospect = get_object_or_404(
+        Prospect.objects.select_related("campaign"),
+        pk=prospect_id,
+        campaign_id=campaign_id,
+        campaign__created_by=owner,
+    )
+    try:
+        reservation = request_manual_regeneration(prospect_id=prospect.pk, actor=owner)
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        process_prospect_pipeline.delay(
+            str(prospect.pk),
+            regeneration_nonce=reservation.regeneration_nonce,
+            actor_id=owner.pk,
+            reservation_token=reservation.token,
+            analysis_generation=reservation.generation,
+        )
+        messages.success(
+            request,
+            "Regeneración solicitada. Esto no aprueba ni envía el mensaje.",
+        )
     return redirect("campaign-detail", campaign_id=campaign_id)

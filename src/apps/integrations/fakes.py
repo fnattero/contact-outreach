@@ -5,8 +5,6 @@ from typing import Any
 from urllib.parse import urlencode
 
 from apps.integrations.contracts import (
-    AIAnalysisResult,
-    AnalysisRequest,
     ExtractedBusiness,
     ExtractedEmail,
     ExtractionBatch,
@@ -19,14 +17,13 @@ from apps.integrations.contracts import (
     GmailSendResult,
     GmailSyncBatch,
     LLMProvider,
-    ReplyClassification,
-    ReplyClassificationRequest,
     SearchRequest,
     WebsiteFetcher,
     WebsitePage,
     WebsiteRequest,
     WebsiteResult,
 )
+from apps.integrations.llm import MockLLMProvider
 
 FAKE_GMAIL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.send",
@@ -123,36 +120,17 @@ class FakeWebsiteFetcher:
                     final_url=request.url,
                     status_code=200,
                     text="Servicio de reparación de motores eléctricos.",
+                    content_type="text/html",
+                    content_hash=sha256(
+                        b"Servicio de reparacion de motores electricos."
+                    ).hexdigest(),
+                    byte_count=48,
                 ),
             )
         )
 
 
-class FakeLLMProvider:
-    """Rule-based provider used for development and automated tests."""
-
-    def analyze(self, request: AnalysisRequest) -> AIAnalysisResult:
-        evidence = tuple(fact.fact_id for fact in request.facts[:2])
-        score = 80 if request.facts else 0
-        return AIAnalysisResult(
-            relevance_score=score,
-            confidence=0.9 if request.facts else 0.0,
-            relevance_reason="Los hechos provistos indican actividad electromecánica.",
-            evidence=evidence,
-            subject="Consulta por carbones para motores",
-            body_text=(
-                "Somos proveedores de carbones para motores y queremos conocer si nuestra línea "
-                "puede ser útil para su actividad. ¿Qué día conviene que pase el vendedor?"
-            ),
-        )
-
-    def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification:
-        normalized = request.body_text.casefold()
-        if "baja" in normalized:
-            return ReplyClassification(classification="UNSUBSCRIBE", confidence=1.0)
-        if "interes" in normalized:
-            return ReplyClassification(classification="INTERESTED", confidence=0.9)
-        return ReplyClassification(classification="OTHER", confidence=0.6)
+FakeLLMProvider = MockLLMProvider
 
 
 class FakeGmailProvider:

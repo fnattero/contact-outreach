@@ -91,6 +91,9 @@ Estado derivado por prospecto/campaña: `NONE`, `REPLIED`, `INTERESTED`, `NOT_IN
 - Catálogo se verifica por storage key, tamaño y SHA-256 justo antes de construir MIME.
 - El límite diario se reserva transaccionalmente; una reserva expirada se libera sólo tras reconciliar Gmail.
 - Las tareas reciben IDs, vuelven a leer estado y terminan sin efecto si la transición ya ocurrió.
+- El pipeline reserva cada prospecto en base de datos antes de publicar la task; una reserva expirada puede recuperarse, pero un mismo token sólo se reclama una vez.
+- Cada análisis usa una generación monotónica. Una regeneración manual incrementa la generación antes de llamar al proveedor y cualquier resultado anterior se descarta bajo lock. El actor manual habilita campañas `RUNNING|PAUSED`, nunca estados terminales.
+- Un límite transitorio del LLM deja `AIAnalysis.RETRY_WAIT` con próximo intento persistido; Beat recupera intentos vencidos después de reinicios.
 
 ## 8. Proyecciones del dashboard
 

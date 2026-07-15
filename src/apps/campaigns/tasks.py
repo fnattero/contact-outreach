@@ -11,6 +11,8 @@ from apps.campaigns.extraction import (
     recoverable_search_run_ids,
 )
 from apps.campaigns.models import SearchRun
+from apps.prospects.pipeline import reserve_run_prospects
+from apps.prospects.tasks import process_prospect_pipeline
 
 
 @shared_task(name="campaigns.orchestrate_extraction")  # type: ignore[untyped-decorator]
@@ -26,6 +28,11 @@ def orchestrate_extraction(campaign_id: str) -> str | None:
 def advance_extraction_run(run_id: str) -> str:
     run = advance_search_run(uuid.UUID(run_id))
     if run.state == SearchRun.State.SUCCEEDED:
+        for reservation in reserve_run_prospects(run):
+            process_prospect_pipeline.delay(
+                str(reservation.prospect_id),
+                reservation_token=reservation.token,
+            )
         orchestrate_extraction.delay(str(run.campaign_id))
     return run.state
 

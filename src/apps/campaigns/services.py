@@ -22,6 +22,9 @@ from apps.catalogs.services import verify_catalog
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone, normalize_name
 from apps.configuration.services import profile_snapshot
 
+PROMPT_VERSION = "prospect-analysis-v1"
+SCHEMA_VERSION = "prospect-analysis-schema-v1"
+
 
 class InvalidCampaignTransition(ValidationError):
     pass
@@ -146,6 +149,8 @@ def _preflight(campaign: Campaign) -> BusinessProfile:
     campaign.full_clean()
     if campaign.extractor_provider == "outscraper" and not settings.OUTSCRAPER_API_KEY:
         raise ValidationError("OUTSCRAPER_API_KEY no está configurada en el entorno.")
+    if campaign.llm_provider == "openai-compatible" and not settings.LLM_API_KEY:
+        raise ValidationError("LLM_API_KEY no está configurada en el entorno.")
     if campaign.delivery_mode == Campaign.DeliveryMode.LIVE:
         if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
             raise ValidationError("El modo live está bloqueado por los controles de despliegue.")
@@ -158,7 +163,12 @@ def _preflight(campaign: Campaign) -> BusinessProfile:
 def _freeze_draft(campaign: Campaign, profile: BusinessProfile) -> None:
     campaign.settings_snapshot = _settings_snapshot(campaign)
     campaign.profile_snapshot = profile_snapshot(profile)
-    campaign.prompt_snapshot = {"version": "not-implemented", "provider": campaign.llm_provider}
+    campaign.prompt_snapshot = {
+        "version": PROMPT_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "provider": campaign.llm_provider,
+        "model": campaign.llm_model,
+    }
     queries: list[SearchQuery] = []
     order = 0
     for category in campaign.category_selections.all():

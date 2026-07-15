@@ -37,7 +37,13 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
     extractor_provider = forms.ChoiceField(
         choices=(("fake", "Mock (sin red)"), ("outscraper", "Outscraper"))
     )
-    llm_provider = forms.ChoiceField(choices=(("fake", "Fake (sin red)"),))
+    llm_provider = forms.ChoiceField(
+        choices=(
+            ("fake", "Mock (sin red)"),
+            ("ollama", "Ollama"),
+            ("openai-compatible", "OpenAI compatible"),
+        )
+    )
     llm_base_url = forms.URLField(required=False, assume_scheme="https")
     catalog = forms.ModelChoiceField(
         queryset=Catalog.objects.filter(active=True, missing=False), label="Catálogo"

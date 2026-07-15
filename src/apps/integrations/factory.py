@@ -12,10 +12,11 @@ from apps.integrations.contracts import (
 from apps.integrations.fakes import (
     FakeExtractorProvider,
     FakeGmailProvider,
-    FakeLLMProvider,
     FakeWebsiteFetcher,
 )
+from apps.integrations.llm import MockLLMProvider, OllamaProvider, OpenAICompatibleProvider
 from apps.integrations.outscraper import OutscraperProvider
+from apps.integrations.website import HttpWebsiteFetcher
 
 
 def _require_fake(setting_name: str) -> None:
@@ -38,14 +39,37 @@ def get_extractor_provider(provider_name: str | None = None) -> ExtractorProvide
     raise ImproperlyConfigured(f"Extractor provider {selected!r} is not supported")
 
 
-def get_website_fetcher() -> WebsiteFetcher:
-    _require_fake("WEBSITE_FETCHER")
-    return FakeWebsiteFetcher()
+def get_website_fetcher(fetcher_name: str | None = None) -> WebsiteFetcher:
+    selected = fetcher_name or settings.WEBSITE_FETCHER
+    if selected == "fake":
+        return FakeWebsiteFetcher()
+    if selected == "http":
+        return HttpWebsiteFetcher()
+    raise ImproperlyConfigured(f"Website fetcher {selected!r} is not supported")
 
 
-def get_llm_provider() -> LLMProvider:
-    _require_fake("LLM_PROVIDER")
-    return FakeLLMProvider()
+def get_llm_provider(
+    provider_name: str | None = None,
+    *,
+    base_url: str = "",
+    model: str = "",
+) -> LLMProvider:
+    selected = provider_name or settings.LLM_PROVIDER
+    selected_model = model or settings.LLM_MODEL
+    if selected == "fake":
+        return MockLLMProvider()
+    if selected == "ollama":
+        return OllamaProvider(
+            base_url=base_url or settings.OLLAMA_BASE_URL,
+            model=selected_model,
+        )
+    if selected == "openai-compatible":
+        return OpenAICompatibleProvider(
+            base_url=base_url or settings.OPENAI_COMPATIBLE_BASE_URL,
+            model=selected_model,
+            api_key=settings.LLM_API_KEY,
+        )
+    raise ImproperlyConfigured(f"LLM provider {selected!r} is not supported")
 
 
 def get_gmail_provider() -> GmailProvider:

@@ -1,9 +1,10 @@
 # Contact Outreach
 
 Aplicación local Django para outreach B2B de un único propietario. El incremento actual incluye
-autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría y
-extracción durable. El proveedor mock es el default sin red; Outscraper es opt-in y queda aislado
-por el contrato interno de extracción.
+autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría,
+extracción durable, enriquecimiento web seguro y generación personalizada. Los proveedores mock
+son el default sin red; Outscraper, el fetch HTTP y los proveedores IA quedan aislados por
+contratos internos y son opt-in.
 
 ## Requisitos
 
@@ -76,9 +77,37 @@ Después de iniciar sesión:
 6. Iniciar el borrador para congelar perfil, configuración, selecciones, catálogo y consultas.
 
 El objetivo inicial es 300. `SEND_MODE` y `SEND_KILL_SWITCH` se muestran en el dashboard pero sólo
-se configuran por entorno. Con los defaults, cualquier campaña es dry-run y el kill switch está
-activo. No hay envío, fetch web ni llamada de IA real en este incremento. La extracción mock usa
-también un resolver MX determinístico; la extracción Outscraper usa DNS MX real desde el worker.
+se configuran por entorno. Con los defaults, cualquier campaña es dry-run, el kill switch está
+activo y web/IA usan fakes sin sockets. La extracción mock usa también un resolver MX
+determinístico; la extracción Outscraper usa DNS MX real desde el worker.
+
+Cada prospecto con email obtiene un snapshot de la home y hasta tres páginas internas. Luego una
+única llamada lógica evalúa relevancia y redacta JSON estructurado. Sólo un resultado enteramente
+válido y sobre el umbral crea un mensaje `PREPARED`; no existe fallback de copy. Desde el detalle
+de campaña se puede regenerar un candidato preparado. Esa acción no lo aprueba ni lo envía.
+
+## Habilitar enriquecimiento web e IA
+
+El fetch HTTP real se activa globalmente con `WEBSITE_FETCHER=http`. Sólo acepta HTTP/HTTPS por
+80/443, valida todas las respuestas DNS y cada redirect, conecta a la IP pública validada y aplica
+límites de páginas, bytes, redirects y tiempo. El contenido resultante siempre se trata como dato
+no confiable.
+
+Al crear una campaña se puede elegir `Ollama` u `OpenAI compatible`, indicando URL base y modelo.
+Los valores externos se configuran sólo por entorno:
+
+```bash
+# Ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+# API compatible con /v1/chat/completions
+OPENAI_COMPATIBLE_BASE_URL=https://proveedor.example
+LLM_API_KEY=replace-with-your-key
+```
+
+La URL/modelo se congelan en la campaña. `LLM_API_KEY` nunca se persiste. Ambos adaptadores exigen
+salida JSON schema y vuelven a validarla localmente; los tests sustituyen sus transportes y
+mantienen todos los sockets bloqueados.
 
 ## Habilitar Outscraper
 
@@ -135,6 +164,6 @@ bloquea sockets y usa exclusivamente los proveedores fake.
 - `HOST_BIND=127.0.0.1`
 - `SEND_MODE=dry-run`
 - `SEND_KILL_SWITCH=true`
-- extractor mock, web, IA y Gmail en `fake`
+- extractor, web, IA y Gmail en `fake`
 - catálogos fuera de static/media público, bajo `PRIVATE_STORAGE_ROOT`
 - sin API keys, OAuth, SMTP, scraping ni llamadas de red de proveedores

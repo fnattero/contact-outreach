@@ -174,11 +174,19 @@ if OUTSCRAPER_BATCH_SIZE <= 0 or OUTSCRAPER_POLL_SECONDS <= 0:
     raise ImproperlyConfigured("Outscraper batch and polling values must be positive")
 WEBSITE_FETCHER = os.getenv("WEBSITE_FETCHER", "fake")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "fake")
+LLM_MODEL = os.getenv("LLM_MODEL", "fake-deterministic")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OPENAI_COMPATIBLE_BASE_URL = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "")
 GMAIL_PROVIDER = os.getenv("GMAIL_PROVIDER", "fake")
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_IMPORTS = ("contact_outreach.tasks", "apps.campaigns.tasks")
+CELERY_IMPORTS = (
+    "contact_outreach.tasks",
+    "apps.campaigns.tasks",
+    "apps.prospects.tasks",
+)
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -191,7 +199,11 @@ CELERY_BEAT_SCHEDULE = {
     "recover-extraction-runs": {
         "task": "campaigns.recover_extraction_runs",
         "schedule": 60.0,
-    }
+    },
+    "recover-prospect-pipeline": {
+        "task": "prospects.recover_pipeline",
+        "schedule": 60.0,
+    },
 }
 
 LOGGING = {

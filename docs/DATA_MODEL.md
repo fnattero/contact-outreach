@@ -36,7 +36,7 @@ Pertenece a query y campaña: proveedor, idempotency key, request JSON redactado
 
 ### Prospect
 
-Entidad canónica: nombre original/normalizado, dirección original/normalizada, barrio, categoría, website, dominio registrable empresarial, teléfono, coordenadas, datos seleccionados del proveedor, estado del pipeline, `error_stage` y `last_error`. Índices por estado, dominio, nombre normalizado, campaña y barrio. `error_stage` permite reanudar exactamente la etapa fallida.
+Entidad canónica: nombre original/normalizado, dirección original/normalizada, barrio, categoría, website, dominio registrable empresarial, teléfono, coordenadas, datos seleccionados del proveedor, estado del pipeline, `error_stage` y `last_error`. También conserva una reserva durable del trabajo (`pipeline_reservation_key`, fechas de reserva/claim) y un contador monotónico `analysis_generation`; ambos impiden que entregas duplicadas o resultados viejos reemplacen trabajo más nuevo. Índices por estado, dominio, nombre normalizado, campaña y barrio. `error_stage` permite reanudar exactamente la etapa fallida.
 
 ### ProspectIdentity
 
@@ -62,7 +62,7 @@ Una fila global por `normalized_email`, bloqueada antes de autorizar cualquier `
 
 ### AIAnalysis
 
-`prospect`, `input_hash`, prompt/schema version, provider, model, fecha, estado, attempts, score, confidence, reason, evidence JSON, subject sin prefijo, body text, output JSON validado y error. Clave de caché única por `(input_hash, prompt_version, schema_version, provider, model)`.
+`prospect`, `input_hash`, prompt/schema version, provider, model, fecha, estado, attempts, score, confidence, reason, evidence JSON, subject sin prefijo, body text, output JSON validado y error. Registra además la generación/nonce de regeneración, actor solicitante y `next_retry_at`; `RETRY_WAIT` representa un error transitorio diferido sin convertirlo en output válido ni borrar el candidato vigente. Clave de caché única por `(input_hash, prompt_version, schema_version, provider, model)`.
 
 ## 5. Campañas y mensajes
 

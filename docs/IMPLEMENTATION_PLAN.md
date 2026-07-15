@@ -10,12 +10,17 @@ El dashboard implementa la fase 2, el audit log append-only de fase 1 y el corte
 campaña borrador/supresión/máquinas de estado. El incremento de extracción aporta la fase 3 y la
 parte de email/deduplicación de fase 4: `SearchRun`, payload crudo, uso/costo, polling durable,
 Outscraper opt-in, mock determinístico, prospectos, identidades globales, sintaxis/MX y email
-principal. Esto aporta evidencia de FR-01, FR-02, FR-03, FR-06, FR-07, FR-09, FR-12, FR-14,
-FR-15, FR-16 y FR-17. La fase 4 completa todavía requiere ledger/override concurrentes en el
-pipeline de entrega; las fases 5–10 (web, IA, orquestación integral, Gmail, delivery y mailbox)
-siguen pendientes. El objetivo calificado ya corta sobre prospectos `QUEUED`, estado que poblarán
-las fases 6–7; nunca se cuenta `EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch
-permanecen como controles de despliegue de sólo lectura.
+principal. Los incrementos de web e IA aportan las fases 5–6 para ese corte: fetch HTTP con IP
+fijada y defensa SSRF, snapshots de hasta cuatro páginas, proveedores mock/Ollama/OpenAI
+compatible, prompt y schema versionados, validación y retry acotado/durable, caché persistente,
+`AIAnalysis`, `OutboundMessage` preparado, reserva idempotente por prospecto y regeneración manual
+con generación monotónica, sin entrega. Esto aporta evidencia
+de FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-09, FR-12, FR-14, FR-15, FR-16 y FR-17.
+La fase 4 completa todavía requiere ledger/override concurrentes en el pipeline de entrega; las
+fases 7–10 (orquestación integral, Gmail, delivery y mailbox) siguen pendientes. El objetivo
+calificado corta sobre prospectos `QUEUED` creados por el análisis sobre umbral; nunca se cuenta
+`EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch permanecen como controles de
+despliegue de sólo lectura.
 
 ## Fase 0 - Scaffold reproducible y aplicación base
 
@@ -76,7 +81,7 @@ permanecen como controles de despliegue de sólo lectura.
 ## Fase 5 - Enriquecimiento web seguro
 
 - **Objetivo:** obtener snapshots útiles sin JavaScript y sin permitir SSRF.
-- **Archivos/módulos:** contrato/adaptadores `WebsiteFetcher`, resolver/transport fijado, extracción/limpieza y tasks `enrichment`.
+- **Archivos/módulos:** contrato/adaptadores `WebsiteFetcher`, resolver/transport fijado con deadline DNS, Public Suffix List embebida, extracción/limpieza y tasks `enrichment`.
 - **Migraciones:** `WebsiteSnapshot` con hashes, extractos, límites y error parcial.
 - **Pruebas:** matriz SSRF IPv4/IPv6/DNS rebinding/redirects/metadata, timeouts, tamaños, content type, máximo páginas, limpieza y fake.
 - **Verificación:** `make check`; suite SSRF con sockets externos bloqueados.
@@ -88,8 +93,8 @@ permanecen como controles de despliegue de sólo lectura.
 
 - **Objetivo:** calificar y generar un mensaje válido con una llamada lógica cacheada.
 - **Archivos/módulos:** contratos/adaptadores mock/Ollama/OpenAI-compatible, schemas Pydantic, prompt versionado, facts builder y task `analysis`.
-- **Migraciones:** `AIAnalysis`, `OutboundMessage` base, `contact_sequence` condicional, cache unique, Message-ID/idempotency unique; agregar `reserved_message`/`last_sent_message` a `ContactLedger` ahora que existe outbound.
-- **Pruebas:** JSON/bounds/evidence, 70–130 palabras, idioma/reglas/CTA, prompt injection, retries, caché e indisponibilidad sin fallback.
+- **Migraciones:** `AIAnalysis` con retry diferido/generación, reserva durable de pipeline en `Prospect`, `OutboundMessage` base, `contact_sequence` condicional, cache unique, Message-ID/idempotency unique; agregar `reserved_message`/`last_sent_message` a `ContactLedger` ahora que existe outbound.
+- **Pruebas:** JSON/bounds/evidence, 70–130 palabras sobre mensaje final, idioma/reglas/CTA, prompt injection, retries diferidos, caché, regeneración concurrente e indisponibilidad sin fallback.
 - **Verificación:** `make check`; golden tests del prompt contra mock; prueba E2E con Ollama sustituido, nunca real.
 - **Terminado:** sólo outputs completamente válidos crean mensaje candidato; bajo umbral no envía; error queda visible.
 - **Dependencias:** fase 5.

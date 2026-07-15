@@ -166,8 +166,10 @@ class Campaign(TimestampedUUIDModel):
             errors["extractor_provider"] = "El proveedor de extracción no es válido."
         if self.extractor_provider == "outscraper" and self.cost_currency != "USD":
             errors["cost_currency"] = "Outscraper sólo admite costos de campaña en USD."
-        if self.llm_provider != "fake":
-            errors["llm_provider"] = "En esta etapa sólo está disponible el proveedor IA fake."
+        if self.llm_provider not in {"fake", "ollama", "openai-compatible"}:
+            errors["llm_provider"] = "El proveedor IA no es válido."
+        if self.llm_provider != "fake" and not self.llm_base_url:
+            errors["llm_base_url"] = "El proveedor IA seleccionado requiere una URL base."
         if errors:
             raise ValidationError(errors)
 
@@ -320,3 +322,53 @@ class ProviderUsage(TimestampedUUIDModel):
     class Meta:
         ordering = ("created_at",)
         indexes = [models.Index(fields=("provider", "campaign", "created_at"))]
+
+
+class OutboundMessage(TimestampedUUIDModel):
+    class Kind(models.TextChoices):
+        FIRST_CONTACT = "FIRST_CONTACT", "Primer contacto"
+        MANUAL_REPLY = "MANUAL_REPLY", "Respuesta manual"
+
+    class State(models.TextChoices):
+        PREPARED = "PREPARED", "Preparado"
+        QUEUED = "QUEUED", "En cola"
+        SENDING = "SENDING", "Enviando"
+        RECONCILING = "RECONCILING", "Reconciliando"
+        SENT = "SENT", "Enviado"
+        DRY_RUN_COMPLETED = "DRY_RUN_COMPLETED", "Simulado"
+        SEND_FAILED = "SEND_FAILED", "Falló"
+        CANCELLED = "CANCELLED", "Cancelado"
+
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.FIRST_CONTACT)
+    campaign = models.ForeignKey(Campaign, on_delete=models.PROTECT, related_name="messages")
+    prospect = models.ForeignKey(
+        "prospects.Prospect", on_delete=models.PROTECT, related_name="outbound_messages"
+    )
+    prospect_email = models.ForeignKey(
+        "prospects.ProspectEmail", on_delete=models.PROTECT, related_name="outbound_messages"
+    )
+    analysis = models.OneToOneField(
+        "prospects.AIAnalysis", on_delete=models.PROTECT, related_name="outbound_message"
+    )
+    recipient = models.CharField(max_length=320)
+    recipient_normalized = models.CharField(max_length=320)
+    subject = models.CharField(max_length=255)
+    body_text = models.TextField()
+    catalog = models.ForeignKey(Catalog, on_delete=models.PROTECT, related_name="messages")
+    catalog_version = models.PositiveIntegerField()
+    state = models.CharField(max_length=30, choices=State.choices, default=State.PREPARED)
+    delivery_mode = models.CharField(max_length=20, choices=Campaign.DeliveryMode.choices)
+    idempotency_key = models.CharField(max_length=200, unique=True)
+    contact_sequence = models.PositiveIntegerField(blank=True, null=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("campaign", "state"))]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("recipient_normalized", "contact_sequence"),
+                condition=Q(kind="FIRST_CONTACT", contact_sequence__isnull=False),
+                name="first_contact_email_sequence_unique",
+            )
+        ]

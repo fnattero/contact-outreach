@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
@@ -38,6 +39,10 @@ class Prospect(TimestampedUUIDModel):
     )
     error_stage = models.CharField(max_length=50, blank=True)
     last_error = models.TextField(blank=True)
+    pipeline_reservation_key = models.CharField(max_length=64, blank=True)
+    pipeline_reserved_at = models.DateTimeField(blank=True, null=True)
+    pipeline_claimed_at = models.DateTimeField(blank=True, null=True)
+    analysis_generation = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ("created_at",)
@@ -97,4 +102,92 @@ class ProspectEmail(TimestampedUUIDModel):
                 condition=Q(is_primary=True),
                 name="prospect_one_primary_email",
             )
+        ]
+
+
+class WebsiteSnapshot(TimestampedUUIDModel):
+    class Status(models.TextChoices):
+        SUCCESS = "SUCCESS", "Exitoso"
+        PARTIAL = "PARTIAL", "Parcial"
+        FALLBACK = "FALLBACK", "Sin contexto web"
+        REJECTED = "REJECTED", "URL rechazada"
+
+    prospect = models.ForeignKey(Prospect, on_delete=models.PROTECT, related_name="web_snapshots")
+    requested_url = models.URLField(max_length=1000, blank=True)
+    final_url = models.URLField(max_length=1000, blank=True)
+    fetched_at = models.DateTimeField()
+    http_status = models.PositiveSmallIntegerField(blank=True, null=True)
+    content_type = models.CharField(max_length=120, blank=True)
+    content_hash = models.CharField(max_length=64)
+    excerpt = models.TextField(blank=True)
+    pages = models.JSONField(default=list)
+    byte_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-fetched_at",)
+        indexes = [
+            models.Index(fields=("prospect", "-fetched_at")),
+            models.Index(fields=("content_hash",)),
+        ]
+
+
+class AIAnalysis(TimestampedUUIDModel):
+    class Status(models.TextChoices):
+        VALID = "VALID", "Válido"
+        RETRY_WAIT = "RETRY_WAIT", "Esperando reintento"
+        ERROR = "ERROR", "Error"
+
+    prospect = models.ForeignKey(Prospect, on_delete=models.PROTECT, related_name="analyses")
+    input_hash = models.CharField(max_length=64)
+    prompt_version = models.CharField(max_length=40)
+    schema_version = models.CharField(max_length=40)
+    provider = models.CharField(max_length=50)
+    model = models.CharField(max_length=120)
+    analyzed_at = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=Status.choices)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    generation = models.PositiveIntegerField(default=0)
+    regeneration_nonce = models.CharField(max_length=64, blank=True)
+    next_retry_at = models.DateTimeField(blank=True, null=True)
+    relevance_score = models.PositiveSmallIntegerField(blank=True, null=True)
+    confidence = models.DecimalField(max_digits=4, decimal_places=3, blank=True, null=True)
+    relevance_reason = models.TextField(blank=True)
+    evidence = models.JSONField(default=list)
+    subject = models.CharField(max_length=200, blank=True)
+    body_text = models.TextField(blank=True)
+    prompt_text = models.TextField()
+    output_json = models.JSONField(default=dict)
+    error = models.TextField(blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="requested_ai_analyses",
+    )
+
+    class Meta:
+        ordering = ("-analyzed_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=(
+                    "input_hash",
+                    "prompt_version",
+                    "schema_version",
+                    "provider",
+                    "model",
+                ),
+                name="ai_analysis_cache_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(relevance_score__isnull=True)
+                | Q(relevance_score__gte=0, relevance_score__lte=100),
+                name="ai_analysis_relevance_0_100",
+            ),
+            models.CheckConstraint(
+                condition=Q(confidence__isnull=True) | Q(confidence__gte=0, confidence__lte=1),
+                name="ai_analysis_confidence_0_1",
+            ),
         ]

@@ -15,7 +15,9 @@ dependencies = [
   "dnspython==2.8.0",
   "email-validator==2.3.0",
   "gunicorn==23.0.0",
+  "pydantic==2.13.2",
   "psycopg[binary]==3.3.4",
+  "tldextract==5.3.1",
 ]
 
 [project.optional-dependencies]
@@ -60,7 +62,15 @@ exclude = ["src/.*/migrations/"]
 django_settings_module = "contact_outreach.settings_test"
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*", "dns", "dns.*", "email_validator"]
+module = [
+  "celery",
+  "celery.*",
+  "dns",
+  "dns.*",
+  "email_validator",
+  "pydantic",
+  "tldextract",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -66,9 +66,9 @@ identidades globales de deduplicación.
 
 ## 4. WebsiteFetcher
 
-`HttpWebsiteFetcher` usa un cliente HTTP sin JavaScript y resolver/transport inyectables. Aplica las reglas SSRF de `SECURITY.md`, permite sólo HTML/texto y procesa como máximo home más tres links internos relevantes. La selección puntúa paths/títulos como servicios, productos, nosotros, reparaciones y contacto, siempre dentro del mismo dominio registrable.
+`HttpWebsiteFetcher` usa un cliente HTTP sin JavaScript y resolver/transport inyectables. Aplica las reglas SSRF de `SECURITY.md`, permite sólo HTML/texto y procesa como máximo home más tres links internos relevantes. El presupuesto total incluye resolución DNS; la resolución recibe el tiempo restante. La selección puntúa paths/títulos como servicios, productos, nosotros, reparaciones y contacto, siempre dentro del mismo dominio registrable calculado con una Public Suffix List embebida, sin descarga en runtime.
 
-El resultado contiene páginas, final URLs, fechas, status, content hashes, extracto limpio y error parcial. Un fallo nunca bloquea IA: se crea `WebsiteResult` fallback sin texto web. `FakeWebsiteFetcher` no abre sockets y modela redirects, timeout, oversize y host prohibido.
+El resultado contiene páginas, final URLs, fechas, status, content hashes, extracto limpio, clase de error y error parcial. Sólo una URL rechazada por política queda `REJECTED`; timeout, 5xx, tamaño o content type dejan un `FALLBACK` auditable sin texto web y no bloquean IA. `FakeWebsiteFetcher` no abre sockets y modela redirects, timeout, oversize y host prohibido.
 
 ## 5. Proveedores LLM
 
@@ -78,7 +78,7 @@ El resultado contiene páginas, final URLs, fechas, status, content hashes, extr
 
 El input contiene hechos con IDs estables, perfil snapshot, reglas y texto web rotulado no confiable. `evidence` sólo admite hechos del input. El prefijo `PUBLICIDAD -`, firma y BAJA se aplican/validan en código de dominio para no depender del modelo. El prompt descuenta del presupuesto las palabras del footer determinístico y el validador exige que el cuerpo final compuesto, no sólo el fragmento del modelo, tenga 70–130 palabras.
 
-Una llamada lógica por prospecto puede tener hasta tres intentos técnicos con el mismo input hash. No se encadenan llamadas de corrección ni fallback genérico. El caché incluye input, prompt/schema, proveedor y modelo. Clasificación de respuestas es una operación distinta; BAJA y bounce se resuelven primero con reglas.
+Una llamada lógica por prospecto puede tener hasta tres intentos técnicos con el mismo input hash. JSON/schema inválido se reintenta localmente de manera acotada; rate limit o falla transitoria se persiste como `RETRY_WAIT` y se reprograma respetando `Retry-After`/backoff, sin agotar intentos en un loop sin espera. No se encadenan llamadas de corrección ni fallback genérico. El caché incluye input, prompt/schema, proveedor y modelo. Clasificación de respuestas es una operación distinta; BAJA y bounce se resuelven primero con reglas.
 
 ## 6. Gmail OAuth y envío
 
@@ -110,7 +110,7 @@ Se guarda sólo el hilo relacionado y cuerpos sanitizados. IDs Gmail únicos hac
 | Outscraper | 3, respeta Retry-After, backoff+jitter | detener extracción/campaña según error |
 | DNS MX | 2 para timeout/SERVFAIL | prospecto ERROR si no concluye |
 | Web | 1 por página | continuar con fallback |
-| LLM | 3 intentos técnicos | prospecto ERROR, sin mensaje |
+| LLM | 3 intentos técnicos; transitorios diferidos y persistidos | prospecto ERROR, sin mensaje |
 | Gmail send | no retry ciego; reconciliar primero | pausar ante ambigüedad/auth |
 | Gmail sync | 3; fallback ante history 404 | degradar sync, nunca bloquear UI |
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any, Protocol
 
 
@@ -92,12 +93,21 @@ class WebsitePage:
     final_url: str
     status_code: int
     text: str
+    content_type: str = "text/plain"
+    content_hash: str = ""
+    byte_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class WebsiteResult:
     pages: tuple[WebsitePage, ...]
     error: str | None = None
+    error_kind: str | None = None
+
+
+class WebsiteErrorKind(StrEnum):
+    REJECTED = "REJECTED"
+    FETCH_ERROR = "FETCH_ERROR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +121,9 @@ class AnalysisRequest:
     facts: tuple[AnalysisFact, ...]
     correlation_id: str
     idempotency_key: str
+    system_prompt: str = ""
+    user_prompt: str = ""
+    json_schema: dict[str, Any] | None = None
     timeout_seconds: float = 30.0
 
 
@@ -122,6 +135,23 @@ class AIAnalysisResult:
     evidence: tuple[str, ...]
     subject: str
     body_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class JSONResponse:
+    status_code: int
+    payload: dict[str, Any]
+
+
+class JSONTransport(Protocol):
+    def post_json(
+        self,
+        *,
+        url: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        timeout_seconds: float,
+    ) -> JSONResponse: ...
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,7 +5,13 @@ from django.urls import path
 
 from apps.accounts.views import ThrottledLoginView
 from apps.audit.views import audit_log
-from apps.campaigns.views import campaign_action, campaign_create, campaign_detail, campaign_list
+from apps.campaigns.views import (
+    campaign_action,
+    campaign_create,
+    campaign_detail,
+    campaign_list,
+    regenerate_prospect_message,
+)
 from apps.catalogs.views import catalog_download, catalog_list
 from apps.compliance.views import suppression_list
 from apps.configuration.views import (
@@ -32,6 +38,11 @@ urlpatterns = [
     path("campanas/", campaign_list, name="campaigns"),
     path("campanas/nueva/", campaign_create, name="campaign-create"),
     path("campanas/<uuid:campaign_id>/", campaign_detail, name="campaign-detail"),
+    path(
+        "campanas/<uuid:campaign_id>/prospectos/<uuid:prospect_id>/regenerar/",
+        regenerate_prospect_message,
+        name="prospect-regenerate",
+    ),
     path("campanas/<uuid:campaign_id>/<str:action>/", campaign_action, name="campaign-action"),
     path("supresiones/", suppression_list, name="suppressions"),
     path("auditoria/", audit_log, name="audit-log"),

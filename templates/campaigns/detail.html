@@ -50,6 +50,35 @@
     {% else %}<p>Todavía no hay ejecuciones.</p>{% endif %}
 </section>
 
+<section class="card">
+    <h2>Prospectos y mensajes preparados</h2>
+    {% if campaign.prospects.all %}
+    <table>
+        <thead><tr><th>Prospecto</th><th>Pipeline</th><th>Web</th><th>Score / razón</th><th>Mensaje</th><th>Acción</th></tr></thead>
+        <tbody>
+        {% for prospect in campaign.prospects.all %}
+            {% with snapshot=prospect.web_snapshots.first analysis=prospect.analyses.first message=prospect.outbound_messages.first %}
+            <tr>
+                <td>{{ prospect.name }}<br><small>{{ prospect.emails.first.normalized_email|default:"—" }}</small></td>
+                <td>{{ prospect.get_pipeline_state_display }}{% if prospect.last_error %}<br><small>{{ prospect.last_error }}</small>{% endif %}</td>
+                <td>{% if snapshot %}{{ snapshot.get_status_display }} · {{ snapshot.pages|length }} pág.{% else %}—{% endif %}</td>
+                <td>{% if analysis and analysis.status == "VALID" %}{{ analysis.relevance_score }} · {{ analysis.relevance_reason }}{% elif analysis %}Error: {{ analysis.error }}{% else %}—{% endif %}</td>
+                <td>{% if message %}<strong>{{ message.subject }}</strong><br><small>{{ message.get_state_display }}</small>{% else %}—{% endif %}</td>
+                <td>
+                    {% if snapshot and not message or message.state == "PREPARED" or message.state == "CANCELLED" %}
+                    <form method="post" action="{% url 'prospect-regenerate' campaign.pk prospect.pk %}">
+                        {% csrf_token %}<button type="submit">Regenerar</button>
+                    </form>
+                    {% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endwith %}
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p>Todavía no hay prospectos.</p>{% endif %}
+</section>
+
 <div class="grid">
     <section><h2>Rubros</h2><ul>{% for item in campaign.category_selections.all %}<li>{{ item.name_snapshot }}</li>{% endfor %}</ul></section>
     <section><h2>Zonas</h2><ul>{% for item in campaign.zone_selections.all %}<li>{{ item.name_snapshot }}</li>{% endfor %}</ul></section>
