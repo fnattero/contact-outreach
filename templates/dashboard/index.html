@@ -12,6 +12,18 @@
 
 <p><a class="button" href="{% url 'campaign-create' %}">Crear campaña</a></p>
 
+<form method="get" class="card filters">
+    <div><label for="dashboard-campaign">Métricas de campaña</label><select id="dashboard-campaign" name="campaign"><option value="">Todas</option>{% for campaign in campaigns %}<option value="{{ campaign.pk }}" {% if selected_campaign == campaign.pk|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>{% endfor %}</select></div>
+    <div class="actions"><button type="submit">Aplicar</button><a class="button secondary" href="{% url 'dashboard' %}">Ver todas</a></div>
+</form>
+
+<section class="grid" aria-label="Métricas operativas">
+    <article class="card"><h2>Descubrimiento</h2><p>{{ metrics.raw }} crudos</p><p>{{ metrics.with_email }} con email · {{ metrics.duplicates }} duplicados</p></article>
+    <article class="card"><h2>Calificación</h2><p>{{ metrics.qualified }} calificados</p><p>{{ metrics.irrelevant }} irrelevantes · {{ metrics.failed }} errores</p></article>
+    <article class="card"><h2>Entrega</h2><p>{{ metrics.queued }} en cola</p><p>{{ metrics.sent }} enviados · {{ metrics.simulated }} simulados</p></article>
+    <article class="card"><h2>Engagement</h2><p>{{ metrics.responded }} respondidos</p><p>{{ metrics.interested }} interesados</p></article>
+</section>
+
 <section class="grid" aria-label="Estado de la aplicación">
     <article class="card">
         <h2>Modo de envío</h2>
@@ -31,6 +43,11 @@
                 <li>{{ label }}: <strong>{{ provider }}</strong></li>
             {% endfor %}
         </ul>
+    </article>
+    <article class="card">
+        <h2>Jobs</h2>
+        {% if jobs %}<ul>{% for state, total in jobs.items %}<li>{{ state }}: <strong>{{ total }}</strong></li>{% endfor %}</ul>{% else %}<p>Sin jobs registrados.</p>{% endif %}
+        <p><a href="{% url 'jobs' %}">Ver progreso y errores</a></p>
     </article>
 </section>
 

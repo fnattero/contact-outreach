@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import errno
+from collections import namedtuple
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
@@ -13,6 +16,7 @@ from django.urls import reverse
 from apps.audit.models import AuditEvent
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import create_catalog, verify_catalog
+from apps.catalogs.storage import private_catalog_storage
 
 
 def pdf_upload(
@@ -22,6 +26,36 @@ def pdf_upload(
     content_type: str = "application/pdf",
 ) -> SimpleUploadedFile:
     return SimpleUploadedFile(name, content, content_type=content_type)
+
+
+@pytest.mark.django_db
+def test_catalog_upload_rejects_low_disk_without_partial_file(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    usage = namedtuple("usage", "total used free")(100, 99, 1)
+    with patch("apps.catalogs.services.shutil.disk_usage", return_value=usage):
+        with pytest.raises(ValidationError, match="espacio seguro"):
+            create_catalog(name="Sin espacio", upload=pdf_upload(), actor=owner)
+    assert not any(private_catalog_dir.rglob("*.pdf"))
+
+
+@pytest.mark.django_db
+def test_catalog_upload_removes_file_created_before_enospc(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    def partial_write(name: str, content: object) -> str:
+        del content
+        path = Path(private_catalog_storage.path(name))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-partial")
+        raise OSError(errno.ENOSPC, "disk full")
+
+    with patch.object(private_catalog_storage, "_save", side_effect=partial_write):
+        with pytest.raises(ValidationError, match="sin espacio"):
+            create_catalog(name="Disco lleno", upload=pdf_upload(), actor=owner)
+
+    assert not any(private_catalog_dir.rglob("*.pdf"))
+    assert not Catalog.objects.exists()
 
 
 @pytest.mark.django_db

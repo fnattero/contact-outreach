@@ -11,3 +11,17 @@ class ManualReplyForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 8, "autocomplete": "off"}),
     )
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput())
+
+
+class FakeInboundForm(forms.Form):
+    outbound_id = forms.UUIDField(label="Envío fake confirmado")
+    scenario = forms.ChoiceField(
+        label="Escenario",
+        choices=(
+            ("INTERESTED", "Interesado"),
+            ("NOT_INTERESTED", "No interesado"),
+            ("UNSUBSCRIBE", "Baja"),
+            ("AUTO_REPLY", "Respuesta automática"),
+            ("BOUNCE", "Rebote"),
+        ),
+    )

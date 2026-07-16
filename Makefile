@@ -1,4 +1,4 @@
-.PHONY: build up down logs lint typecheck test test-e2e check migrate owner demo smoke-worker
+.PHONY: build up down logs lint typecheck test test-e2e check migrate owner demo smoke-worker backup restore
 
 COMPOSE := docker compose
 
@@ -42,3 +42,9 @@ demo:
 
 smoke-worker:
 	$(COMPOSE) exec web python src/manage.py check_worker
+
+backup:
+	./scripts/backup.sh $(BACKUP_ROOT)
+
+restore:
+	./scripts/restore.sh --confirm $(BACKUP)

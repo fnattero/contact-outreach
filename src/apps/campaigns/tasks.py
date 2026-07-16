@@ -4,6 +4,8 @@ import uuid
 
 from celery import shared_task
 
+from apps.audit.models import BackgroundJob
+from apps.audit.services import finish_job, start_job
 from apps.campaigns.extraction import (
     advance_search_run,
     ensure_next_search_run,
@@ -26,15 +28,40 @@ def orchestrate_extraction(campaign_id: str) -> str | None:
 
 @shared_task(name="campaigns.advance_extraction_run")  # type: ignore[untyped-decorator]
 def advance_extraction_run(run_id: str) -> str:
-    run = advance_search_run(uuid.UUID(run_id))
-    if run.state == SearchRun.State.SUCCEEDED:
-        for reservation in reserve_run_prospects(run):
-            process_prospect_pipeline.delay(
-                str(reservation.prospect_id),
-                reservation_token=reservation.token,
+    job = start_job(
+        idempotency_key=f"extract:{run_id}",
+        task_name="campaigns.advance_extraction_run",
+        entity_type="SearchRun",
+        entity_id=run_id,
+        queue="extraction",
+    )
+    try:
+        run = advance_search_run(uuid.UUID(run_id))
+        if run.state == SearchRun.State.SUCCEEDED:
+            for reservation in reserve_run_prospects(run):
+                process_prospect_pipeline.delay(
+                    str(reservation.prospect_id),
+                    reservation_token=reservation.token,
+                )
+            orchestrate_extraction.delay(str(run.campaign_id))
+            finish_job(job)
+        elif run.state == SearchRun.State.RETRY_WAIT:
+            finish_job(
+                job,
+                state=BackgroundJob.State.RETRY_WAIT,
+                error=run.error,
+                next_retry_at=run.next_poll_at,
             )
-        orchestrate_extraction.delay(str(run.campaign_id))
-    return run.state
+        elif run.state == SearchRun.State.FAILED_PERMANENT:
+            finish_job(job, state=BackgroundJob.State.FAILED, error=run.error)
+        elif run.state == SearchRun.State.CANCELLED:
+            finish_job(job, state=BackgroundJob.State.CANCELLED)
+        else:
+            finish_job(job, state=BackgroundJob.State.PENDING)
+        return run.state
+    except Exception as exc:
+        finish_job(job, state=BackgroundJob.State.FAILED, error=exc)
+        raise
 
 
 @shared_task(name="campaigns.recover_extraction_runs")  # type: ignore[untyped-decorator]

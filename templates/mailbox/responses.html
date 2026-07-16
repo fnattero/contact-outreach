@@ -3,8 +3,17 @@
 {% block title %}Respuestas · Contact Outreach{% endblock %}
 
 {% block content %}
-<h1>Respuestas de campañas</h1>
+<div class="actions"><h1>Respuestas de campañas</h1><a class="button" href="{% url 'responses-export' %}?{{ request.GET.urlencode }}">Exportar CSV</a></div>
 <p class="muted">Sólo se muestran mensajes asociados a un thread ID o a cabeceras RFC de envíos propios.</p>
+<form method="get" class="card filters" role="search">
+    <div><label for="response-q">Buscar remitente, asunto, texto o prospecto</label><input id="response-q" type="search" name="q" value="{{ request.GET.q }}"></div>
+    <div><label for="response-campaign">Campaña</label><select id="response-campaign" name="campaign"><option value="">Todas</option>{% for campaign in campaigns %}<option value="{{ campaign.pk }}" {% if request.GET.campaign == campaign.pk|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>{% endfor %}</select></div>
+    <div><label for="response-classification">Clasificación</label><select id="response-classification" name="classification"><option value="">Todas</option>{% for value, label in classifications %}<option value="{{ value }}" {% if request.GET.classification == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="response-interest">Interés</label><select id="response-interest" name="interest"><option value="">Todo</option><option value="human" {% if request.GET.interest == "human" %}selected{% endif %}>Respondidas por persona</option><option value="interested" {% if request.GET.interest == "interested" %}selected{% endif %}>Interesadas</option></select></div>
+    <div><label for="response-from">Desde</label><input id="response-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
+    <div><label for="response-to">Hasta</label><input id="response-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
+    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{% url 'responses' %}">Limpiar</a></div>
+</form>
 
 {% if responses %}
 <table>
@@ -22,6 +31,7 @@
     {% endfor %}
     </tbody>
 </table>
+{% include "includes/pagination.html" %}
 {% else %}
 <p class="card">Todavía no hay respuestas asociadas a campañas.</p>
 {% endif %}

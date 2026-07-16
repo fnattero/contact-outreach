@@ -80,3 +80,6 @@ Raw extractor y snapshots web tienen retención inicial de 180 días. Supresione
 - Identidad legal, domicilio, reply-to y BAJA completos; revisión legal registrada externamente.
 - Catálogo hash válido, Gmail test exitoso, límites conservadores y supresión cargada.
 - Backup y restore probados; kill switch comprobado antes de desactivarlo.
+- `verify_restore` confirma migraciones, hashes, margen de disco y descifrado de refresh tokens con
+  el kill switch activo; la clave de cifrado tiene backup separado.
+- Confirmaciones UI revisadas para iniciar, pausar, reanudar, cancelar y seleccionar campaña LIVE.

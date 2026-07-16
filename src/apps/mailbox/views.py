@@ -4,18 +4,24 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db.models import Q
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.campaigns.models import OutboundMessage
+from apps.dashboard.csv_export import csv_download
+from apps.dashboard.queries import owner_campaigns, response_queryset
 from apps.integrations.contracts import ProviderError
-from apps.mailbox.forms import ManualReplyForm
+from apps.integrations.fakes import FakeGmailProvider
+from apps.mailbox.forms import FakeInboundForm, ManualReplyForm
 from apps.mailbox.manual import authorize_manual_reply
 from apps.mailbox.models import GmailConnection, InboundMessage
 from apps.mailbox.services import (
@@ -24,9 +30,10 @@ from apps.mailbox.services import (
     disconnect_gmail,
     oauth_material,
     oauth_redirect_uri,
+    provider_for_connection,
     test_gmail_connection,
 )
-from apps.mailbox.tasks import deliver_manual_reply_task
+from apps.mailbox.tasks import deliver_manual_reply_task, sync_gmail_connection_task
 
 OAUTH_STATE_SESSION_KEY = "gmail_oauth_state"
 OAUTH_VERIFIER_SESSION_KEY = "gmail_oauth_verifier"
@@ -46,7 +53,22 @@ def gmail_settings(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
     connection = GmailConnection.objects.filter(owner=owner).first()
-    return render(request, "mailbox/settings.html", {"connection": connection})
+    fake_outbound = OutboundMessage.objects.none()
+    if settings.GMAIL_PROVIDER == "fake":
+        fake_outbound = OutboundMessage.objects.filter(
+            campaign__created_by=owner,
+            state=OutboundMessage.State.SENT,
+        ).select_related("campaign", "prospect")
+    return render(
+        request,
+        "mailbox/settings.html",
+        {
+            "connection": connection,
+            "fake_mode": settings.GMAIL_PROVIDER == "fake",
+            "fake_outbound": fake_outbound,
+            "fake_form": FakeInboundForm(),
+        },
+    )
 
 
 @login_required
@@ -132,11 +154,99 @@ def gmail_disconnect(request: HttpRequest) -> HttpResponse:
 def response_list(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
-    responses = InboundMessage.objects.filter(connection__owner=owner).select_related(
-        "related_outbound__campaign",
-        "related_outbound__prospect",
+    responses = response_queryset(request.GET, owner_id=owner.pk)
+    page = Paginator(responses, 25).get_page(request.GET.get("page"))
+    query = request.GET.copy()
+    query.pop("page", None)
+    return render(
+        request,
+        "mailbox/responses.html",
+        {
+            "responses": page,
+            "page_obj": page,
+            "query_string": query.urlencode(),
+            "campaigns": owner_campaigns(owner.pk),
+            "classifications": InboundMessage.Classification.choices,
+        },
     )
-    return render(request, "mailbox/responses.html", {"responses": responses})
+
+
+@login_required
+def response_export(request: HttpRequest) -> HttpResponse:
+    owner = request.user
+    assert isinstance(owner, User)
+    rows = response_queryset(request.GET, owner_id=owner.pk)
+    return csv_download(
+        filename="respuestas.csv",
+        headers=(
+            "fecha",
+            "campaña",
+            "prospecto",
+            "remitente",
+            "asunto",
+            "clasificación",
+            "humana",
+        ),
+        rows=(
+            (
+                item.external_at,
+                item.related_outbound.campaign.name,
+                item.related_outbound.prospect.name,
+                item.sender,
+                item.subject,
+                item.get_classification_display(),
+                "sí" if item.is_human else "no",
+            )
+            for item in rows
+        ),
+    )
+
+
+@login_required
+@require_POST
+def fake_inbound(request: HttpRequest) -> HttpResponse:
+    if settings.GMAIL_PROVIDER != "fake":
+        raise Http404
+    owner = request.user
+    assert isinstance(owner, User)
+    form = FakeInboundForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Elegí un envío y un escenario fake válido.")
+        return redirect("gmail-settings")
+    outbound = get_object_or_404(
+        OutboundMessage.objects.select_related("campaign", "prospect"),
+        pk=form.cleaned_data["outbound_id"],
+        campaign__created_by=owner,
+        state=OutboundMessage.State.SENT,
+    )
+    connection = get_object_or_404(
+        GmailConnection,
+        owner=owner,
+        status=GmailConnection.Status.CONNECTED,
+    )
+    provider = provider_for_connection(connection, persist_fake=True)
+    if not isinstance(provider, FakeGmailProvider):
+        raise Http404
+    scenario = form.cleaned_data["scenario"]
+    bodies = {
+        "INTERESTED": "Sí, me interesa. Podemos coordinar una visita.",
+        "NOT_INTERESTED": "No me interesa por el momento.",
+        "UNSUBSCRIBE": "Solicito la BAJA y no recibir más mensajes.",
+        "AUTO_REPLY": "Respuesta automática: estoy fuera de la oficina.",
+        "BOUNCE": "Permanent failure: user unknown.",
+    }
+    provider.inject_inbound(
+        thread_id=outbound.gmail_thread_id,
+        sender=outbound.recipient_normalized,
+        recipient=connection.email,
+        subject=f"Re: {outbound.subject}",
+        body_text=bodies[scenario],
+        in_reply_to=outbound.message_id,
+        references=(outbound.message_id,),
+    )
+    sync_gmail_connection_task.delay(str(connection.pk))
+    messages.success(request, "Respuesta fake inyectada y sincronización solicitada.")
+    return redirect("responses")
 
 
 @login_required

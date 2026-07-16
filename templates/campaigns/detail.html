@@ -9,14 +9,14 @@
 
 <div class="actions">
     {% if campaign.state == "DRAFT" %}
-        <form method="post" action="{% url 'campaign-action' campaign.pk 'start' %}">{% csrf_token %}<button type="submit">Iniciar</button></form>
+        <details class="confirm"><summary>Iniciar campaña</summary><p>Iniciar congela la configuración y autoriza el pipeline. Si la campaña es LIVE y las barreras externas están habilitadas, autoriza primeros envíos.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'start' %}">{% csrf_token %}<button type="submit">Confirmar inicio</button></form></details>
     {% elif campaign.state == "RUNNING" %}
-        <form method="post" action="{% url 'campaign-action' campaign.pk 'pause' %}">{% csrf_token %}<button type="submit">Pausar</button></form>
+        <details class="confirm"><summary>Pausar campaña</summary><p>No se tomarán tareas nuevas; los efectos ya aceptados por un proveedor no se revierten.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'pause' %}">{% csrf_token %}<label for="pause-reason">Motivo</label><input id="pause-reason" name="reason" required><button type="submit">Confirmar pausa</button></form></details>
     {% elif campaign.state == "PAUSED" %}
-        <form method="post" action="{% url 'campaign-action' campaign.pk 'resume' %}">{% csrf_token %}<button type="submit">Reanudar</button></form>
+        <details class="confirm"><summary>Reanudar campaña</summary><p>Se vuelven a validar catálogo, proveedores y controles live antes de continuar.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'resume' %}">{% csrf_token %}<button type="submit">Confirmar reanudación</button></form></details>
     {% endif %}
     {% if campaign.state == "DRAFT" or campaign.state == "RUNNING" or campaign.state == "PAUSED" %}
-        <form method="post" action="{% url 'campaign-action' campaign.pk 'cancel' %}">{% csrf_token %}<button class="danger" type="submit">Cancelar</button></form>
+        <details class="confirm"><summary>Cancelar campaña</summary><p>La cancelación es terminal y no revierte correos ya aceptados por Gmail.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'cancel' %}">{% csrf_token %}<label for="cancel-reason">Motivo</label><input id="cancel-reason" name="reason" required><button class="danger" type="submit">Confirmar cancelación</button></form></details>
     {% endif %}
 </div>
 
@@ -26,6 +26,8 @@
     <article class="card"><h2>Análisis</h2><p>Umbral: {{ campaign.relevance_threshold }}</p><p>Extractor: {{ campaign.extractor_provider }}</p><p>IA: {{ campaign.llm_provider }} / {{ campaign.llm_model }}</p></article>
     <article class="card"><h2>Catálogo</h2><p>{{ campaign.catalog }}</p><p><code>{{ campaign.catalog.sha256|slice:":16" }}…</code></p></article>
 </section>
+
+<p class="actions"><a class="button secondary" href="{% url 'prospects' %}?campaign={{ campaign.pk }}">Filtrar prospectos</a><a class="button secondary" href="{% url 'outbound-messages' %}?campaign={{ campaign.pk }}">Filtrar envíos</a><a class="button secondary" href="{% url 'responses' %}?campaign={{ campaign.pk }}">Filtrar respuestas</a></p>
 
 <section class="card">
     <h2>Ejecuciones de extracción</h2>

@@ -4,7 +4,7 @@ from django.contrib.auth.views import LogoutView
 from django.urls import path
 
 from apps.accounts.views import ThrottledLoginView
-from apps.audit.views import audit_log
+from apps.audit.views import audit_log, job_list, retry_job
 from apps.campaigns.views import (
     campaign_action,
     campaign_create,
@@ -21,15 +21,23 @@ from apps.configuration.views import (
     toggle_item,
     zones,
 )
-from apps.dashboard.views import dashboard
-from apps.health.views import liveness, readiness
+from apps.dashboard.views import (
+    dashboard,
+    outbound_export,
+    outbound_list,
+    prospect_export,
+    prospect_list,
+)
+from apps.health.views import degraded, liveness, readiness
 from apps.mailbox.views import (
+    fake_inbound,
     gmail_connect,
     gmail_disconnect,
     gmail_oauth_callback,
     gmail_settings,
     gmail_test,
     manual_reply,
+    response_export,
     response_list,
     response_thread,
 )
@@ -38,6 +46,10 @@ urlpatterns = [
     path("login/", ThrottledLoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("", dashboard, name="dashboard"),
+    path("prospectos/", prospect_list, name="prospects"),
+    path("prospectos/exportar.csv", prospect_export, name="prospects-export"),
+    path("envios/", outbound_list, name="outbound-messages"),
+    path("envios/exportar.csv", outbound_export, name="outbound-export"),
     path("perfil/", business_profile, name="business-profile"),
     path("rubros/", categories, name="categories"),
     path("zonas/", zones, name="zones"),
@@ -56,12 +68,16 @@ urlpatterns = [
     path("campanas/<uuid:campaign_id>/<str:action>/", campaign_action, name="campaign-action"),
     path("supresiones/", suppression_list, name="suppressions"),
     path("auditoria/", audit_log, name="audit-log"),
+    path("jobs/", job_list, name="jobs"),
+    path("jobs/<uuid:job_id>/reintentar/", retry_job, name="job-retry"),
     path("gmail/", gmail_settings, name="gmail-settings"),
     path("gmail/conectar/", gmail_connect, name="gmail-connect"),
     path("gmail/oauth/callback/", gmail_oauth_callback, name="gmail-oauth-callback"),
     path("gmail/probar/", gmail_test, name="gmail-test"),
     path("gmail/desconectar/", gmail_disconnect, name="gmail-disconnect"),
+    path("gmail/fake/respuesta/", fake_inbound, name="gmail-fake-inbound"),
     path("respuestas/", response_list, name="responses"),
+    path("respuestas/exportar.csv", response_export, name="responses-export"),
     path("respuestas/<uuid:inbound_id>/", response_thread, name="response-thread"),
     path(
         "respuestas/<uuid:inbound_id>/enviar/",
@@ -71,4 +87,10 @@ urlpatterns = [
     path("health/", liveness, name="health"),
     path("health/live/", liveness, name="health-live"),
     path("health/ready/", readiness, name="health-ready"),
+    path("health/degraded/", degraded, name="health-degraded"),
 ]
+
+handler400 = "apps.core.views.bad_request"
+handler403 = "apps.core.views.permission_denied"
+handler404 = "apps.core.views.page_not_found"
+handler500 = "apps.core.views.server_error"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django import forms
 
 from apps.campaigns.models import Campaign
@@ -18,6 +20,13 @@ WEEKDAY_CHOICES = (
 
 
 class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
+    confirm_live = forms.BooleanField(
+        required=False,
+        label=(
+            "Confirmo que revisé el checklist live y que una campaña LIVE puede enviar "
+            "correos reales si los controles de despliegue también están habilitados"
+        ),
+    )
     categories = forms.ModelMultipleChoiceField(
         queryset=SearchCategory.objects.filter(active=True, archived_at__isnull=True),
         label="Rubros",
@@ -79,3 +88,11 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
 
     def clean_weekdays(self) -> list[int]:
         return [int(day) for day in self.cleaned_data["weekdays"]]
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        if cleaned.get("delivery_mode") == Campaign.DeliveryMode.LIVE and not cleaned.get(
+            "confirm_live"
+        ):
+            self.add_error("confirm_live", "Confirmá explícitamente antes de habilitar modo live.")
+        return cleaned

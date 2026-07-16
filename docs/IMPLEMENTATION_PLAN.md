@@ -26,6 +26,12 @@ baja/rebote. También incorpora el hilo cronológico y la respuesta manual idemp
 POST, revalida elegibilidad bajo lock y reconcilia ambigüedades, mientras el scheduler general nunca
 convierte mensajes entrantes en respuestas. Esto
 completa evidencia de FR-11 y FR-13 y amplía FR-12, FR-14, FR-15 y FR-17.
+El incremento de fases 11–12 completa métricas derivadas, filtros/búsqueda/paginación, CSV seguro,
+progreso de jobs, retry manual sobre la misma entidad, logs JSON correlacionados/redactados,
+pantallas de error, health degradado, ENOSPC, confirmaciones de acciones/live, simulación fake desde
+UI, backup/restore con checksums y verificación de catálogos/tokens. La aceptación fake completa y
+los runbooks están en `tests/e2e/`, `docs/OPERATIONS.md` y `docs/HARDENING_AUDIT.md`. Esto completa
+evidencia de FR-14, FR-15, FR-16, FR-17, OPS-02 y QA-01 sin cambiar la arquitectura.
 El objetivo
 calificado corta sobre prospectos `QUEUED` creados por el análisis sobre umbral; nunca se cuenta
 `EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch permanecen como controles de

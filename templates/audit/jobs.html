@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Jobs · Contact Outreach{% endblock %}
+{% block content %}
+<h1>Jobs y progreso</h1>
+<p class="muted">Los reintentos visibles reutilizan la misma entidad e idempotency key. Una entrega ambigua se reconcilia y nunca aparece como reintento manual.</p>
+<form method="get" class="card filters" role="search">
+    <div><label for="job-q">Buscar tarea, entidad o error</label><input id="job-q" type="search" name="q" value="{{ request.GET.q }}"></div>
+    <div><label for="job-state">Estado</label><select id="job-state" name="state"><option value="">Todos</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="job-queue">Cola</label><select id="job-queue" name="queue"><option value="">Todas</option>{% for queue in queues %}<option value="{{ queue }}" {% if request.GET.queue == queue %}selected{% endif %}>{{ queue }}</option>{% endfor %}</select></div>
+    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{% url 'jobs' %}">Limpiar</a></div>
+</form>
+<div class="table-scroll"><table><thead><tr><th>Tarea</th><th>Entidad</th><th>Estado</th><th>Intentos</th><th>Heartbeat / próximo</th><th>Diagnóstico</th><th>Acción segura</th></tr></thead><tbody>
+{% for job in jobs %}<tr><td>{{ job.task_name }}<br><small>{{ job.queue }}</small></td><td>{{ job.entity_type }}<br><code>{{ job.entity_id }}</code></td><td>{{ job.get_state_display }}</td><td>{{ job.attempts }}</td><td>{{ job.heartbeat_at|default:"—" }}<br><small>{{ job.next_retry_at|default:"Sin reintento programado" }}</small></td><td>{{ job.error|default:"—" }}</td><td>{% if job.state == "FAILED" and job.entity_type == "OutboundMessage" %}<details class="confirm"><summary>Reintentar</summary><p>Confirmá sólo después de corregir la causa. Se reutilizará el mismo Message-ID.</p><form method="post" action="{% url 'job-retry' job.pk %}">{% csrf_token %}<label for="reason-{{ job.pk }}">Causa corregida</label><textarea id="reason-{{ job.pk }}" name="reason" required minlength="10" rows="2"></textarea><button type="submit">Confirmar reintento</button></form></details>{% else %}Automático o no reintentable{% endif %}</td></tr>
+{% empty %}<tr><td colspan="7">No hay jobs para estos filtros.</td></tr>{% endfor %}</tbody></table></div>
+{% include "includes/pagination.html" %}
+{% endblock %}

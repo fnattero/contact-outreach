@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Envíos · Contact Outreach{% endblock %}
+{% block content %}
+<div class="actions"><h1>Preparados y enviados</h1><a class="button" href="{% url 'outbound-export' %}?{{ request.GET.urlencode }}">Exportar CSV</a></div>
+{% include "dashboard/_filters.html" %}
+<p class="muted">{{ page_obj.paginator.count }} resultado{{ page_obj.paginator.count|pluralize }}. “Simulado” nunca llamó Gmail.</p>
+<div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Campaña / prospecto</th><th>Destinatario</th><th>Asunto</th><th>Tipo</th><th>Estado</th><th>Diagnóstico</th></tr></thead><tbody>
+{% for message in page_obj %}<tr><td>{{ message.sent_at|default:message.simulated_at|default:message.created_at }}</td><td><a href="{% url 'campaign-detail' message.campaign_id %}">{{ message.campaign.name }}</a><br><small>{{ message.prospect.name }}</small></td><td>{{ message.recipient_normalized }}</td><td>{{ message.subject }}</td><td>{{ message.get_kind_display }}</td><td>{{ message.get_state_display }}</td><td>{{ message.error|default:"—" }}{% if message.state == "SEND_FAILED" %}<br><a href="{% url 'jobs' %}?q={{ message.pk }}">Reintento seguro</a>{% endif %}</td></tr>
+{% empty %}<tr><td colspan="7">No hay mensajes para estos filtros.</td></tr>{% endfor %}</tbody></table></div>
+{% include "includes/pagination.html" %}
+{% endblock %}

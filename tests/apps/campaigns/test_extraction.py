@@ -10,6 +10,8 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 
+from apps.audit.models import BackgroundJob
+from apps.campaigns import tasks as campaign_tasks
 from apps.campaigns.extraction import advance_search_run, ensure_next_search_run
 from apps.campaigns.models import Campaign, ProviderUsage, SearchQuery, SearchRun
 from apps.campaigns.services import create_campaign, transition_campaign
@@ -325,6 +327,59 @@ def test_pause_and_cancel_prevent_provider_effects_and_keep_runs_recoverable(
     )
     assert result.state == SearchRun.State.CANCELLED
     assert provider.submit_calls == 1
+
+
+@pytest.mark.django_db
+def test_cancelled_extraction_run_finishes_observability_job(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign = _campaign(owner)
+    run = ensure_next_search_run(campaign.pk)
+    assert run is not None
+    transition_campaign(
+        campaign_id=campaign.pk,
+        target_state=Campaign.State.CANCELLED,
+        actor=owner,
+    )
+
+    assert campaign_tasks.advance_extraction_run(str(run.pk)) == SearchRun.State.CANCELLED
+
+    job = BackgroundJob.objects.get(idempotency_key=f"extract:{run.pk}")
+    assert job.state == BackgroundJob.State.CANCELLED
+    assert job.finished_at is not None
+
+
+@pytest.mark.django_db
+def test_extraction_dispatch_failure_finishes_observability_job(
+    monkeypatch: pytest.MonkeyPatch,
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    campaign = _campaign(owner)
+    run = ensure_next_search_run(campaign.pk)
+    assert run is not None
+    completed = advance_search_run(
+        run.pk,
+        provider=MockExtractorProvider(),
+        resolver=MockMXResolver(),
+    )
+    monkeypatch.setattr(campaign_tasks, "advance_search_run", lambda run_id: completed)
+    monkeypatch.setattr(campaign_tasks, "reserve_run_prospects", lambda current: ())
+
+    def dispatch_failure(campaign_id: str) -> None:
+        del campaign_id
+        raise RuntimeError("Redis no disponible")
+
+    monkeypatch.setattr(campaign_tasks.orchestrate_extraction, "delay", dispatch_failure)
+
+    with pytest.raises(RuntimeError, match="Redis no disponible"):
+        campaign_tasks.advance_extraction_run(str(run.pk))
+
+    job = BackgroundJob.objects.get(idempotency_key=f"extract:{run.pk}")
+    assert job.state == BackgroundJob.State.FAILED
+    assert job.finished_at is not None
 
 
 class MultiEmailProvider(MockExtractorProvider):

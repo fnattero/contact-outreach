@@ -4,6 +4,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -42,10 +44,25 @@ CAMPAIGN_VALUE_FIELDS = (
 
 @login_required
 def campaign_list(request: HttpRequest) -> HttpResponse:
+    owner = request.user
+    assert isinstance(owner, User)
+    campaigns = Campaign.objects.select_related("catalog", "created_by").filter(created_by=owner)
+    if query := request.GET.get("q", "").strip():
+        campaigns = campaigns.filter(Q(name__icontains=query) | Q(location_text__icontains=query))
+    if state := request.GET.get("state", ""):
+        campaigns = campaigns.filter(state=state)
+    page = Paginator(campaigns, 25).get_page(request.GET.get("page"))
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
     return render(
         request,
         "campaigns/list.html",
-        {"campaigns": Campaign.objects.select_related("catalog", "created_by")},
+        {
+            "campaigns": page,
+            "page_obj": page,
+            "query_string": query_params.urlencode(),
+            "states": Campaign.State.choices,
+        },
     )
 
 

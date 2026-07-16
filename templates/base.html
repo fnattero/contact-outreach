@@ -35,14 +35,27 @@
         .checkbox-list ul { columns: 2; list-style: none; padding: 0; }
         .auth { max-width: 25rem; margin: 4rem auto; }
         .errorlist { color: #9d1c1c; }
+        .error-text { color: #9d1c1c; }
+        .table-scroll { overflow-x: auto; }
+        .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.8rem; align-items: end; margin-bottom: 1rem; }
+        .filters .actions { align-items: end; }
+        .pagination { color: inherit; margin-top: 1rem; justify-content: center; }
+        .pagination a { color: white; }
+        :focus-visible { outline: 3px solid #f0a500; outline-offset: 2px; }
+        .skip-link { position: absolute; left: -9999px; }
+        .skip-link:focus { left: 1rem; top: 1rem; background: white; color: #172033; padding: 0.7rem; z-index: 10; }
+        details.confirm { background: white; border: 1px solid #dce2ec; border-radius: 0.4rem; padding: 0.5rem; }
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
     <header>
         <nav aria-label="Navegación principal">
             <a href="{% url 'dashboard' %}">Contact Outreach</a>
             {% if user.is_authenticated %}
                 <a href="{% url 'campaigns' %}">Campañas</a>
+                <a href="{% url 'prospects' %}">Prospectos</a>
+                <a href="{% url 'outbound-messages' %}">Envíos</a>
                 <a href="{% url 'business-profile' %}">Perfil</a>
                 <a href="{% url 'categories' %}">Rubros</a>
                 <a href="{% url 'zones' %}">Zonas</a>
@@ -51,6 +64,7 @@
                 <a href="{% url 'responses' %}">Respuestas</a>
                 <a href="{% url 'suppressions' %}">Supresiones</a>
                 <a href="{% url 'audit-log' %}">Auditoría</a>
+                <a href="{% url 'jobs' %}">Jobs</a>
                 <span class="pill">{{ runtime_send_mode }} · kill switch {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}</span>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
@@ -59,9 +73,9 @@
             {% endif %}
         </nav>
     </header>
-    <main>
+    <main id="main-content" tabindex="-1">
         {% if messages %}
-            <ul class="messages">
+            <ul class="messages" role="status" aria-live="polite">
                 {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
             </ul>
         {% endif %}

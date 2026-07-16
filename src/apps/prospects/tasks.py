@@ -7,6 +7,8 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 
+from apps.audit.models import BackgroundJob
+from apps.audit.services import finish_job, start_job
 from apps.prospects.analysis import analyze_prospect
 from apps.prospects.enrichment import enrich_prospect
 from apps.prospects.exceptions import ProspectPipelineInactive, StaleProspectAnalysis
@@ -29,6 +31,16 @@ def process_prospect_pipeline(
     analysis_generation: int | None = None,
 ) -> str:
     prospect = Prospect.objects.get(pk=uuid.UUID(prospect_id))
+    generation = (
+        analysis_generation if analysis_generation is not None else prospect.analysis_generation
+    )
+    job = start_job(
+        idempotency_key=f"pipeline:{prospect_id}:{generation}",
+        task_name="prospects.process_pipeline",
+        entity_type="Prospect",
+        entity_id=prospect_id,
+        queue="analysis",
+    )
     actor = User.objects.filter(pk=actor_id).first() if actor_id is not None else None
     token = reservation_token
     if not token:
@@ -44,9 +56,11 @@ def process_prospect_pipeline(
             manual=actor is not None,
         )
         if reservation is None:
+            finish_job(job)
             return prospect.pipeline_state
         token = reservation.token
     if not claim_prospect_pipeline(prospect.pk, token=token, manual=actor is not None):
+        finish_job(job)
         return prospect.pipeline_state
     try:
         if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
@@ -80,8 +94,22 @@ def process_prospect_pipeline(
                     },
                     countdown=countdown,
                 )
+            finish_job(
+                job,
+                state=BackgroundJob.State.RETRY_WAIT,
+                error=analysis.error,
+                next_retry_at=analysis.next_retry_at,
+            )
+        elif analysis.status == AIAnalysis.Status.ERROR:
+            finish_job(job, state=BackgroundJob.State.FAILED, error=analysis.error)
+        else:
+            finish_job(job)
     except (ProspectPipelineInactive, StaleProspectAnalysis):
+        finish_job(job, state=BackgroundJob.State.CANCELLED)
         return prospect.pipeline_state
+    except Exception as exc:
+        finish_job(job, state=BackgroundJob.State.FAILED, error=exc)
+        raise
     finally:
         clear_prospect_pipeline_reservation(prospect.pk, token=token)
     return analysis.status

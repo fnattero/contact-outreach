@@ -5,6 +5,8 @@ from unittest.mock import Mock
 import pytest
 from django.contrib.auth.models import User
 
+from apps.audit.models import BackgroundJob
+from apps.integrations.contracts import AuthenticationError, RetryableProviderError
 from apps.mailbox import tasks
 from apps.mailbox.models import GmailConnection
 
@@ -47,6 +49,56 @@ def test_sync_scheduler_dispatches_connected_account(
     monkeypatch.setattr(tasks.sync_gmail_connection_task, "delay", delay)
     assert tasks.sync_gmail_replies() == 1
     delay.assert_called_once_with(str(connection.pk))
+
+
+@pytest.mark.django_db
+def test_sync_job_marks_non_retryable_error_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    owner: User,
+) -> None:
+    connection = GmailConnection.objects.create(
+        owner=owner,
+        status=GmailConnection.Status.CONNECTED,
+    )
+
+    def authentication_failure(connection_id: str) -> int:
+        del connection_id
+        raise AuthenticationError("OAuth revocado")
+
+    monkeypatch.setattr(tasks, "sync_gmail_connection", authentication_failure)
+    with pytest.raises(AuthenticationError, match="OAuth revocado"):
+        tasks.sync_gmail_connection_task(str(connection.pk))
+
+    job = BackgroundJob.objects.get(idempotency_key=f"gmail-sync:{connection.pk}")
+    assert job.state == BackgroundJob.State.FAILED
+    assert job.finished_at is not None
+
+
+@pytest.mark.django_db
+def test_sync_job_marks_exhausted_retryable_error_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    owner: User,
+) -> None:
+    connection = GmailConnection.objects.create(
+        owner=owner,
+        status=GmailConnection.Status.CONNECTED,
+    )
+
+    def transient_failure(connection_id: str) -> int:
+        del connection_id
+        raise RetryableProviderError("Proveedor temporalmente fuera de servicio")
+
+    monkeypatch.setattr(tasks, "sync_gmail_connection", transient_failure)
+    tasks.sync_gmail_connection_task.push_request(retries=3)
+    try:
+        with pytest.raises(RetryableProviderError, match="temporalmente"):
+            tasks.sync_gmail_connection_task.run(str(connection.pk))
+    finally:
+        tasks.sync_gmail_connection_task.pop_request()
+
+    job = BackgroundJob.objects.get(idempotency_key=f"gmail-sync:{connection.pk}")
+    assert job.state == BackgroundJob.State.FAILED
+    assert job.finished_at is not None
 
 
 def test_manual_reply_tasks_only_dispatch_authorized_rows(

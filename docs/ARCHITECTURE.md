@@ -90,6 +90,11 @@ Los adaptadores activos se eligen por configuración: mocks por defecto, Outscra
 
 Logs estructurados incluyen correlation ID, campaña, job, proveedor, duración y código de error, nunca tokens/API keys ni cuerpos completos fuera de debug explícito y redactado. `ProviderUsage`, `BackgroundJob` y `AuditEvent` sustentan dashboard y diagnóstico.
 
+El middleware HTTP genera un correlation ID no confiado al cliente, lo devuelve en la respuesta y
+emite JSON por stdout sin query string ni body. Jobs proyecta checkpoints persistidos; el único
+retry manual es `SEND_FAILED -> QUEUED` sobre la misma fila, después de revalidar owner, campaña,
+email, supresión, catálogo y ausencia de confirmación Gmail.
+
 Health checks separados:
 
 - liveness del proceso;
@@ -97,6 +102,9 @@ Health checks separados:
 - estado degradado para Gmail/proveedores, sin marcar la web como caída.
 
 El backup consistente incluye PostgreSQL y volumen privado de catálogos; la clave de cifrado se respalda separadamente. Restore verifica migraciones, hashes de catálogo y capacidad de descifrar tokens antes de habilitar live.
+Los scripts publican backups sólo tras dump/copia/checksums completos, exigen confirmación para
+restore y rechazan live efectivo con kill switch desactivado. Health degradado informa margen de
+disco y configuración local sin hacer llamadas remotas.
 
 ## 8. Riesgos arquitectónicos
 

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q
@@ -800,6 +801,70 @@ def recoverable_message_ids(now: datetime | None = None) -> tuple[uuid.UUID, ...
             next_attempt_at__lte=moment,
         ).values_list("pk", flat=True)
     )
+
+
+@transaction.atomic
+def retry_failed_message(
+    message_id: uuid.UUID | str,
+    *,
+    actor: User,
+    reason: str,
+) -> OutboundMessage:
+    """Requeue the same logical message only after an explicit, audited operator decision."""
+
+    message = (
+        OutboundMessage.objects.select_for_update()
+        .select_related("campaign", "catalog", "prospect_email")
+        .get(pk=message_id)
+    )
+    if message.campaign.created_by_id != actor.pk:
+        raise ValidationError("El mensaje pertenece a otro propietario.")
+    if message.state != OutboundMessage.State.SEND_FAILED:
+        raise ValidationError("Sólo se pueden reintentar mensajes con fallo final.")
+    if message.gmail_message_id:
+        raise ValidationError("El mensaje ya tiene confirmación Gmail y no se puede reencolar.")
+    if message.campaign.state not in {Campaign.State.RUNNING, Campaign.State.PAUSED}:
+        raise ValidationError("La campaña cerrada no admite reintentos.")
+    clean_reason = " ".join(reason.split())
+    if len(clean_reason) < 10:
+        raise ValidationError("Documentá qué causa fue corregida antes de reintentar.")
+    eligibility_error = _final_email_error(message)
+    if eligibility_error:
+        raise ValidationError(eligibility_error)
+    verify_catalog(message.catalog)
+    before = {"state": message.state, "attempts": message.attempts, "error": message.error}
+    message.state = OutboundMessage.State.QUEUED
+    message.attempts = 0
+    message.next_attempt_at = timezone.now()
+    message.delivery_reserved_at = None
+    message.sending_started_at = None
+    message.error = ""
+    message.save(
+        update_fields=(
+            "state",
+            "attempts",
+            "next_attempt_at",
+            "delivery_reserved_at",
+            "sending_started_at",
+            "error",
+            "updated_at",
+        )
+    )
+    BackgroundJob.objects.filter(idempotency_key=f"deliver:{message.pk}").update(
+        state=BackgroundJob.State.RETRY_WAIT,
+        attempts=0,
+        next_retry_at=message.next_attempt_at,
+        finished_at=None,
+        error="",
+    )
+    record_event(
+        action="message.retry_requested",
+        entity=message,
+        actor=actor,
+        before=before,
+        after={"state": message.state, "reason": clean_reason},
+    )
+    return message
 
 
 @transaction.atomic

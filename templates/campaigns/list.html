@@ -4,6 +4,11 @@
 
 {% block content %}
 <div class="actions"><h1>Campañas</h1><a class="button" href="{% url 'campaign-create' %}">Crear campaña</a></div>
+<form method="get" class="card filters" role="search">
+    <div><label for="campaign-q">Buscar nombre o ubicación</label><input id="campaign-q" type="search" name="q" value="{{ request.GET.q }}"></div>
+    <div><label for="campaign-state">Estado</label><select id="campaign-state" name="state"><option value="">Todos</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{% url 'campaigns' %}">Limpiar</a></div>
+</form>
 <table>
     <thead><tr><th>Nombre</th><th>Estado</th><th>Objetivo</th><th>Crudos máx.</th><th>Catálogo</th></tr></thead>
     <tbody>
@@ -18,4 +23,5 @@
     {% empty %}<tr><td colspan="5">Todavía no hay campañas.</td></tr>{% endfor %}
     </tbody>
 </table>
+{% include "includes/pagination.html" %}
 {% endblock %}

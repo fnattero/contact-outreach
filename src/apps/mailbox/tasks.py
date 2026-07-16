@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from celery import shared_task
 
+from apps.audit.models import BackgroundJob
+from apps.audit.services import finish_job, start_job
 from apps.campaigns.delivery import (
     complete_drained_campaigns,
     deliver_message,
@@ -48,13 +52,37 @@ def recover_ambiguous_sends() -> int:
 
 
 @shared_task(  # type: ignore[untyped-decorator]
+    bind=True,
     name="mailbox.sync_gmail_connection",
     autoretry_for=(RetryableProviderError,),
     retry_backoff=True,
     max_retries=3,
 )
-def sync_gmail_connection_task(connection_id: str) -> int:
-    return sync_gmail_connection(connection_id)
+def sync_gmail_connection_task(task: Any, connection_id: str) -> int:
+    job = start_job(
+        idempotency_key=f"gmail-sync:{connection_id}",
+        task_name="mailbox.sync_gmail_connection",
+        entity_type="GmailConnection",
+        entity_id=connection_id,
+        queue="mailbox",
+    )
+    try:
+        imported = sync_gmail_connection(connection_id)
+    except RetryableProviderError as exc:
+        retries_exhausted = task.request.retries >= task.max_retries
+        finish_job(
+            job,
+            state=(
+                BackgroundJob.State.FAILED if retries_exhausted else BackgroundJob.State.RETRY_WAIT
+            ),
+            error=exc,
+        )
+        raise
+    except Exception as exc:
+        finish_job(job, state=BackgroundJob.State.FAILED, error=exc)
+        raise
+    finish_job(job)
+    return imported
 
 
 @shared_task(name="mailbox.sync_gmail_replies")  # type: ignore[untyped-decorator]

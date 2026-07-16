@@ -4,7 +4,13 @@
 
 {% block content %}
 <h1>Audit log</h1>
-<p class="muted">Eventos append-only; se muestran los 200 más recientes.</p>
+<p class="muted">Eventos append-only redactados. La búsqueda nunca consulta ciphertext ni secretos.</p>
+<form method="get" class="card filters" role="search">
+    <div><label for="audit-q">Buscar</label><input id="audit-q" type="search" name="q" value="{{ request.GET.q }}"></div>
+    <div><label for="audit-action">Acción</label><input id="audit-action" name="action" value="{{ request.GET.action }}"></div>
+    <div><label for="audit-entity">Entidad</label><input id="audit-entity" name="entity" value="{{ request.GET.entity }}"></div>
+    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{% url 'audit-log' %}">Limpiar</a></div>
+</form>
 <table>
     <thead><tr><th>Fecha</th><th>Actor</th><th>Acción</th><th>Entidad</th><th>Después</th></tr></thead>
     <tbody>
@@ -19,4 +25,5 @@
     {% empty %}<tr><td colspan="5">No hay eventos.</td></tr>{% endfor %}
     </tbody>
 </table>
+{% include "includes/pagination.html" %}
 {% endblock %}

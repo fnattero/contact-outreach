@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Prospectos · Contact Outreach{% endblock %}
+{% block content %}
+<div class="actions"><h1>Prospectos</h1><a class="button" href="{% url 'prospects-export' %}?{{ request.GET.urlencode }}">Exportar CSV</a></div>
+<form method="get" class="card filters" role="search">
+    <div><label for="q">Buscar nombre, email o dirección</label><input id="q" type="search" name="q" value="{{ request.GET.q }}"></div>
+    <div><label for="campaign">Campaña</label><select id="campaign" name="campaign"><option value="">Todas</option>{% for campaign in campaigns %}<option value="{{ campaign.pk }}" {% if request.GET.campaign == campaign.pk|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>{% endfor %}</select></div>
+    <div><label for="state">Estado</label><select id="state" name="state"><option value="">Todos</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="category">Rubro</label><input id="category" name="category" value="{{ request.GET.category }}"></div>
+    <div><label for="neighborhood">Barrio</label><input id="neighborhood" name="neighborhood" value="{{ request.GET.neighborhood }}"></div>
+    <div><label for="min-score">Relevancia mínima</label><input id="min-score" type="number" min="0" max="100" name="min_score" value="{{ request.GET.min_score }}"></div>
+    <div><label for="max-score">Relevancia máxima</label><input id="max-score" type="number" min="0" max="100" name="max_score" value="{{ request.GET.max_score }}"></div>
+    <div><label for="date-from">Desde</label><input id="date-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
+    <div><label for="date-to">Hasta</label><input id="date-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
+    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{% url 'prospects' %}">Limpiar</a></div>
+</form>
+<p class="muted">{{ page_obj.paginator.count }} resultado{{ page_obj.paginator.count|pluralize }}.</p>
+<div class="table-scroll"><table><thead><tr><th>Prospecto</th><th>Campaña</th><th>Rubro / barrio</th><th>Estado</th><th>Relevancia</th><th>Alta</th></tr></thead><tbody>
+{% for prospect in page_obj %}<tr><td>{{ prospect.name }}<br><small>{{ prospect.primary_email|default:"—" }}</small></td><td><a href="{% url 'campaign-detail' prospect.campaign_id %}">{{ prospect.campaign.name }}</a></td><td>{{ prospect.category|default:"—" }}<br><small>{{ prospect.neighborhood|default:"—" }}</small></td><td>{{ prospect.get_pipeline_state_display }}{% if prospect.last_error %}<br><small class="error-text">{{ prospect.last_error }}</small>{% endif %}</td><td>{{ prospect.latest_score|default:"—" }}{% if prospect.latest_reason %}<br><small>{{ prospect.latest_reason }}</small>{% endif %}</td><td>{{ prospect.created_at }}</td></tr>
+{% empty %}<tr><td colspan="6">No hay prospectos para estos filtros.</td></tr>{% endfor %}</tbody></table></div>
+{% include "includes/pagination.html" %}
+{% endblock %}

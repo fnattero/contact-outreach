@@ -87,6 +87,11 @@ Escenario principal:
 7. Inyectar interesado, BAJA, auto-reply y bounce; sincronizar y verificar dashboard.
 8. Enviar una respuesta manual fake en el hilo y exportar CSV seguro.
 
+La aceptación automatizada vigente ejecuta estos pasos desde vistas/formularios reales con Celery
+eager como transporte fake determinístico. Incluye OAuth/prueba Gmail fake, confirmación LIVE,
+respuesta simulada desde la pantalla Gmail, hilo, POST manual y las tres exportaciones. Se ejecuta
+con `make test-e2e` y sin red.
+
 ## 7. Quality gates
 
 - `ruff check`, `ruff format --check` y mypy sin errores en código propio.

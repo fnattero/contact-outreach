@@ -3,14 +3,27 @@
 Aplicación local Django para outreach B2B de un único propietario. El incremento actual incluye
 autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría,
 extracción durable, enriquecimiento web seguro, generación personalizada, OAuth Gmail y entrega
-controlada de primeros mensajes. Los proveedores mock
+controlada de primeros mensajes. También incluye métricas derivadas, filtros, búsqueda, paginación,
+CSV seguro, progreso/reintento de jobs, logs JSON correlacionados, errores amigables y
+backup/restore verificado. Los proveedores mock
 son el default sin red; Outscraper, el fetch HTTP y los proveedores IA quedan aislados por
 contratos internos y son opt-in.
 
 ## Requisitos
 
-- Docker Engine con Docker Compose.
+- Una distribución Linux de 64 bits con Git, `make`, OpenSSL y al menos 4 GiB libres.
+- Docker Engine con el plugin Docker Compose. En una máquina limpia, instalar ambos desde la
+  [guía oficial de Docker](https://docs.docker.com/engine/install/) para la distribución.
 - Opcional para validar fuera de Docker: Python 3.12+ y `make`.
+
+Comprobar la instalación antes de continuar:
+
+```bash
+git --version
+docker version
+docker compose version
+make --version
+```
 
 ## Iniciar el entorno
 
@@ -20,9 +33,17 @@ contratos internos y son opt-in.
    cp .env.example .env
    ```
 
-2. Reemplazar en `.env` `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, `OWNER_PASSWORD` y
-   `FIELD_ENCRYPTION_KEY`. Gmail e IA siguen fake; las integraciones de red sólo se habilitan
-   explícitamente como se describe más abajo.
+2. Generar valores independientes y reemplazarlos en `.env`:
+
+   ```bash
+   openssl rand -hex 32  # DJANGO_SECRET_KEY
+   openssl rand -hex 32  # POSTGRES_PASSWORD
+   openssl rand -hex 32  # FIELD_ENCRYPTION_KEY
+   ```
+
+   Definir además una contraseña fuerte en `OWNER_PASSWORD`. Gmail e IA siguen fake; las
+   integraciones de red sólo se habilitan explícitamente. No guardar `.env`, la clave de cifrado ni
+   backups dentro del repositorio.
 
 3. Construir e iniciar todos los servicios:
 
@@ -41,10 +62,14 @@ Para seguir los logs:
 make logs
 ```
 
+Cada línea de aplicación es JSON e incluye evento, nivel, correlation ID, duración, ruta y código
+de estado cuando corresponde. No incluye query strings, cuerpos, destinatarios ni secretos.
+
 ## Comprobar el entorno
 
 - Liveness: <http://127.0.0.1:8000/health/live/>
 - Readiness de PostgreSQL y Redis: <http://127.0.0.1:8000/health/ready/>
+- Estado degradado de storage/proveedores: <http://127.0.0.1:8000/health/degraded/>
 - Procesamiento real de una tarea por el worker:
 
   ```bash
@@ -90,6 +115,12 @@ la cola desde PostgreSQL: en dry-run genera y hashea el MIME sin llamar Gmail; e
 si pasan modo, kill switch, conexión probada, cuota, intervalo, horario, catálogo, supresión y
 ledger global. Desde el detalle se puede regenerar únicamente un candidato que todavía no entró
 en entrega.
+
+Campañas, Prospectos, Envíos, Respuestas, Jobs y Auditoría ofrecen búsqueda, filtros y paginación.
+Prospectos, Envíos y Respuestas exportan el conjunto filtrado a CSV con neutralización de fórmulas.
+Jobs muestra heartbeat, intentos, próximo retry y error redactado. Un fallo final sólo puede
+reintentarse con motivo explícito, sobre la misma fila, Message-ID e idempotency key; un estado
+ambiguo se reconcilia y no ofrece ese botón.
 
 ## Conectar Gmail
 
@@ -175,6 +206,29 @@ docker compose down --volumes
 make up
 ```
 
+## Backup y restore
+
+El backup incluye un dump consistente de PostgreSQL y el volumen privado de catálogos, con hashes
+SHA-256 y permisos restrictivos. No incluye `FIELD_ENCRYPTION_KEY`: respaldarla separadamente es
+obligatorio para recuperar Gmail OAuth.
+
+```bash
+make backup
+# o: ./scripts/backup.sh /ruta/cifrada/backups
+```
+
+Para restaurar, recuperar la misma `FIELD_ENCRYPTION_KEY`, dejar `SEND_KILL_SWITCH=true` y confirmar
+el reemplazo de la instalación actual:
+
+```bash
+make restore BACKUP=backups/20260716T120000Z
+```
+
+Restore verifica checksums, restaura base/catálogos con propiedad del usuario no privilegiado
+`app`, aplica migraciones, recalcula hashes y prueba que los refresh tokens se puedan descifrar
+antes de reiniciar workers. Ver incidentes de disco, proveedores y reinicios en
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
+
 ## Quality gates
 
 Crear un entorno Python local y ejecutar todos los checks:
@@ -190,6 +244,33 @@ make test-e2e
 También están disponibles por separado `make lint`, `make typecheck` y `make test`.
 `make check` valida Ruff, formato, mypy, pytest, migraciones pendientes y checks de Django. Pytest
 bloquea sockets y usa exclusivamente los proveedores fake.
+
+La aceptación automatizada
+`tests/e2e/test_base_application.py::test_full_fake_acceptance_flow_from_ui` recorre desde la UI
+perfil, PDF, OAuth/prueba fake, campaña, pipeline, entrega, respuesta entrante, clasificación,
+respuesta manual y exportaciones.
+
+## Checklist obligatorio antes de SEND_MODE=live
+
+No cambiar `SEND_MODE=live` ni desactivar el kill switch hasta completar y registrar externamente:
+
+- [ ] `make check` y `make test-e2e` pasan sobre el commit a desplegar.
+- [ ] `.env`, backups, catálogos/exportaciones y claves no están versionados; el escaneo de secretos
+  no encuentra valores reales.
+- [ ] Bind/proxy/orígenes/cookies fueron revisados; fuera de loopback hay TLS, cookies secure y HSTS.
+- [ ] `FIELD_ENCRYPTION_KEY` tiene backup separado y un backup+restore reciente pasó
+  `verify_restore` con el kill switch activo.
+- [ ] Gmail OAuth usa exactamente `gmail.send` y `gmail.readonly`, la prueba propia pasó y se revisó
+  la política de expiración del refresh token.
+- [ ] Identidad legal, vendedor, domicilio, firma, asunto `PUBLICIDAD -` y BAJA están completos; la
+  campaña tuvo revisión legal y de entregabilidad.
+- [ ] Catálogo conserva tamaño/hash y el disco supera `MIN_FREE_DISK_BYTES`.
+- [ ] Supresiones fueron revisadas y se probaron baja, bounce e invalidez tardía.
+- [ ] Límite diario, intervalo, días, horario y `America/Argentina/Buenos_Aires` son conservadores.
+- [ ] Se probaron pausa, cancelación, kill switch, proveedor caído, retry/reconciliación y reinicio.
+- [ ] `/health/ready/` está `ok` y `/health/degraded/` no tiene componentes críticos degradados.
+- [ ] Primero se cambia `SEND_MODE=live` manteniendo `SEND_KILL_SWITCH=true`; recién después del
+  preflight se desactiva el kill switch para una campaña LIVE confirmada.
 
 ## Controles seguros por defecto
 

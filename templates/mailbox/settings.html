@@ -29,4 +29,18 @@
         </form>
     {% endif %}
 </section>
+{% if fake_mode and connection and connection.status == "CONNECTED" %}
+<section class="card form-card">
+    <h2>Simular respuesta fake</h2>
+    <p class="muted">Disponible sólo con GMAIL_PROVIDER=fake. No abre red ni toca una cuenta real.</p>
+    {% if fake_outbound %}
+    <form method="post" action="{% url 'gmail-fake-inbound' %}">
+        {% csrf_token %}
+        <p><label for="fake-outbound">Envío confirmado</label><select id="fake-outbound" name="outbound_id" required>{% for item in fake_outbound %}<option value="{{ item.pk }}">{{ item.campaign.name }} · {{ item.prospect.name }}</option>{% endfor %}</select></p>
+        <p><label for="fake-scenario">Escenario</label><select id="fake-scenario" name="scenario" required>{% for value, label in fake_form.fields.scenario.choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></p>
+        <button type="submit">Inyectar y sincronizar</button>
+    </form>
+    {% else %}<p>Primero completá un envío live con el proveedor Gmail fake.</p>{% endif %}
+</section>
+{% endif %}
 {% endblock %}
