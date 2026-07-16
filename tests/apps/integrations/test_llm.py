@@ -111,7 +111,7 @@ def test_provider_response_still_requires_local_schema_validation() -> None:
 
     with pytest.raises(ValidationProviderError, match="JSON válido"):
         provider.analyze(_request())
-    with pytest.raises(ValidationProviderError, match="fase 10"):
+    with pytest.raises(ValidationProviderError, match="clasificación IA"):
         provider.classify_reply(ReplyClassificationRequest("hola", "correlation", "classification"))
     with pytest.raises(ValidationProviderError, match="esquema"):
         parse_analysis_output({"relevance_score": 101})

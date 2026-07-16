@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Protocol
@@ -38,6 +39,10 @@ class CostLimitError(ProviderError):
 
 class PermanentProviderError(ProviderError):
     pass
+
+
+class GmailHistoryExpired(PermanentProviderError):
+    """The incremental Gmail cursor is no longer accepted by Gmail."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +181,13 @@ class GmailConnectionData:
     email: str
     refresh_token: str
     scopes: tuple[str, ...]
+    history_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class GmailAccountInfo:
     email: str
+    history_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,15 +224,23 @@ class GmailCursor:
 class GmailInboundMessage:
     message_id: str
     thread_id: str
+    rfc_message_id: str
+    in_reply_to: str
+    references: tuple[str, ...]
     sender: str
+    recipients: tuple[str, ...]
     subject: str
     body_text: str
+    body_html: str
+    received_at: datetime
+    headers: dict[str, str]
 
 
 @dataclass(frozen=True, slots=True)
 class GmailSyncBatch:
     messages: tuple[GmailInboundMessage, ...]
     next_cursor: GmailCursor
+    used_fallback: bool = False
 
 
 class ExtractorProvider(Protocol):

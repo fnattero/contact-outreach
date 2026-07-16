@@ -95,7 +95,7 @@ def test_fake_gmail_deduplicates_message_id_and_keeps_reply_thread() -> None:
         )
     )
     assert reply.thread_id == "existing-thread"
-    assert provider.sync(GmailCursor(history_id="4")).next_cursor.history_id == "5"
+    assert provider.sync(GmailCursor(history_id="4")).next_cursor.history_id == "4"
     provider.revoke()
 
 

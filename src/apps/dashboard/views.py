@@ -10,6 +10,7 @@ from apps.campaigns.models import Campaign
 from apps.catalogs.models import Catalog
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone
+from apps.mailbox.models import InboundMessage
 
 
 @login_required
@@ -28,6 +29,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "categories": SearchCategory.objects.filter(active=True, archived_at__isnull=True).count(),
         "zones": SearchZone.objects.filter(active=True, archived_at__isnull=True).count(),
         "suppressions": SuppressionEntry.objects.count(),
+        "responses": InboundMessage.objects.count(),
     }
     return render(
         request,
@@ -37,5 +39,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             "summary": summary,
             "profile_configured": BusinessProfile.objects.filter(owner=owner).exists(),
             "recent_campaigns": Campaign.objects.select_related("catalog")[:5],
+            "recent_responses": InboundMessage.objects.select_related(
+                "related_outbound__campaign",
+                "related_outbound__prospect",
+            )[:5],
         },
     )

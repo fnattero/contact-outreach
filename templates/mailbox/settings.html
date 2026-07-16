@@ -11,6 +11,7 @@
         <h2>{{ connection.email }}</h2>
         <p>Estado: {{ connection.get_status_display }}</p>
         <p>Última prueba: {{ connection.last_tested_at|default:"Todavía no probada" }}</p>
+        <p>Última sincronización: {{ connection.last_sync_at|default:"Todavía no sincronizada" }}</p>
         {% if connection.error %}<p class="errorlist">{{ connection.error }}</p>{% endif %}
         <div class="actions">
             <form method="post" action="{% url 'gmail-test' %}">

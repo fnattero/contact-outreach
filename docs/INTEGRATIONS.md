@@ -93,7 +93,7 @@ Al conectar por primera vez se guarda el `historyId` actual como baseline y no s
 
 MIME se construye con la librería estándar `email`: `text/plain; charset=utf-8`, PDF base64, un `To`, sin CC/BCC, Date, deterministic Message-ID y headers opacos `X-Contact-Outreach-Campaign`/`Message`. No incluyen email, categoría ni PII. Se codifica base64url y usa `users.messages.send`: [guía de envío](https://developers.google.com/workspace/gmail/api/guides/sending).
 
-Para respuestas manuales `reply()` se invoca sólo desde el comando HTTP explícito y envía con `threadId`, `In-Reply-To`, `References` y asunto del hilo. Antes de cualquier retry ambiguo se busca el Message-ID; si la reconciliación no es concluyente, se pausa y requiere intervención en lugar de arriesgar duplicado.
+Para respuestas manuales el POST explícito persiste una autorización durable e idempotente; un worker invoca `reply()` sólo para esa fila autorizada y envía con `threadId`, `In-Reply-To`, `References` y asunto del hilo. Justo antes del efecto toma el mismo lock de elegibilidad que supresión y revalida dirección, conexión, modo y kill switch. Antes de cualquier retry ambiguo se busca el Message-ID; una segunda autorización sobre el mismo inbound reutiliza la fila existente en lugar de crear otro envío.
 
 `FakeGmailProvider` simula autorización, exchange, revocación y mailbox en memoria/base de prueba; deduplica por Message-ID, modela cuotas/historyId/404/rebotes y nunca abre red.
 
@@ -101,7 +101,7 @@ Para respuestas manuales `reply()` se invoca sólo desde el comando HTTP explíc
 
 Beat solicita cambios con `history.list(startHistoryId)`, pagina, obtiene sólo metadata/raw necesarios y actualiza el cursor al confirmar toda la transacción. History expirado (HTTP 404) activa una búsqueda `newer_than:30d`, máximo 1000 candidatos, que filtra por Gmail thread IDs o headers propios antes de persistir. Gmail indica que history suele conservarse al menos una semana pero puede expirar antes: [sincronización oficial](https://developers.google.com/workspace/gmail/api/guides/sync).
 
-Se guarda sólo el hilo relacionado y cuerpos sanitizados. IDs Gmail únicos hacen repetible cada sync. Una falla de clasificación no revierte importación ni cursor; deja `OTHER`/job pendiente según corresponda.
+Se guarda sólo el hilo relacionado y cuerpos sanitizados. Las partes de texto detached se recuperan por `attachmentId`, pero archivos con nombre y adjuntos no textuales no se importan. IDs Gmail únicos hacen repetible cada sync. Una falla de clasificación no revierte importación ni cursor; deja `OTHER`/job pendiente según corresponda. Fallos permanentes/auth degradan la conexión y un cursor legacy vacío se inicializa desde el perfil sin ejecutar fallback histórico.
 
 ## 8. Política de reintentos
 

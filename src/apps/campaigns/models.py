@@ -348,7 +348,25 @@ class OutboundMessage(TimestampedUUIDModel):
         "prospects.ProspectEmail", on_delete=models.PROTECT, related_name="outbound_messages"
     )
     analysis = models.OneToOneField(
-        "prospects.AIAnalysis", on_delete=models.PROTECT, related_name="outbound_message"
+        "prospects.AIAnalysis",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="outbound_message",
+    )
+    parent_inbound = models.ForeignKey(
+        "mailbox.InboundMessage",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="manual_replies",
+    )
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="manual_replies",
     )
     recipient = models.CharField(max_length=320)
     recipient_normalized = models.CharField(max_length=320)
@@ -361,6 +379,8 @@ class OutboundMessage(TimestampedUUIDModel):
     idempotency_key = models.CharField(max_length=200, unique=True)
     contact_sequence = models.PositiveIntegerField(blank=True, null=True)
     message_id = models.CharField(max_length=255, blank=True)
+    in_reply_to = models.CharField(max_length=255, blank=True)
+    references = models.JSONField(default=list, blank=True)
     mime_sha256 = models.CharField(max_length=64, blank=True)
     gmail_message_id = models.CharField(max_length=255, blank=True)
     gmail_thread_id = models.CharField(max_length=255, blank=True)
@@ -394,5 +414,10 @@ class OutboundMessage(TimestampedUUIDModel):
                 fields=("gmail_message_id",),
                 condition=~Q(gmail_message_id=""),
                 name="outbound_gmail_message_id_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("parent_inbound",),
+                condition=Q(kind="MANUAL_REPLY", parent_inbound__isnull=False),
+                name="manual_reply_parent_inbound_unique",
             ),
         ]

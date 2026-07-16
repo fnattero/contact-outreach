@@ -4,7 +4,7 @@
 
 {% block content %}
 <h1>Dashboard</h1>
-<p class="muted">Configurá el perfil, el catálogo y una campaña. Esta etapa no realiza llamadas externas.</p>
+<p class="muted">Gestioná campañas, entregas y respuestas sincronizadas desde un único panel.</p>
 
 {% if not profile_configured %}
 <p class="card">Antes de iniciar una campaña, <a href="{% url 'business-profile' %}">completá el perfil comercial</a>.</p>
@@ -22,6 +22,7 @@
         <h2>Configuración</h2>
         <p>{{ summary.categories }} rubros · {{ summary.zones }} zonas</p>
         <p>{{ summary.catalogs }} catálogos · {{ summary.suppressions }} supresiones</p>
+        <p><a href="{% url 'responses' %}">{{ summary.responses }} respuestas de campañas</a></p>
     </article>
     <article class="card">
         <h2>Proveedores</h2>
@@ -49,4 +50,22 @@
     </tbody>
 </table>
 {% else %}<p class="muted">Todavía no hay campañas.</p>{% endif %}
+
+<h2>Respuestas recientes</h2>
+{% if recent_responses %}
+<table>
+    <thead><tr><th>Fecha</th><th>Campaña</th><th>Prospecto</th><th>Clasificación</th><th></th></tr></thead>
+    <tbody>
+    {% for response in recent_responses %}
+        <tr>
+            <td>{{ response.external_at }}</td>
+            <td>{{ response.related_outbound.campaign.name }}</td>
+            <td>{{ response.related_outbound.prospect.name }}</td>
+            <td>{{ response.get_classification_display }}</td>
+            <td><a href="{% url 'response-thread' response.pk %}">Ver hilo</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}<p class="muted">Todavía no hay respuestas de campañas.</p>{% endif %}
 {% endblock %}

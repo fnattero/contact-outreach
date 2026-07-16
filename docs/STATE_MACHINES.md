@@ -58,7 +58,7 @@ Estados: `PREPARED`, `QUEUED`, `SENDING`, `RECONCILING`, `SENT`, `DRY_RUN_COMPLE
 | PREPARED/QUEUED | CANCELLED | Campaña cancelada antes de iniciar efecto externo |
 | SEND_FAILED | QUEUED | Reintento manual con causa resuelta y misma fila/idempotency key |
 
-`SENDING` vencido siempre pasa primero por `RECONCILING`. `SENT` y `DRY_RUN_COMPLETED` son terminales para ese mensaje. Una respuesta manual usa la misma máquina pero sólo puede originarse por POST explícito del usuario.
+`SENDING` vencido siempre pasa primero por `RECONCILING`. `SENT` y `DRY_RUN_COMPLETED` son terminales para ese mensaje. Una respuesta manual usa la misma máquina pero sólo puede originarse por POST explícito del usuario: el POST crea `QUEUED`, el worker ejecuta el efecto autorizado y `SENDING|RECONCILING` nunca vuelven a enviar sin buscar antes el `Message-ID`.
 
 ## 5. Engagement
 

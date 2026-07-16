@@ -56,7 +56,7 @@ En live, el sender fija `SENDING` y una clave única antes del efecto externo. T
 
 ### Respuestas
 
-Beat ejecuta una única sincronización por cuenta. `historyId` obtiene cambios; se consultan metadatos y sólo se persisten mensajes ligados a threads/cabeceras propios. Ante cursor expirado se usa búsqueda limitada. Reglas detectan rebotes y BAJA; la IA sólo clasifica lo restante. Las respuestas manuales pasan por un comando separado que exige POST, CSRF, usuario autenticado y clic explícito.
+Beat ejecuta una única sincronización por cuenta. `historyId` obtiene cambios; se consultan metadatos y sólo se persisten mensajes ligados a threads/cabeceras propios. Ante cursor expirado se captura primero un baseline y luego se usa búsqueda limitada, evitando perder llegadas concurrentes. Un cursor vacío de una conexión legacy sólo inicializa baseline y no importa históricos. Reglas detectan rebotes y BAJA antes de construir cualquier proveedor IA; la IA sólo clasifica lo restante. Las respuestas manuales pasan por un comando separado que exige POST, CSRF, usuario autenticado y clic explícito: el request persiste una autorización única y el worker revalida supresión/invalidez bajo el lock compartido antes de Gmail. Una ambigüedad sólo avanza mediante reconciliación por `Message-ID`.
 
 ## 4. Colas y recuperación
 

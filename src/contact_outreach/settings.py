@@ -219,6 +219,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "mailbox.recover_ambiguous_sends",
         "schedule": 60.0,
     },
+    "sync-gmail-replies": {
+        "task": "mailbox.sync_gmail_replies",
+        "schedule": 300.0,
+    },
+    "dispatch-authorized-manual-replies": {
+        "task": "mailbox.dispatch_manual_replies",
+        "schedule": 60.0,
+    },
 }
 
 LOGGING = {

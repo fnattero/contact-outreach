@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from email.message import Message
 from io import BytesIO
@@ -9,6 +10,7 @@ import pytest
 
 from apps.integrations.contracts import (
     AuthenticationError,
+    GmailCursor,
     GmailReplyRequest,
     GmailSendRequest,
     PermanentProviderError,
@@ -113,6 +115,8 @@ def test_gmail_api_refreshes_access_token_and_validates_responses() -> None:
             HTTPResponse(200, {"access_token": "fresh"}),
             HTTPResponse(200, {"emailAddress": "owner@gmail.com"}),
             HTTPResponse(200, {}),
+            HTTPResponse(200, {"emailAddress": "owner@gmail.com", "historyId": "55"}),
+            HTTPResponse(200, {"messages": []}),
         ]
     )
     provider = _provider(transport, refresh_token="refresh")
@@ -132,8 +136,79 @@ def test_gmail_api_refreshes_access_token_and_validates_responses() -> None:
         _provider(StubTransport([])).test_connection()
     with pytest.raises(AuthenticationError, match="CLIENT"):
         GmailAPIProvider(client_id="", client_secret="")
-    with pytest.raises(PermanentProviderError, match="fase 10"):
-        provider.sync(None)
+    batch = provider.sync(None)
+    assert batch.used_fallback is True
+    assert batch.next_cursor.history_id == "55"
+    assert str(transport.calls[-2]["url"]).endswith("/users/me/profile")
+    assert "q=newer_than%3A30d" in str(transport.calls[-1]["url"])
+
+
+def test_gmail_api_incremental_sync_maps_allowed_headers_and_bodies() -> None:
+    text = base64.urlsafe_b64encode(b"Hola, me interesa").decode().rstrip("=")
+    transport = StubTransport(
+        [
+            HTTPResponse(
+                200,
+                {
+                    "historyId": "11",
+                    "history": [{"messagesAdded": [{"message": {"id": "incoming-1"}}]}],
+                },
+            ),
+            HTTPResponse(
+                200,
+                {
+                    "id": "incoming-1",
+                    "threadId": "thread-1",
+                    "internalDate": "1784203200000",
+                    "payload": {
+                        "mimeType": "multipart/mixed",
+                        "headers": [
+                            {"name": "Message-ID", "value": "<incoming@example.com>"},
+                            {"name": "In-Reply-To", "value": "<root@example.com>"},
+                            {"name": "References", "value": "<root@example.com>"},
+                            {"name": "From", "value": "Prospecto <ventas@example.com>"},
+                            {"name": "To", "value": "owner@gmail.com"},
+                            {"name": "Subject", "value": "PUBLICIDAD - Consulta"},
+                            {"name": "X-Untrusted-Secret", "value": "discard-me"},
+                        ],
+                        "parts": [
+                            {"mimeType": "text/plain", "body": {"data": text}},
+                            {
+                                "mimeType": "text/plain",
+                                "filename": "attachment.txt",
+                                "body": {
+                                    "data": base64.urlsafe_b64encode(b"do not import").decode()
+                                },
+                            },
+                            {
+                                "mimeType": "text/plain",
+                                "body": {"attachmentId": "detached-text"},
+                            },
+                        ],
+                    },
+                },
+            ),
+            HTTPResponse(
+                200,
+                {"data": base64.urlsafe_b64encode(b"Texto grande separado").decode()},
+            ),
+        ]
+    )
+    provider = _provider(transport, refresh_token="refresh")
+    provider._access_token = "access"
+
+    batch = provider.sync(GmailCursor("10"))
+
+    assert batch.used_fallback is False
+    assert batch.next_cursor.history_id == "11"
+    assert len(batch.messages) == 1
+    message = batch.messages[0]
+    assert message.body_text == "Hola, me interesa\nTexto grande separado"
+    assert message.in_reply_to == "<root@example.com>"
+    assert message.references == ("<root@example.com>",)
+    assert "X-Untrusted-Secret" not in message.headers
+    assert "startHistoryId=10" in str(transport.calls[0]["url"])
+    assert str(transport.calls[2]["url"]).endswith("/messages/incoming-1/attachments/detached-text")
 
 
 class URLResponse:

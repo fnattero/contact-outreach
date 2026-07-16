@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ root.subject }} · Contact Outreach{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'responses' %}">← Volver a respuestas</a></p>
+<h1>{{ root.subject }}</h1>
+<p><strong>{{ root.prospect.name }}</strong> · {{ root.recipient }} · {{ root.campaign.name }}</p>
+
+<section aria-label="Hilo cronológico">
+    {% for item in chronology %}
+    <article class="card" style="margin-bottom: 1rem;{% if item.direction == 'outbound' %} margin-left: 8%;{% else %} margin-right: 8%;{% endif %}">
+        <p><strong>{% if item.direction == "outbound" %}Enviado{% else %}Recibido{% endif %}</strong> · {{ item.date }} · {{ item.classification }}</p>
+        <p class="muted">{{ item.sender }}</p>
+        <div style="white-space: pre-wrap">{{ item.body }}</div>
+    </article>
+    {% endfor %}
+</section>
+
+{% if inbound.is_human %}
+<section class="card form-card">
+    <h2>Responder manualmente</h2>
+    <p class="muted">Destinatario: {{ root.recipient }}. El asunto y el hilo se mantienen.</p>
+    <form method="post" action="{% url 'manual-reply' inbound.pk %}">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Enviar respuesta</button>
+    </form>
+</section>
+{% endif %}
+{% endblock %}

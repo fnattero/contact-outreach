@@ -84,7 +84,7 @@ Las clases son `INTERESTED`, `NOT_INTERESTED`, `UNSUBSCRIBE`, `AUTO_REPLY`, `BOU
 
 ### FR-13 Respuesta manual
 
-Desde el hilo se muestra destinatario, asunto, historial y editor de texto. Sólo se envía al pulsar `Enviar respuesta`, dentro del `gmail_thread_id`, conservando asunto e incluyendo `References` e `In-Reply-To`. Se registra usuario, fecha, resultado e idempotency key. No existe tarea que genere o envíe respuestas automáticamente.
+Desde el hilo se muestra destinatario, asunto, historial y editor de texto. Sólo se autoriza al pulsar `Enviar respuesta`; el POST persiste texto, usuario e idempotency key y un worker ejecuta exclusivamente ese efecto durable dentro del `gmail_thread_id`, conservando asunto e incluyendo `References` e `In-Reply-To`. Los resultados ambiguos se reconcilian por `Message-ID` antes de permitir otro intento. Ninguna tarea genera texto, crea autorizaciones ni responde sin esa acción humana explícita.
 
 ### FR-14 Dashboard y exportaciones
 

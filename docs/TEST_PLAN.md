@@ -64,10 +64,12 @@ Parsear MIME con librería estándar: texto plano UTF-8, un To, sin CC/BCC, PDF 
 ## 5. Respuestas, supresión y seguridad
 
 - Conexión inicial fija baseline sin importar históricos; history incremental paginado, cursor sólo tras commit, mensajes repetidos e history 404 con fallback limitado.
+- Cursor legacy vacío inicializa baseline sin importar; fallback captura baseline antes de listar para no perder llegadas concurrentes; fallos auth/permanentes degradan la conexión.
 - Asociación por Gmail thread ID, Message-ID, References e In-Reply-To; ignorar mensajes ajenos.
-- BAJA en mayúsculas/minúsculas y frases equivalentes crea supresión permanente antes de IA.
+- BAJA en mayúsculas/minúsculas y frases equivalentes crea supresión permanente antes de construir o invocar IA, incluso si el proveedor está mal configurado.
 - Bounce invalida email; auto-reply no marca respuesta humana; clasificación IA fallida queda OTHER.
-- Respuesta manual no sale con GET, sin login, sin CSRF ni sin clic; doble POST conserva un envío.
+- Respuesta manual no sale con GET, sin login, sin CSRF ni sin clic; doble POST conserva un envío. El worker revalida una supresión tardía y una ambigüedad se reconcilia por Message-ID sin permitir otra fila para el mismo inbound.
+- Headers RFC sobredimensionados no envenenan el cursor y cuerpos de texto detached se recuperan sin importar archivos adjuntos.
 - Sanitización de HTML/email, filenames/path traversal, PDF falso/oversize y CSV formula injection.
 - Tokens/API keys/cuerpos no aparecen en logs, errores, auditoría ni snapshots mostrados.
 - Permisos: usuario anónimo sólo accede login/health permitido; archivos privados requieren sesión.

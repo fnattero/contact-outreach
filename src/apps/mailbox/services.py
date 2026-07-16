@@ -63,6 +63,11 @@ def connect_gmail(
             provider.revoke()
         finally:
             raise ValidationError("Google no concedió exactamente los scopes Gmail requeridos.")
+    if not data.history_id:
+        try:
+            provider.revoke()
+        finally:
+            raise ValidationError("Gmail no devolvió el historyId inicial requerido.")
     encrypted = encrypt_token(data.refresh_token)
     connection, _ = GmailConnection.objects.select_for_update().update_or_create(
         owner=owner,
@@ -70,7 +75,7 @@ def connect_gmail(
             "email": data.email,
             "scopes": sorted(granted),
             "refresh_token_encrypted": encrypted,
-            "history_id": "",
+            "history_id": data.history_id,
             "status": GmailConnection.Status.CONNECTED,
             "last_tested_at": None,
             "error": "",

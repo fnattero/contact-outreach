@@ -666,6 +666,8 @@ def deliver_message(
 ) -> str:
     moment = now or timezone.now()
     message = OutboundMessage.objects.get(pk=message_id)
+    if message.kind != OutboundMessage.Kind.FIRST_CONTACT:
+        raise ValidationError("Las respuestas manuales sólo se envían desde el POST explícito.")
     if message.delivery_mode == Campaign.DeliveryMode.DRY_RUN:
         return complete_dry_run(message.pk, now=moment)
     effect = _prepare_live_effect(message.pk, moment)
@@ -767,6 +769,7 @@ def pending_message_ids(now: datetime | None = None) -> tuple[uuid.UUID, ...]:
     moment = now or timezone.now()
     return tuple(
         OutboundMessage.objects.filter(
+            kind=OutboundMessage.Kind.FIRST_CONTACT,
             campaign__state=Campaign.State.RUNNING,
             state__in=(OutboundMessage.State.PREPARED, OutboundMessage.State.QUEUED),
         )
@@ -774,6 +777,7 @@ def pending_message_ids(now: datetime | None = None) -> tuple[uuid.UUID, ...]:
         .values_list("pk", flat=True)
     ) + tuple(
         OutboundMessage.objects.filter(
+            kind=OutboundMessage.Kind.FIRST_CONTACT,
             campaign__state=Campaign.State.RUNNING,
             state=OutboundMessage.State.QUEUED,
             next_attempt_at__lte=moment,
@@ -785,11 +789,13 @@ def recoverable_message_ids(now: datetime | None = None) -> tuple[uuid.UUID, ...
     moment = now or timezone.now()
     return tuple(
         OutboundMessage.objects.filter(
+            kind=OutboundMessage.Kind.FIRST_CONTACT,
             state=OutboundMessage.State.SENDING,
             sending_started_at__lte=moment - STALE_SENDING_AFTER,
         ).values_list("pk", flat=True)
     ) + tuple(
         OutboundMessage.objects.filter(
+            kind=OutboundMessage.Kind.FIRST_CONTACT,
             state=OutboundMessage.State.RECONCILING,
             next_attempt_at__lte=moment,
         ).values_list("pk", flat=True)
@@ -807,12 +813,13 @@ def _complete_campaign_if_drained(campaign_id: uuid.UUID) -> bool:
     ):
         return False
     if campaign.messages.filter(
+        kind=OutboundMessage.Kind.FIRST_CONTACT,
         state__in=(
             OutboundMessage.State.PREPARED,
             OutboundMessage.State.QUEUED,
             OutboundMessage.State.SENDING,
             OutboundMessage.State.RECONCILING,
-        )
+        ),
     ).exists():
         return False
     unfinished_pipeline_states = (

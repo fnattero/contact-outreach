@@ -19,7 +19,13 @@ desde PostgreSQL, ledger/override global, OAuth Gmail con PKCE y token cifrado, 
 proveedor API/fake, scheduler de entrega, cuota/calendario/intervalo, pausa/cancelación/kill switch,
 backoff acotado y reconciliación por Message-ID. Esto aporta evidencia
 de FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-08, FR-09, FR-10, FR-12, FR-14, FR-15,
-FR-16 y FR-17. La sincronización de respuestas y la respuesta manual de fase 10 siguen pendientes.
+FR-16 y FR-17. El incremento de fase 10 agrega sincronización Gmail incremental con fallback
+acotado, asociación exclusiva por thread/cabeceras propias, sanitización, clasificación y efectos de
+baja/rebote. También incorpora el hilo cronológico y la respuesta manual idempotente por POST, con
+`threadId`, `In-Reply-To` y `References`; un worker dedicado sólo consume autorizaciones creadas por
+POST, revalida elegibilidad bajo lock y reconcilia ambigüedades, mientras el scheduler general nunca
+convierte mensajes entrantes en respuestas. Esto
+completa evidencia de FR-11 y FR-13 y amplía FR-12, FR-14, FR-15 y FR-17.
 El objetivo
 calificado corta sobre prospectos `QUEUED` creados por el análisis sobre umbral; nunca se cuenta
 `EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch permanecen como controles de

@@ -29,6 +29,9 @@ from apps.mailbox.views import (
     gmail_oauth_callback,
     gmail_settings,
     gmail_test,
+    manual_reply,
+    response_list,
+    response_thread,
 )
 
 urlpatterns = [
@@ -58,6 +61,13 @@ urlpatterns = [
     path("gmail/oauth/callback/", gmail_oauth_callback, name="gmail-oauth-callback"),
     path("gmail/probar/", gmail_test, name="gmail-test"),
     path("gmail/desconectar/", gmail_disconnect, name="gmail-disconnect"),
+    path("respuestas/", response_list, name="responses"),
+    path("respuestas/<uuid:inbound_id>/", response_thread, name="response-thread"),
+    path(
+        "respuestas/<uuid:inbound_id>/enviar/",
+        manual_reply,
+        name="manual-reply",
+    ),
     path("health/", liveness, name="health"),
     path("health/live/", liveness, name="health-live"),
     path("health/ready/", readiness, name="health-ready"),

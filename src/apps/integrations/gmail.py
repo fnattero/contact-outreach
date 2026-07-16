@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -14,6 +16,8 @@ from apps.integrations.contracts import (
     GmailAccountInfo,
     GmailConnectionData,
     GmailCursor,
+    GmailHistoryExpired,
+    GmailInboundMessage,
     GmailProvider,
     GmailReplyRequest,
     GmailSendRequest,
@@ -33,6 +37,26 @@ AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
+FALLBACK_QUERY = "newer_than:30d"
+MAX_SYNC_CANDIDATES = 1000
+SYNC_PAGE_SIZE = 500
+ALLOWED_INBOUND_HEADERS = frozenset(
+    {
+        "auto-submitted",
+        "content-type",
+        "date",
+        "from",
+        "in-reply-to",
+        "message-id",
+        "precedence",
+        "references",
+        "return-path",
+        "subject",
+        "to",
+        "x-auto-response-suppress",
+        "x-autoreply",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +115,8 @@ class GmailHTTPTransport:
             raise RateLimitError(message, retry_after=_parse_retry_after(retry_after))
         if status >= 500:
             raise RetryableProviderError(message)
+        if status == 404:
+            raise GmailHistoryExpired(message)
         if status == 400:
             raise ValidationProviderError(message)
         raise PermanentProviderError(message)
@@ -163,6 +189,7 @@ class GmailAPIProvider(GmailProvider):
             email=profile.email,
             refresh_token=refresh_token,
             scopes=scopes,
+            history_id=profile.history_id,
         )
 
     def _token(self) -> str:
@@ -206,7 +233,10 @@ class GmailAPIProvider(GmailProvider):
         email = str(response.payload.get("emailAddress", ""))
         if not email:
             raise ValidationProviderError("Gmail no devolvió la dirección de la cuenta.")
-        return GmailAccountInfo(email=email)
+        return GmailAccountInfo(
+            email=email,
+            history_id=str(response.payload.get("historyId", "")),
+        )
 
     def _send(self, raw_message: bytes, *, thread_id: str = "") -> GmailSendResult:
         payload: dict[str, Any] = {
@@ -248,5 +278,204 @@ class GmailAPIProvider(GmailProvider):
         return GmailSendResult(message_id=str(item["id"]), thread_id=str(item["threadId"]))
 
     def sync(self, cursor: GmailCursor | None) -> GmailSyncBatch:
-        del cursor
-        raise PermanentProviderError("La sincronización de respuestas pertenece a la fase 10.")
+        if cursor is None:
+            profile = self.test_connection()
+            if not profile.history_id:
+                raise ValidationProviderError("Gmail no devolvió historyId para el fallback.")
+            message_ids = self._fallback_message_ids()
+            next_cursor = GmailCursor(history_id=profile.history_id)
+            used_fallback = True
+        else:
+            message_ids, history_id = self._incremental_message_ids(cursor)
+            next_cursor = GmailCursor(history_id=history_id)
+            used_fallback = False
+        messages = tuple(self._get_message(message_id) for message_id in message_ids)
+        return GmailSyncBatch(
+            messages=messages,
+            next_cursor=next_cursor,
+            used_fallback=used_fallback,
+        )
+
+    def _incremental_message_ids(self, cursor: GmailCursor) -> tuple[tuple[str, ...], str]:
+        page_token = ""
+        latest_history_id = cursor.history_id
+        seen: set[str] = set()
+        message_ids: list[str] = []
+        while True:
+            query = {
+                "startHistoryId": cursor.history_id,
+                "historyTypes": "messageAdded",
+                "maxResults": str(SYNC_PAGE_SIZE),
+            }
+            if page_token:
+                query["pageToken"] = page_token
+            response = self.transport.request(
+                method="GET",
+                url=f"{GMAIL_API}/users/me/history?{urlencode(query)}",
+                headers=self._headers(),
+            )
+            latest_history_id = str(response.payload.get("historyId", latest_history_id))
+            history = response.payload.get("history", [])
+            if not isinstance(history, list):
+                raise ValidationProviderError("Gmail devolvió un historial inválido.")
+            for event in history:
+                if not isinstance(event, dict):
+                    continue
+                additions = event.get("messagesAdded", [])
+                if not isinstance(additions, list):
+                    continue
+                for addition in additions:
+                    item = addition.get("message") if isinstance(addition, dict) else None
+                    message_id = str(item.get("id", "")) if isinstance(item, dict) else ""
+                    if message_id and message_id not in seen:
+                        seen.add(message_id)
+                        message_ids.append(message_id)
+            page_token = str(response.payload.get("nextPageToken", ""))
+            if not page_token:
+                return tuple(message_ids), latest_history_id
+
+    def _fallback_message_ids(self) -> tuple[str, ...]:
+        page_token = ""
+        message_ids: list[str] = []
+        while len(message_ids) < MAX_SYNC_CANDIDATES:
+            query = {"q": FALLBACK_QUERY, "maxResults": str(SYNC_PAGE_SIZE)}
+            if page_token:
+                query["pageToken"] = page_token
+            response = self.transport.request(
+                method="GET",
+                url=f"{GMAIL_API}/users/me/messages?{urlencode(query)}",
+                headers=self._headers(),
+            )
+            items = response.payload.get("messages", [])
+            if not isinstance(items, list):
+                raise ValidationProviderError("Gmail devolvió candidatos inválidos.")
+            for item in items:
+                message_id = str(item.get("id", "")) if isinstance(item, dict) else ""
+                if message_id:
+                    message_ids.append(message_id)
+                    if len(message_ids) >= MAX_SYNC_CANDIDATES:
+                        break
+            page_token = str(response.payload.get("nextPageToken", ""))
+            if not page_token:
+                break
+        return tuple(message_ids)
+
+    def _get_message(self, message_id: str) -> GmailInboundMessage:
+        response = self.transport.request(
+            method="GET",
+            url=f"{GMAIL_API}/users/me/messages/{quote(message_id)}?format=full",
+            headers=self._headers(),
+        )
+        payload = response.payload.get("payload", {})
+        if not isinstance(payload, dict):
+            raise ValidationProviderError("Gmail devolvió un mensaje sin payload válido.")
+        headers = _allowed_headers(payload.get("headers", []))
+        text_parts, html_parts = _message_bodies(
+            payload,
+            detached_loader=lambda attachment_id: self._get_text_attachment(
+                message_id,
+                attachment_id,
+            ),
+        )
+        try:
+            received_at = datetime.fromtimestamp(
+                int(str(response.payload.get("internalDate", "0"))) / 1000,
+                tz=UTC,
+            )
+        except (ValueError, OSError, OverflowError) as exc:
+            raise ValidationProviderError("Gmail devolvió una fecha de mensaje inválida.") from exc
+        gmail_message_id = str(response.payload.get("id", ""))
+        thread_id = str(response.payload.get("threadId", ""))
+        if not gmail_message_id or not thread_id:
+            raise ValidationProviderError("Gmail devolvió un mensaje sin IDs.")
+        return GmailInboundMessage(
+            message_id=gmail_message_id,
+            thread_id=thread_id,
+            rfc_message_id=headers.get("Message-ID", ""),
+            in_reply_to=headers.get("In-Reply-To", ""),
+            references=tuple(headers.get("References", "").split()),
+            sender=headers.get("From", ""),
+            recipients=tuple(
+                item.strip() for item in headers.get("To", "").split(",") if item.strip()
+            ),
+            subject=headers.get("Subject", ""),
+            body_text="\n".join(text_parts),
+            body_html="\n".join(html_parts),
+            received_at=received_at,
+            headers=headers,
+        )
+
+    def _get_text_attachment(self, message_id: str, attachment_id: str) -> str:
+        response = self.transport.request(
+            method="GET",
+            url=(
+                f"{GMAIL_API}/users/me/messages/{quote(message_id)}/attachments/"
+                f"{quote(attachment_id)}"
+            ),
+            headers=self._headers(),
+        )
+        return _decode_body(response.payload.get("data"))
+
+
+def _decode_body(data: object) -> str:
+    if not isinstance(data, str) or not data:
+        return ""
+    padded = data + "=" * (-len(data) % 4)
+    try:
+        return base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
+    except (ValueError, TypeError):
+        return ""
+
+
+def _message_bodies(
+    payload: dict[str, Any],
+    *,
+    detached_loader: Callable[[str], str] | None = None,
+) -> tuple[list[str], list[str]]:
+    text_parts: list[str] = []
+    html_parts: list[str] = []
+
+    def visit(part: dict[str, Any]) -> None:
+        if str(part.get("filename", "")).strip():
+            return
+        mime_type = str(part.get("mimeType", "")).casefold()
+        body = part.get("body", {})
+        data = body.get("data") if isinstance(body, dict) else None
+        decoded = _decode_body(data)
+        attachment_id = str(body.get("attachmentId", "")) if isinstance(body, dict) else ""
+        if (
+            not decoded
+            and attachment_id
+            and detached_loader is not None
+            and mime_type in {"text/plain", "text/html"}
+        ):
+            decoded = detached_loader(attachment_id)
+        if decoded and mime_type == "text/plain":
+            text_parts.append(decoded)
+        elif decoded and mime_type == "text/html":
+            html_parts.append(decoded)
+        children = part.get("parts", [])
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    visit(child)
+
+    visit(payload)
+    return text_parts, html_parts
+
+
+def _allowed_headers(raw_headers: object) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not isinstance(raw_headers, list):
+        return result
+    for item in raw_headers:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if name.casefold() not in ALLOWED_INBOUND_HEADERS:
+            continue
+        canonical = "-".join(part.capitalize() for part in name.split("-"))
+        if canonical.casefold() == "message-id":
+            canonical = "Message-ID"
+        result[canonical] = str(item.get("value", ""))[:4000]
+    return result

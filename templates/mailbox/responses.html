@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Respuestas · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Respuestas de campañas</h1>
+<p class="muted">Sólo se muestran mensajes asociados a un thread ID o a cabeceras RFC de envíos propios.</p>
+
+{% if responses %}
+<table>
+    <thead><tr><th>Fecha</th><th>Campaña / prospecto</th><th>Remitente</th><th>Asunto</th><th>Clasificación</th><th></th></tr></thead>
+    <tbody>
+    {% for response in responses %}
+        <tr>
+            <td>{{ response.external_at }}</td>
+            <td>{{ response.related_outbound.campaign.name }}<br><small>{{ response.related_outbound.prospect.name }}</small></td>
+            <td>{{ response.sender }}</td>
+            <td>{{ response.subject|default:response.related_outbound.subject }}</td>
+            <td>{{ response.get_classification_display }}{% if response.classification_error %}<br><small>Revisión manual: {{ response.classification_error }}</small>{% endif %}</td>
+            <td><a class="button" href="{% url 'response-thread' response.pk %}">Ver hilo</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="card">Todavía no hay respuestas asociadas a campañas.</p>
+{% endif %}
+{% endblock %}
