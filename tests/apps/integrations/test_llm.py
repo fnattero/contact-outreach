@@ -13,11 +13,13 @@ from apps.integrations.contracts import (
     ValidationProviderError,
 )
 from apps.integrations.llm import (
+    NoRedirectHandler,
     OllamaProvider,
     OpenAICompatibleProvider,
     UrllibJSONTransport,
     analysis_json_schema,
     parse_analysis_output,
+    validate_llm_base_url,
 )
 
 
@@ -126,6 +128,29 @@ def test_provider_configuration_is_explicit() -> None:
         OpenAICompatibleProvider(base_url="", model="model", api_key="secret")
 
 
+def test_provider_urls_reject_secret_bearing_insecure_and_metadata_targets() -> None:
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_llm_base_url("http://provider.example/v1", label="remoto")
+    with pytest.raises(ValueError, match="credenciales"):
+        validate_llm_base_url("https://user:secret@provider.example/v1", label="remoto")
+    with pytest.raises(ValueError, match="query"):
+        validate_llm_base_url("https://provider.example/v1?api_key=secret", label="remoto")
+    with pytest.raises(ValueError, match="reservado"):
+        validate_llm_base_url("http://metadata.google.internal", label="remoto")
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_llm_base_url("http://internal-service/v1", label="OpenAI compatible")
+    assert validate_llm_base_url("http://ollama:11434", label="Ollama") == ("http://ollama:11434")
+    assert validate_llm_base_url("http://127.0.0.1:11434", label="local") == (
+        "http://127.0.0.1:11434"
+    )
+
+
+def test_llm_transport_refuses_redirects() -> None:
+    handler = NoRedirectHandler()
+    redirected = handler.redirect_request(None, None, 302, "Found", {}, "https://attacker.example")
+    assert redirected is None
+
+
 class FakeURLResponse:
     status = 200
 
@@ -140,8 +165,14 @@ class FakeURLResponse:
         return b'{"ok": true}'
 
 
+class FakeOpener:
+    def open(self, request: object, timeout: float) -> FakeURLResponse:
+        del request, timeout
+        return FakeURLResponse()
+
+
 def test_default_json_transport_parses_bounded_object(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("apps.integrations.llm.urlopen", lambda *args, **kwargs: FakeURLResponse())
+    monkeypatch.setattr("apps.integrations.llm.build_opener", lambda *args: FakeOpener())
 
     result = UrllibJSONTransport().post_json(
         url="https://llm.test/v1/chat/completions",

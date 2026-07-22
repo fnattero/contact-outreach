@@ -18,6 +18,7 @@ from apps.audit.services import record_event
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.campaigns.services import PROMPT_VERSION, SCHEMA_VERSION
 from apps.compliance.models import SuppressionEntry
+from apps.configuration.integrations import redact_provider_error
 from apps.integrations.contracts import (
     AIAnalysisResult,
     AnalysisFact,
@@ -219,8 +220,8 @@ def _output_json(result: AIAnalysisResult) -> dict[str, Any]:
     }
 
 
-def _sanitized_error(error: Exception) -> str:
-    return " ".join(str(error).split())[:500] or error.__class__.__name__
+def _sanitized_error(error: Exception, *, owner_id: int) -> str:
+    return redact_provider_error(error, owner_id=owner_id)
 
 
 def _campaign_allows_analysis(prospect: Prospect, *, manual: bool) -> bool:
@@ -277,7 +278,7 @@ def _persist_error(
             "next_retry_at": None,
             "prompt_text": prompt_text,
             "output_json": {},
-            "error": _sanitized_error(error),
+            "error": _sanitized_error(error, owner_id=prospect.campaign.created_by_id),
             "requested_by": actor,
         },
     )
@@ -331,7 +332,7 @@ def _persist_retry_wait(
             "next_retry_at": timezone.now() + timedelta(seconds=delay),
             "prompt_text": prompt_text,
             "output_json": {},
-            "error": _sanitized_error(error),
+            "error": _sanitized_error(error, owner_id=prospect.campaign.created_by_id),
             "requested_by": actor,
         },
     )
@@ -560,6 +561,7 @@ def analyze_prospect(
         provider_name,
         base_url=prospect.campaign.llm_base_url,
         model=model,
+        owner_id=prospect.campaign.created_by_id,
     )
     existing_analysis = AIAnalysis.objects.filter(
         input_hash=input_hash,

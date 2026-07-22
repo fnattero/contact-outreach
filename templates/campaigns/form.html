@@ -5,6 +5,7 @@
 {% block content %}
 <h1>Nueva campaña</h1>
 <p class="muted">El objetivo inicial es 300. Podés ajustar todos los límites antes de crear el borrador.</p>
+<p class="muted">Extractor, proveedor IA, URL y modelo se administran con reingreso de contraseña en <a href="{% url 'integrations' %}">Integraciones</a>; acá se guardan como snapshot de sólo lectura.</p>
 <form method="post" class="card form-card checkbox-list">
     {% csrf_token %}{{ form.as_p }}
     <p class="muted">SEND_MODE y kill switch son controles de despliegue de sólo lectura: {{ runtime_send_mode }} / {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}.</p>

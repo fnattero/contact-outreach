@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import unicodedata
 from collections.abc import Sequence
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -41,6 +43,53 @@ class StructuredReplyClassification(BaseModel):
         pattern="^(INTERESTED|NOT_INTERESTED|UNSUBSCRIBE|AUTO_REPLY|BOUNCE|OTHER)$"
     )
     confidence: float = Field(ge=0, le=1)
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> None:
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
+def _local_or_private_host(hostname: str, *, allow_service_name: bool) -> bool:
+    normalized = hostname.casefold().rstrip(".")
+    if normalized in {"localhost", "host.docker.internal"} or normalized.endswith(
+        (".localhost", ".test")
+    ):
+        return True
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return allow_service_name and "." not in normalized
+    if (
+        address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    ):
+        return False
+    return address.is_loopback or address.is_private
+
+
+def validate_llm_base_url(value: str, *, label: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold().rstrip(".")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError(f"La URL de {label} no puede contener credenciales, query ni fragmento.")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError(f"La URL de {label} debe ser HTTP o HTTPS válida.")
+    if hostname in {"metadata", "metadata.google.internal"}:
+        raise ValueError(f"La URL de {label} apunta a un host reservado.")
+    if parsed.scheme != "https" and not _local_or_private_host(
+        hostname, allow_service_name=label == "Ollama"
+    ):
+        raise ValueError(
+            f"La URL de {label} debe usar HTTPS salvo para un servicio local o privado."
+        )
+    return normalized
 
 
 def analysis_json_schema() -> dict[str, Any]:
@@ -100,7 +149,8 @@ class UrllibJSONTransport:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            opener = build_opener(NoRedirectHandler())
+            with opener.open(request, timeout=timeout_seconds) as response:
                 body = response.read(2 * 1024 * 1024 + 1)
                 if len(body) > 2 * 1024 * 1024:
                     raise ValidationProviderError("La respuesta IA excede el límite permitido.")
@@ -216,9 +266,9 @@ class OllamaProvider(_StructuredHTTPProvider):
         transport: JSONTransport | None = None,
     ) -> None:
         super().__init__(model=model, transport=transport)
-        self.base_url = base_url.rstrip("/")
-        if not self.base_url:
+        if not base_url.strip():
             raise ValueError("Ollama requiere una URL base explícita.")
+        self.base_url = validate_llm_base_url(base_url, label="Ollama")
 
     def analyze(self, request: AnalysisRequest) -> AIAnalysisResult:
         response = self.transport.post_json(
@@ -267,10 +317,11 @@ class OpenAICompatibleProvider(_StructuredHTTPProvider):
         transport: JSONTransport | None = None,
     ) -> None:
         super().__init__(model=model, transport=transport)
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.strip().rstrip("/")
         self.api_key = api_key
         if not self.base_url:
             raise ValueError("El proveedor compatible requiere una URL base explícita.")
+        self.base_url = validate_llm_base_url(self.base_url, label="OpenAI compatible")
         if not self.api_key:
             raise AuthenticationError("La API key del proveedor IA no está configurada.")
 

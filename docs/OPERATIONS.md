@@ -25,8 +25,9 @@ el volumen `/app/private`, crea manifiesto y checksums, y publica el directorio 
 Usa `umask 077`. Un fallo, incluido disco lleno, conserva el backup anterior y elimina sólo el
 temporal de esa ejecución.
 
-El backup no contiene `FIELD_ENCRYPTION_KEY`. Guardar esa clave por un canal cifrado separado. Un
-backup sin base, catálogos y clave no es restaurable.
+El dump contiene ciphertext de Integraciones pero no `FIELD_ENCRYPTION_KEY`. Guardar esa raíz por
+un canal cifrado separado. Un backup sin base, catálogos y clave no es restaurable; quien obtiene
+sólo el dump no debe poder descifrar API keys, client secret ni refresh token.
 
 ## 3. Restore
 
@@ -36,8 +37,9 @@ backup sin base, catálogos y clave no es restaurable.
 4. El script verifica checksums, detiene web/worker/beat, restaura PostgreSQL, reemplaza el volumen
    privado y reasigna sus archivos al usuario no privilegiado `app`; después aplica migraciones y
    ejecuta `verify_restore`.
-5. `verify_restore` rechaza migraciones pendientes, catálogos ausentes/hash inválido, tokens no
-   descifrables, poco disco o live efectivo sin kill switch.
+5. `verify_restore` rechaza migraciones pendientes, catálogos ausentes/hash inválido, refresh tokens
+   o credenciales de integración no descifrables, poco disco o live efectivo sin kill switch. Nunca
+   imprime valores ni ciphertext.
 6. Revisar dashboard, Gmail y health; completar el checklist live antes de cambiar barreras.
 
 La restauración es destructiva sólo después de `--confirm`. Probarla periódicamente sobre una

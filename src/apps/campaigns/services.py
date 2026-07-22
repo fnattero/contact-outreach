@@ -19,6 +19,7 @@ from apps.campaigns.models import (
     SearchRun,
 )
 from apps.catalogs.services import verify_catalog
+from apps.configuration.integrations import get_llm_api_key, get_outscraper_api_key
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone, normalize_name
 from apps.configuration.services import profile_snapshot
 
@@ -147,10 +148,20 @@ def _preflight(campaign: Campaign) -> BusinessProfile:
         raise ValidationError("La campaña necesita rubros y zonas.")
     verify_catalog(campaign.catalog)
     campaign.full_clean()
-    if campaign.extractor_provider == "outscraper" and not settings.OUTSCRAPER_API_KEY:
-        raise ValidationError("OUTSCRAPER_API_KEY no está configurada en el entorno.")
-    if campaign.llm_provider == "openai-compatible" and not settings.LLM_API_KEY:
-        raise ValidationError("LLM_API_KEY no está configurada en el entorno.")
+    if campaign.extractor_provider == "outscraper":
+        try:
+            outscraper_key = get_outscraper_api_key(campaign.created_by_id)
+        except Exception as exc:
+            raise ValidationError("La credencial de Outscraper no se puede descifrar.") from exc
+        if not outscraper_key:
+            raise ValidationError("Configurá la API key de Outscraper en Integraciones.")
+    if campaign.llm_provider == "openai-compatible":
+        try:
+            llm_key = get_llm_api_key(campaign.created_by_id)
+        except Exception as exc:
+            raise ValidationError("La credencial del proveedor IA no se puede descifrar.") from exc
+        if not llm_key:
+            raise ValidationError("Configurá la API key del proveedor IA en Integraciones.")
     if campaign.delivery_mode == Campaign.DeliveryMode.LIVE:
         if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
             raise ValidationError("El modo live está bloqueado por los controles de despliegue.")

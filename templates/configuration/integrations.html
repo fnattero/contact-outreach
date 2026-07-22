@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Integraciones · Contact Outreach{% endblock %}
+
+{% block content %}
+<h1>Integraciones</h1>
+<p class="muted">Configurá Gmail, IA y Outscraper sin volver a mostrar credenciales guardadas. Los secretos se cifran con una clave que permanece fuera de la base.</p>
+
+<div class="card">
+    <strong>Límite de seguridad:</strong>
+    <span><code>FIELD_ENCRYPTION_KEY</code>, <code>DJANGO_SECRET_KEY</code>, base de datos, Redis, hosts/TLS, <code>SEND_MODE</code> y el kill switch siguen siendo configuración externa.</span>
+</div>
+
+<form method="post" class="form-card" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <section class="card">
+        <h2>Outscraper</h2>
+        <p>{{ form.extractor_provider.label_tag }}{{ form.extractor_provider }}{{ form.extractor_provider.errors }}</p>
+        <p>{{ form.outscraper_api_key.label_tag }}{{ form.outscraper_api_key }}<small class="muted">{{ form.outscraper_api_key.help_text }}</small>{{ form.outscraper_api_key.errors }}</p>
+        <p>{{ form.remove_outscraper_api_key }} {{ form.remove_outscraper_api_key.label_tag }}{{ form.remove_outscraper_api_key.errors }}</p>
+        <p>{{ form.outscraper_base_url.label_tag }}{{ form.outscraper_base_url }}{{ form.outscraper_base_url.errors }}</p>
+        <p>{{ form.outscraper_max_cost_per_result.label_tag }}{{ form.outscraper_max_cost_per_result }}{{ form.outscraper_max_cost_per_result.errors }}</p>
+        <p>{{ form.outscraper_batch_size.label_tag }}{{ form.outscraper_batch_size }}{{ form.outscraper_batch_size.errors }}</p>
+        <p>{{ form.outscraper_poll_seconds.label_tag }}{{ form.outscraper_poll_seconds }}{{ form.outscraper_poll_seconds.errors }}</p>
+    </section>
+
+    <section class="card">
+        <h2>Proveedor IA</h2>
+        <p>{{ form.llm_provider.label_tag }}{{ form.llm_provider }}{{ form.llm_provider.errors }}</p>
+        <p>{{ form.llm_model.label_tag }}{{ form.llm_model }}{{ form.llm_model.errors }}</p>
+        <p>{{ form.ollama_base_url.label_tag }}{{ form.ollama_base_url }}{{ form.ollama_base_url.errors }}</p>
+        <p>{{ form.openai_compatible_base_url.label_tag }}{{ form.openai_compatible_base_url }}{{ form.openai_compatible_base_url.errors }}</p>
+        <p>{{ form.llm_api_key.label_tag }}{{ form.llm_api_key }}<small class="muted">{{ form.llm_api_key.help_text }}</small>{{ form.llm_api_key.errors }}</p>
+        <p>{{ form.remove_llm_api_key }} {{ form.remove_llm_api_key.label_tag }}{{ form.remove_llm_api_key.errors }}</p>
+    </section>
+
+    <section class="card">
+        <h2>Google Gmail</h2>
+        <p>{{ form.gmail_provider.label_tag }}{{ form.gmail_provider }}{{ form.gmail_provider.errors }}</p>
+        <p>{{ form.gmail_oauth_client_id.label_tag }}{{ form.gmail_oauth_client_id }}{{ form.gmail_oauth_client_id.errors }}</p>
+        <p>{{ form.gmail_oauth_client_secret.label_tag }}{{ form.gmail_oauth_client_secret }}<small class="muted">{{ form.gmail_oauth_client_secret.help_text }}</small>{{ form.gmail_oauth_client_secret.errors }}</p>
+        <p>{{ form.remove_gmail_oauth_client_secret }} {{ form.remove_gmail_oauth_client_secret.label_tag }}{{ form.remove_gmail_oauth_client_secret.errors }}</p>
+        <p><strong>Redirect URI para Google Cloud:</strong><br><code>{{ gmail_redirect_uri }}</code></p>
+        <p class="muted">Creá una credencial OAuth de aplicación web en Google Cloud y registrá exactamente esta URI. Después de guardar, usá <a href="{% url 'gmail-settings' %}">Conectar con Google</a>.</p>
+    </section>
+
+    <section class="card">
+        <h2>Confirmar cambio</h2>
+        <p>{{ form.current_password.label_tag }}{{ form.current_password }}<small class="muted">{{ form.current_password.help_text }}</small>{{ form.current_password.errors }}</p>
+        <button type="submit">Guardar integraciones</button>
+    </section>
+</form>
+{% endblock %}

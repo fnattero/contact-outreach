@@ -42,7 +42,10 @@ durable usa las tres operaciones explícitas.
 El adaptador vigente usa `GET /google-maps-search` con `async=true`, enrichment
 `contacts_n_leads`, región `AR` e idioma `es-419`; autentica exclusivamente con `X-API-KEY` y
 recupera trabajos con `GET /requests/{requestId}`. El transport HTTP es inyectable para impedir red
-en tests. La API key proviene sólo de `OUTSCRAPER_API_KEY`.
+en tests. La API key se resuelve justo antes de construir el adaptador desde
+`IntegrationConfiguration` cifrada o, durante migración, desde `OUTSCRAPER_API_KEY`. Nunca entra en
+URL, request JSON, task, snapshot ni auditoría. La URL base editable sigue limitada por el propio
+adaptador a HTTPS y hosts oficiales de Outscraper.
 
 Si la API devuelve un request asíncrono, `SearchRun` persiste el request ID y el polling es idempotente. Un run no se repite con una nueva solicitud después de timeout si puede consultarse el request existente. Se respetan 429/403, `Retry-After`, estado de cuenta y errores permanentes.
 
@@ -76,11 +79,24 @@ El resultado contiene páginas, final URLs, fechas, status, content hashes, extr
 - `OllamaProvider`: endpoint local configurable, modelo explícito y JSON schema cuando la versión lo soporte; no presupone GPU.
 - `OpenAICompatibleProvider`: base URL, modelo y API key; usa `/v1/chat/completions` compatible y modo JSON/schema si está disponible, siempre con validación local.
 
+Proveedor, modelo y URLs base tienen defaults editables en Integraciones y se congelan en cada
+campaña. El formulario de campaña los muestra deshabilitados y el servidor ignora cualquier
+override POST: cambiarlos exige reautenticarse en Integraciones. La API key se resuelve desde
+ciphertext o fallback de entorno sólo al construir el adaptador. URLs con
+userinfo/query/fragment se rechazan; HTTP sólo se admite para hosts
+locales/privados, y el transport no sigue redirects para no reenviar el header `Authorization` a
+otro origen.
+
 El input contiene hechos con IDs estables, perfil snapshot, reglas y texto web rotulado no confiable. `evidence` sólo admite hechos del input. El prefijo `PUBLICIDAD -`, firma y BAJA se aplican/validan en código de dominio para no depender del modelo. El prompt descuenta del presupuesto las palabras del footer determinístico y el validador exige que el cuerpo final compuesto, no sólo el fragmento del modelo, tenga 70–130 palabras.
 
 Una llamada lógica por prospecto puede tener hasta tres intentos técnicos con el mismo input hash. JSON/schema inválido se reintenta localmente de manera acotada; rate limit o falla transitoria se persiste como `RETRY_WAIT` y se reprograma respetando `Retry-After`/backoff, sin agotar intentos en un loop sin espera. No se encadenan llamadas de corrección ni fallback genérico. El caché incluye input, prompt/schema, proveedor y modelo. Clasificación de respuestas es una operación distinta; BAJA y bounce se resuelven primero con reglas.
 
 ## 6. Gmail OAuth y envío
+
+El dashboard guarda client ID y client secret de la aplicación web; el secreto queda cifrado y
+write-only. Guardar la configuración exige reingreso de contraseña y una conexión activa debe
+desconectarse antes de cambiar esas credenciales. El redirect se deriva del callback o de la
+configuración externa explícita y debe registrarse manualmente en Google Cloud.
 
 Flujo OAuth web-server con PKCE/state, redirect local configurado, acceso offline y scopes:
 

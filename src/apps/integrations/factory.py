@@ -3,6 +3,12 @@ from __future__ import annotations
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+from apps.configuration.integrations import (
+    get_gmail_oauth_client_secret,
+    get_llm_api_key,
+    get_outscraper_api_key,
+    runtime_integration_configuration,
+)
 from apps.integrations.contracts import (
     ExtractorProvider,
     GmailProvider,
@@ -28,14 +34,17 @@ def _require_fake(setting_name: str) -> None:
         )
 
 
-def get_extractor_provider(provider_name: str | None = None) -> ExtractorProvider:
-    selected = provider_name or settings.EXTRACTOR_PROVIDER
+def get_extractor_provider(
+    provider_name: str | None = None, *, owner_id: int | None = None
+) -> ExtractorProvider:
+    runtime = runtime_integration_configuration(owner_id)
+    selected = provider_name or runtime.extractor_provider
     if selected == "fake":
         return FakeExtractorProvider()
     if selected == "outscraper":
         return OutscraperProvider(
-            api_key=settings.OUTSCRAPER_API_KEY,
-            base_url=settings.OUTSCRAPER_BASE_URL,
+            api_key=get_outscraper_api_key(owner_id),
+            base_url=runtime.outscraper_base_url,
         )
     raise ImproperlyConfigured(f"Extractor provider {selected!r} is not supported")
 
@@ -54,21 +63,23 @@ def get_llm_provider(
     *,
     base_url: str = "",
     model: str = "",
+    owner_id: int | None = None,
 ) -> LLMProvider:
-    selected = provider_name or settings.LLM_PROVIDER
-    selected_model = model or settings.LLM_MODEL
+    runtime = runtime_integration_configuration(owner_id)
+    selected = provider_name or runtime.llm_provider
+    selected_model = model or runtime.llm_model
     if selected == "fake":
         return MockLLMProvider()
     if selected == "ollama":
         return OllamaProvider(
-            base_url=base_url or settings.OLLAMA_BASE_URL,
+            base_url=base_url or runtime.ollama_base_url,
             model=selected_model,
         )
     if selected == "openai-compatible":
         return OpenAICompatibleProvider(
-            base_url=base_url or settings.OPENAI_COMPATIBLE_BASE_URL,
+            base_url=base_url or runtime.openai_compatible_base_url,
             model=selected_model,
-            api_key=settings.LLM_API_KEY,
+            api_key=get_llm_api_key(owner_id),
         )
     raise ImproperlyConfigured(f"LLM provider {selected!r} is not supported")
 
@@ -79,18 +90,20 @@ def get_gmail_provider(
     code_verifier: str = "",
     code_challenge: str = "",
     persist_fake: bool = False,
+    owner_id: int | None = None,
 ) -> GmailProvider:
-    if settings.GMAIL_PROVIDER == "fake":
+    runtime = runtime_integration_configuration(owner_id)
+    if runtime.gmail_provider == "fake":
         return FakeGmailProvider(
             account_email=settings.GMAIL_FAKE_ACCOUNT_EMAIL,
             persist=persist_fake,
         )
-    if settings.GMAIL_PROVIDER == "api":
+    if runtime.gmail_provider == "api":
         return GmailAPIProvider(
-            client_id=settings.GMAIL_OAUTH_CLIENT_ID,
-            client_secret=settings.GMAIL_OAUTH_CLIENT_SECRET,
+            client_id=runtime.gmail_oauth_client_id,
+            client_secret=get_gmail_oauth_client_secret(owner_id),
             refresh_token=refresh_token,
             code_verifier=code_verifier,
             code_challenge=code_challenge,
         )
-    raise ImproperlyConfigured(f"Gmail provider {settings.GMAIL_PROVIDER!r} is not supported")
+    raise ImproperlyConfigured(f"Gmail provider {runtime.gmail_provider!r} is not supported")

@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_event
+from apps.configuration.integrations import runtime_integration_configuration
 from apps.integrations.contracts import GmailProvider, GmailSendRequest, ProviderError
 from apps.integrations.factory import get_gmail_provider
 from apps.integrations.gmail import GMAIL_SCOPES
@@ -34,9 +35,11 @@ def oauth_redirect_uri(request_uri: str) -> str:
     return settings.GMAIL_OAUTH_REDIRECT_URI or request_uri
 
 
-def authorization_url(*, state: str, verifier: str, challenge: str, redirect_uri: str) -> str:
+def authorization_url(
+    *, owner: User, state: str, verifier: str, challenge: str, redirect_uri: str
+) -> str:
     del verifier
-    provider = get_gmail_provider(code_challenge=challenge)
+    provider = get_gmail_provider(code_challenge=challenge, owner_id=owner.pk)
     return provider.authorization_url(state, redirect_uri)
 
 
@@ -48,10 +51,11 @@ def connect_gmail(
     verifier: str,
     redirect_uri: str,
 ) -> GmailConnection:
-    provider = get_gmail_provider(code_verifier=verifier)
+    provider = get_gmail_provider(code_verifier=verifier, owner_id=owner.pk)
     data = provider.exchange_code(code, redirect_uri)
     domain = data.email.rsplit("@", 1)[-1].casefold()
-    if settings.GMAIL_PROVIDER == "api" and domain not in {"gmail.com", "googlemail.com"}:
+    runtime = runtime_integration_configuration(owner.pk)
+    if runtime.gmail_provider == "api" and domain not in {"gmail.com", "googlemail.com"}:
         try:
             provider.revoke()
         finally:
@@ -97,6 +101,7 @@ def provider_for_connection(
     return get_gmail_provider(
         refresh_token=decrypt_token(connection.refresh_token_encrypted),
         persist_fake=persist_fake,
+        owner_id=connection.owner_id,
     )
 
 

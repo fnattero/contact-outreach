@@ -42,7 +42,7 @@ El contenido se trata como dato hostil: nunca puede modificar instrucciones del 
 
 ### FR-05 Análisis y generación con IA
 
-Una llamada lógica por prospecto, con reintentos limitados, produce JSON validado por Pydantic: `relevance_score` 0–100, `confidence` 0–1, `relevance_reason`, `evidence[]`, `subject` y `body_text`. Las evidencias deben corresponder a hechos suministrados. Existen `MockLLMProvider`, `OllamaProvider` y `OpenAICompatibleProvider` con base URL, modelo y API key externa al repositorio.
+Una llamada lógica por prospecto, con reintentos limitados, produce JSON validado por Pydantic: `relevance_score` 0–100, `confidence` 0–1, `relevance_reason`, `evidence[]`, `subject` y `body_text`. Las evidencias deben corresponder a hechos suministrados. Existen `MockLLMProvider`, `OllamaProvider` y `OpenAICompatibleProvider` con base URL, modelo y API key externa al repositorio, almacenada como ciphertext cuando se configura desde el dashboard.
 
 El mensaje final compuesto usa español argentino, tono profesional y directo, 70–130 palabras incluyendo firma y BAJA, texto plano, sin emojis, tracking, afirmaciones inventadas, descuentos falsos ni marketing vacío. Sólo menciona contexto explícito; no dice haber visto una web sin evidencia. Explica una relación posible con carbones para motores sin asumir compra y pregunta únicamente qué día conviene que pase el vendedor. Agrega identidad, firma e instrucción clara para responder `BAJA`; el prefijo inicial de asunto es `PUBLICIDAD -`.
 
@@ -50,7 +50,7 @@ Por debajo del umbral se marca irrelevante y no se envía. Tras agotar reintento
 
 ### FR-06 Perfil comercial y configuración
 
-El dashboard edita empresa, vendedor, teléfono, WhatsApp, descripción, productos, diferenciadores, dirección, web, firma, instrucciones adicionales y umbral. También configura ubicación, límites, proveedor/modelo y parámetros no secretos. API keys permanecen en variables de entorno y sólo se muestra su estado redactado.
+El dashboard edita empresa, vendedor, teléfono, WhatsApp, descripción, productos, diferenciadores, dirección, web, firma, instrucciones adicionales y umbral. También configura ubicación, límites, proveedor/modelo y parámetros de Outscraper, IA y Google OAuth. Las API keys y el client secret se aceptan únicamente por POST autenticado con CSRF y reingreso de contraseña, se cifran con una clave raíz externa y son write-only: después de guardar sólo se muestra estado/origen, nunca el valor ni el ciphertext. Variables de entorno equivalentes permanecen como fallback de migración hasta que el propietario reemplaza o desactiva expresamente cada credencial.
 
 ### FR-07 Ciclo de campaña
 
@@ -68,7 +68,7 @@ El usuario carga y selecciona versiones inmutables de catálogo. Se validan exte
 
 ### FR-10 Gmail y primer envío
 
-Una página permite conectar, inspeccionar, probar y desconectar una sola cuenta personal Gmail mediante OAuth 2.0. No se solicita ni almacena contraseña. Se generan MIME RFC válidos con cuerpo texto plano y PDF, `Message-ID` determinístico y cabeceras internas opacas. Se guardan recipient, subject, fechas, `gmail_message_id` y `gmail_thread_id`.
+Una página permite configurar el client ID/secret de una aplicación OAuth web y conectar, inspeccionar, probar y desconectar una sola cuenta personal Gmail mediante OAuth 2.0. El client secret es write-only y cifrado; la contraseña Google nunca se solicita ni almacena. Una conexión activa debe desconectarse antes de reemplazar las credenciales OAuth. Se generan MIME RFC válidos con cuerpo texto plano y PDF, `Message-ID` determinístico y cabeceras internas opacas. Se guardan recipient, subject, fechas, `gmail_message_id` y `gmail_thread_id`.
 
 Antes de reintentar un envío ambiguo se reconcilia por `Message-ID` y datos persistidos. No se rotan cuentas ni se evaden límites de Gmail.
 
@@ -96,7 +96,7 @@ Servicios de dominio validan transiciones; las vistas y tareas no asignan estado
 
 ### FR-16 Seguridad local
 
-No hay registro público. Un usuario propietario se inicializa desde variables de entorno y la contraseña sólo se guarda hasheada. Django provee sesiones, CSRF y hashing Argon2. La web escucha por defecto en `127.0.0.1`; exposición externa exige configuración explícita, TLS en proxy y cookies seguras. Se validan uploads y contenido externo, se cifran tokens, se redactan secretos y se aplican límites a todas las integraciones.
+No hay registro público. Un usuario propietario se inicializa desde variables de entorno y la contraseña sólo se guarda hasheada. Django provee sesiones, CSRF y hashing Argon2. La web escucha por defecto en `127.0.0.1`; exposición externa exige configuración explícita, TLS en proxy y cookies seguras. Se validan uploads y contenido externo, se cifran tokens y credenciales con propósitos criptográficos separados, se redactan secretos y se aplican límites a todas las integraciones. La clave raíz, secretos Django/infraestructura y barreras live nunca son editables desde el dashboard.
 
 ### FR-17 Abstracciones y modo fake
 
@@ -106,7 +106,7 @@ Extractor, IA, Gmail y fetch web viven detrás de interfaces, con implementacion
 
 - **OPS-01:** Python 3.12+, Django 5.2 LTS, PostgreSQL, Celery, Redis, Docker Compose, pytest, Ruff, mypy con `django-stubs` y migraciones versionadas; sin Node salvo necesidad demostrada.
 - **OPS-02:** entregar en fases posteriores Dockerfile, Compose, `.env.example`, Makefile, README, backups, restore, health checks, seeds, demo y comandos `make lint`, `make test`, `make typecheck`.
-- **DM-01:** persistir y relacionar como mínimo `User`, `BusinessProfile`, `SearchCategory`, `SearchZone`, `SearchQuery`, `SearchRun`, `Prospect`, `ProspectEmail`, `WebsiteSnapshot`, `AIAnalysis`, `Campaign`, `Catalog`, `OutboundMessage`, `InboundMessage`, `SuppressionEntry`, `ProviderUsage`, `AuditEvent` y `BackgroundJob`, con las extensiones de integridad documentadas en `DATA_MODEL.md`.
+- **DM-01:** persistir y relacionar como mínimo `User`, `BusinessProfile`, `IntegrationConfiguration`, `SearchCategory`, `SearchZone`, `SearchQuery`, `SearchRun`, `Prospect`, `ProspectEmail`, `WebsiteSnapshot`, `AIAnalysis`, `Campaign`, `Catalog`, `OutboundMessage`, `InboundMessage`, `SuppressionEntry`, `ProviderUsage`, `AuditEvent` y `BackgroundJob`, con las extensiones de integridad documentadas en `DATA_MODEL.md`.
 - **QA-01:** cubrir normalización, deduplicación, email/MX, IA, prompt injection, SSRF, MIME, cuotas, reinicios, estados, idempotencia, bajas, hilos, respuesta manual, permisos, CSRF y E2E fake.
 
 ## 5. Fuera de alcance

@@ -10,6 +10,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import verify_catalog
+from apps.configuration.integrations import validate_encrypted_integration_credentials
 from apps.mailbox.crypto import decrypt_token
 from apps.mailbox.models import GmailConnection
 
@@ -40,6 +41,7 @@ class Command(BaseCommand):
                 decrypt_token(gmail.refresh_token_encrypted)
             except Exception:
                 failures.append(f"token Gmail {gmail.pk} no descifrable")
+        failures.extend(validate_encrypted_integration_credentials())
         try:
             free = shutil.disk_usage(settings.PRIVATE_STORAGE_ROOT).free
         except OSError:

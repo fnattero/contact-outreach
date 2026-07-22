@@ -14,6 +14,7 @@ from apps.audit.models import BackgroundJob
 from apps.campaigns.models import Campaign, OutboundMessage, SearchRun
 from apps.catalogs.models import Catalog
 from apps.compliance.models import SuppressionEntry
+from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone
 from apps.mailbox.models import InboundMessage
 from apps.prospects.models import Prospect
@@ -35,11 +36,12 @@ def _page_context(
 def dashboard(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
+    integration_runtime = runtime_integration_configuration(owner.pk)
     providers = {
-        "Extractor": settings.EXTRACTOR_PROVIDER,
+        "Extractor": integration_runtime.extractor_provider,
         "Sitios web": settings.WEBSITE_FETCHER,
-        "IA": settings.LLM_PROVIDER,
-        "Gmail": settings.GMAIL_PROVIDER,
+        "IA": integration_runtime.llm_provider,
+        "Gmail": integration_runtime.gmail_provider,
     }
     campaign_scope = Campaign.objects.filter(created_by=owner)
     selected_campaign = request.GET.get("campaign", "")

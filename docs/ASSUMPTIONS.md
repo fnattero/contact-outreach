@@ -15,7 +15,7 @@ Este registro fija alternativas simples para detalles no bloqueantes. Todos los 
 | A-009 | Web: home + 3 internas, 3 redirects, 2 MiB/página, connect 5 s, read 10 s, total 30 s. | **SEGURIDAD / COSTO** |
 | A-010 | Raw extractor y snapshots web: 180 días; supresión mínima: permanente. | **SEGURIDAD / INTEGRIDAD** |
 | A-011 | Tres intentos técnicos para extractor/LLM, backoff con jitter y máximo 15 minutos; web falla abierto hacia contexto mínimo. | Costo / disponibilidad |
-| A-012 | API keys sólo por entorno; base URL/modelo/parámetros no secretos desde dashboard. Refresh token Gmail cifrado en DB. | **SEGURIDAD** |
+| A-012 | API keys LLM/Outscraper y Google client secret son write-only y cifrados por propósito en DB; entorno es fallback explícito. `FIELD_ENCRYPTION_KEY`, infraestructura y barreras live siguen sólo externas. Refresh token Gmail queda cifrado por separado. | **SEGURIDAD** |
 | A-013 | Gmail usa `gmail.send` + `gmail.readonly`; sync cada 5 minutos; fallback 30 días/1000 candidatos. | **SEGURIDAD / COSTO** |
 | A-014 | Idempotencia Gmail es efectivamente-una-vez mediante Message-ID/reconciliación, no garantía absoluta del proveedor. | **INTEGRIDAD DE DATOS** |
 | A-015 | El prefijo se agrega fuera de IA y vale `PUBLICIDAD -`; firma, identidad, domicilio y BAJA son obligatorios en live. | **LEGAL / ENTREGABILIDAD** |
@@ -70,5 +70,7 @@ Los 48 nacen activos, `kind=NEIGHBORHOOD`, ubicación `Ciudad Autónoma de Bueno
 2. **“Nunca duplicar” vs. Gmail:** no existe idempotency key de envío provista por Gmail. Se pausa ante incertidumbre no reconciliable en lugar de reintentar a ciegas.
 3. **Scopes mínimos vs. lectura de respuestas:** `gmail.readonly` es necesario para cuerpos/hilos y tiene acceso potencial amplio; la aplicación minimiza persistencia, pero el riesgo del scope permanece.
 4. **Objetivo 300 vs. 30/día:** calificación puede completarse antes; la cola se drena durante varios días respetando calendario.
-5. **Configuración IA vs. secretos:** dashboard edita proveedor/base URL/modelo, mientras la API key se inyecta externamente y sólo se muestra como configurada/no configurada.
+5. **Configuración IA vs. secretos:** dashboard edita proveedor/base URL/modelo y acepta una API key
+   write-only con reautenticación. Sólo muestra estado/origen; la clave raíz permanece externa y un
+   borrado explícito no vuelve al fallback de entorno.
 6. **Límite de extracción vs. cola existente:** agotar objetivo/queries/raw/costo/proveedor termina descubrimiento, pero no cancela mensajes ya autorizados; la campaña completa después de drenar esa cola.

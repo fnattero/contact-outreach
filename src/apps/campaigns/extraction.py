@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 from datetime import timedelta
 from decimal import ROUND_FLOOR, Decimal
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
 from apps.audit.services import record_event
 from apps.campaigns.models import Campaign, ProviderUsage, SearchQuery, SearchRun
+from apps.configuration.integrations import (
+    redact_provider_error,
+    runtime_integration_configuration,
+)
 from apps.integrations.contracts import (
     AuthenticationError,
     CostLimitError,
@@ -50,8 +52,10 @@ ACTIVE_RUN_STATES = (
 )
 
 
-def _unit_cost(provider: str) -> Decimal:
-    return Decimal("0") if provider == "fake" else settings.OUTSCRAPER_MAX_COST_PER_RESULT
+def _unit_cost(provider: str, *, owner_id: int) -> Decimal:
+    if provider == "fake":
+        return Decimal("0")
+    return runtime_integration_configuration(owner_id).outscraper_max_cost_per_result
 
 
 def _campaign_cost(campaign: Campaign) -> Decimal:
@@ -157,8 +161,9 @@ def ensure_next_search_run(campaign_id: uuid.UUID | str) -> SearchRun | None:
         return None
 
     raw_used = sum(campaign.search_runs.values_list("raw_count", flat=True))
-    requested_limit = min(settings.OUTSCRAPER_BATCH_SIZE, campaign.max_raw_records - raw_used)
-    per_unit = _unit_cost(campaign.extractor_provider)
+    runtime = runtime_integration_configuration(campaign.created_by_id)
+    requested_limit = min(runtime.outscraper_batch_size, campaign.max_raw_records - raw_used)
+    per_unit = _unit_cost(campaign.extractor_provider, owner_id=campaign.created_by_id)
     cost_remaining = campaign.cost_limit - _campaign_cost(campaign)
     if per_unit > 0:
         affordable = int((cost_remaining / per_unit).to_integral_value(rounding=ROUND_FLOOR))
@@ -290,7 +295,8 @@ def _mark_pending(run_id: uuid.UUID, *, retry_after: float | None = None) -> Sea
         or run.state == SearchRun.State.CANCELLED
     ):
         return run
-    delay = retry_after if retry_after is not None else settings.OUTSCRAPER_POLL_SECONDS
+    runtime = runtime_integration_configuration(campaign.created_by_id)
+    delay = retry_after if retry_after is not None else runtime.outscraper_poll_seconds
     run.state = SearchRun.State.RETRY_WAIT
     run.next_poll_at = timezone.now() + timedelta(seconds=max(1.0, delay))
     run.query.state = SearchQuery.State.RETRY_WAIT
@@ -312,7 +318,7 @@ def _mark_retryable(run_id: uuid.UUID, error: Exception) -> SearchRun:
         return run
     run.campaign = campaign
     run.attempts += 1
-    run.error = _sanitized_error(error)
+    run.error = _sanitized_error(error, owner_id=campaign.created_by_id)
     if run.attempts >= MAX_PROVIDER_ATTEMPTS:
         run.state = SearchRun.State.FAILED_PERMANENT
         run.finished_at = timezone.now()
@@ -357,7 +363,7 @@ def _mark_permanent(run_id: uuid.UUID, error: Exception) -> SearchRun:
         return run
     run.campaign = campaign
     run.state = SearchRun.State.FAILED_PERMANENT
-    run.error = _sanitized_error(error)
+    run.error = _sanitized_error(error, owner_id=campaign.created_by_id)
     run.finished_at = timezone.now()
     run.query.state = SearchQuery.State.FAILED_PERMANENT
     run.query.last_error = run.error
@@ -377,16 +383,8 @@ def _mark_permanent(run_id: uuid.UUID, error: Exception) -> SearchRun:
     return run
 
 
-def _sanitized_error(error: Exception) -> str:
-    message = " ".join(str(error).split())[:500] or error.__class__.__name__
-    secret = settings.OUTSCRAPER_API_KEY
-    if secret:
-        message = message.replace(secret, "[REDACTED]")
-    return re.sub(
-        r"(?i)\b(api[_-]?key|token|authorization)\s*[:=]\s*[^\s,;]+",
-        r"\1=[REDACTED]",
-        message,
-    )
+def _sanitized_error(error: Exception, *, owner_id: int) -> str:
+    return redact_provider_error(error, owner_id=owner_id)
 
 
 def _process_persisted_response(
@@ -452,7 +450,9 @@ def _persist_processed_records(
     run.finished_at = run.processed_at
     run.state = SearchRun.State.SUCCEEDED
     if run.cost_estimated is None:
-        run.cost_estimated = _unit_cost(run.provider) * raw_count
+        run.cost_estimated = (
+            _unit_cost(run.provider, owner_id=run.campaign.created_by_id) * raw_count
+        )
     run.query.state = SearchQuery.State.SUCCEEDED
     run.query.last_error = ""
     run.save(
@@ -539,7 +539,9 @@ def advance_search_run(
     if run.campaign.state != Campaign.State.RUNNING:
         return run
     try:
-        active_provider = provider or get_extractor_provider(run.provider)
+        active_provider = provider or get_extractor_provider(
+            run.provider, owner_id=run.campaign.created_by_id
+        )
     except (AuthenticationError, ValidationProviderError) as exc:
         return _mark_permanent(run.pk, exc)
     active_resolver = resolver or (MockMXResolver() if run.provider == "fake" else DNSMXResolver())

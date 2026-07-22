@@ -14,6 +14,7 @@ from apps.campaigns.forms import CampaignForm
 from apps.campaigns.models import Campaign
 from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
+from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import BusinessProfile
 from apps.prospects.models import Prospect
 from apps.prospects.pipeline import request_manual_regeneration
@@ -39,6 +40,12 @@ CAMPAIGN_VALUE_FIELDS = (
     "llm_base_url",
     "llm_model",
     "catalog",
+)
+INTEGRATION_SNAPSHOT_FIELDS = (
+    "extractor_provider",
+    "llm_provider",
+    "llm_base_url",
+    "llm_model",
 )
 
 
@@ -71,11 +78,30 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
     initial: dict[str, object] = {}
+    integration_runtime = runtime_integration_configuration(owner.pk)
+    initial.update(
+        {
+            "extractor_provider": integration_runtime.extractor_provider,
+            "llm_provider": integration_runtime.llm_provider,
+            "llm_model": integration_runtime.llm_model,
+            "llm_base_url": integration_runtime.llm_base_url(),
+        }
+    )
     profile = BusinessProfile.objects.filter(owner=owner).first()
     if profile is not None:
         initial["relevance_threshold"] = profile.relevance_threshold
+    form = CampaignForm(
+        request.POST if request.method == "POST" else None,
+        initial=initial,
+    )
+    for field_name in INTEGRATION_SNAPSHOT_FIELDS:
+        form.fields[field_name].disabled = True
+        form.fields[
+            field_name
+        ].help_text = (
+            "Se configura con reautenticación en Integraciones y se congela en la campaña."
+        )
     if request.method == "POST":
-        form = CampaignForm(request.POST)
         if form.is_valid():
             try:
                 campaign = create_campaign(
@@ -89,8 +115,6 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
             else:
                 messages.success(request, "Campaña creada en borrador.")
                 return redirect("campaign-detail", campaign_id=campaign.pk)
-    else:
-        form = CampaignForm(initial=initial)
     return render(request, "campaigns/form.html", {"form": form})
 
 

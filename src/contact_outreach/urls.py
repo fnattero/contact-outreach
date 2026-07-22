@@ -18,6 +18,7 @@ from apps.configuration.views import (
     business_profile,
     categories,
     delete_item,
+    integrations,
     toggle_item,
     zones,
 )
@@ -51,6 +52,7 @@ urlpatterns = [
     path("envios/", outbound_list, name="outbound-messages"),
     path("envios/exportar.csv", outbound_export, name="outbound-export"),
     path("perfil/", business_profile, name="business-profile"),
+    path("integraciones/", integrations, name="integrations"),
     path("rubros/", categories, name="categories"),
     path("zonas/", zones, name="zones"),
     path("configuracion/<str:kind>/<uuid:item_id>/toggle/", toggle_item, name="config-toggle"),

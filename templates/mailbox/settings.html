@@ -5,6 +5,7 @@
 {% block content %}
 <h1>Gmail</h1>
 <p class="muted">OAuth usa únicamente gmail.send y gmail.readonly. No se guarda ninguna contraseña.</p>
+<p>Proveedor activo: <strong>{{ gmail_provider }}</strong> · <a href="{% url 'integrations' %}">Configurar credenciales</a></p>
 
 <section class="card form-card">
     {% if connection and connection.status == "CONNECTED" %}
@@ -25,7 +26,7 @@
         <p>No hay una cuenta Gmail conectada.</p>
         {% if connection.error %}<p class="errorlist">{{ connection.error }}</p>{% endif %}
         <form method="post" action="{% url 'gmail-connect' %}">
-            {% csrf_token %}<button type="submit">Conectar Gmail</button>
+            {% csrf_token %}<button type="submit">{% if gmail_provider == "api" %}Conectar con Google{% else %}Conectar Gmail fake{% endif %}</button>
         </form>
     {% endif %}
 </section>

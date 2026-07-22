@@ -52,6 +52,112 @@ class BusinessProfile(TimestampedUUIDModel):
         return self.company_name
 
 
+class IntegrationConfiguration(TimestampedUUIDModel):
+    class SecretSource(models.TextChoices):
+        ENVIRONMENT = "ENVIRONMENT", "Entorno"
+        ENCRYPTED = "ENCRYPTED", "Dashboard cifrado"
+        NONE = "NONE", "Sin configurar"
+
+    class ExtractorProvider(models.TextChoices):
+        FAKE = "fake", "Mock (sin red)"
+        OUTSCRAPER = "outscraper", "Outscraper"
+
+    class LLMProvider(models.TextChoices):
+        FAKE = "fake", "Mock (sin red)"
+        OLLAMA = "ollama", "Ollama"
+        OPENAI_COMPATIBLE = "openai-compatible", "OpenAI compatible"
+
+    class GmailProvider(models.TextChoices):
+        FAKE = "fake", "Fake (sin red)"
+        API = "api", "Google Gmail"
+
+    owner = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="integration_configuration",
+    )
+    extractor_provider = models.CharField(
+        max_length=30,
+        choices=ExtractorProvider.choices,
+        default=ExtractorProvider.FAKE,
+    )
+    outscraper_api_key_encrypted = models.TextField(blank=True, editable=False)
+    outscraper_api_key_source = models.CharField(
+        max_length=20,
+        choices=SecretSource.choices,
+        default=SecretSource.ENVIRONMENT,
+    )
+    outscraper_base_url = models.URLField(default="https://api.outscraper.cloud")
+    outscraper_max_cost_per_result = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        default="0.010000",
+        validators=(MinValueValidator(0),),
+    )
+    outscraper_batch_size = models.PositiveIntegerField(default=20)
+    outscraper_poll_seconds = models.PositiveIntegerField(default=30)
+    llm_provider = models.CharField(
+        max_length=30,
+        choices=LLMProvider.choices,
+        default=LLMProvider.FAKE,
+    )
+    llm_model = models.CharField(max_length=120, default="fake-deterministic")
+    llm_api_key_encrypted = models.TextField(blank=True, editable=False)
+    llm_api_key_source = models.CharField(
+        max_length=20,
+        choices=SecretSource.choices,
+        default=SecretSource.ENVIRONMENT,
+    )
+    ollama_base_url = models.URLField(default="http://127.0.0.1:11434")
+    openai_compatible_base_url = models.URLField(blank=True)
+    gmail_provider = models.CharField(
+        max_length=20,
+        choices=GmailProvider.choices,
+        default=GmailProvider.FAKE,
+    )
+    gmail_oauth_client_id = models.CharField(max_length=500, blank=True)
+    gmail_oauth_client_secret_encrypted = models.TextField(blank=True, editable=False)
+    gmail_oauth_client_secret_source = models.CharField(
+        max_length=20,
+        choices=SecretSource.choices,
+        default=SecretSource.ENVIRONMENT,
+    )
+    revision = models.PositiveIntegerField(default=1, editable=False)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(outscraper_max_cost_per_result__gte=0),
+                name="integration_outscraper_cost_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=Q(outscraper_batch_size__gt=0),
+                name="integration_outscraper_batch_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(outscraper_poll_seconds__gt=0),
+                name="integration_outscraper_poll_positive",
+            ),
+            models.CheckConstraint(
+                condition=~Q(outscraper_api_key_source="ENCRYPTED")
+                | ~Q(outscraper_api_key_encrypted=""),
+                name="integration_outscraper_cipher_required",
+            ),
+            models.CheckConstraint(
+                condition=~Q(llm_api_key_source="ENCRYPTED") | ~Q(llm_api_key_encrypted=""),
+                name="integration_llm_cipher_required",
+            ),
+            models.CheckConstraint(
+                condition=~Q(gmail_oauth_client_secret_source="ENCRYPTED")
+                | ~Q(gmail_oauth_client_secret_encrypted=""),
+                name="integration_gmail_cipher_required",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Integraciones de {self.owner.username}"
+
+
 class SearchCategory(TimestampedUUIDModel):
     name = models.CharField(max_length=160)
     normalized_name = models.CharField(max_length=160, editable=False)

@@ -11,6 +11,13 @@ from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.configuration.integrations import (
+    GMAIL_CLIENT_SECRET_PURPOSE,
+    LLM_KEY_PURPOSE,
+    OUTSCRAPER_KEY_PURPOSE,
+)
+from apps.configuration.models import IntegrationConfiguration
+from apps.core.crypto import encrypt_secret
 from apps.integrations.gmail import GMAIL_SCOPES
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection
@@ -127,6 +134,42 @@ def test_degraded_health_reports_missing_local_gmail_api_configuration(
 
 
 @pytest.mark.django_db
+def test_degraded_health_uses_encrypted_dashboard_configuration(
+    client: Client, owner: User, tmp_path: Path
+) -> None:
+    configuration = IntegrationConfiguration.objects.create(
+        owner=owner,
+        extractor_provider="outscraper",
+        outscraper_api_key_source=IntegrationConfiguration.SecretSource.ENCRYPTED,
+        outscraper_api_key_encrypted=encrypt_secret(
+            "health-outscraper-secret", purpose=OUTSCRAPER_KEY_PURPOSE
+        ),
+        llm_provider="openai-compatible",
+        llm_model="model",
+        openai_compatible_base_url="https://llm.example.test/v1",
+        llm_api_key_source=IntegrationConfiguration.SecretSource.ENCRYPTED,
+        llm_api_key_encrypted=encrypt_secret("health-llm-secret", purpose=LLM_KEY_PURPOSE),
+        gmail_provider="api",
+        gmail_oauth_client_id="client-id.apps.googleusercontent.com",
+        gmail_oauth_client_secret_source=IntegrationConfiguration.SecretSource.ENCRYPTED,
+        gmail_oauth_client_secret_encrypted=encrypt_secret(
+            "health-google-secret", purpose=GMAIL_CLIENT_SECRET_PURPOSE
+        ),
+    )
+    with override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1):
+        response = client.get(reverse("health-degraded"))
+
+    assert response.json()["components"] == {
+        "storage": "ok",
+        "gmail": "not_connected",
+        "extractor": "configured",
+        "llm": "configured",
+    }
+    assert b"health-" not in response.content
+    assert configuration.outscraper_api_key_encrypted.encode() not in response.content
+
+
+@pytest.mark.django_db
 def test_verify_restore_checks_migrations_and_safe_live_state(tmp_path: Path) -> None:
     with override_settings(
         PRIVATE_STORAGE_ROOT=tmp_path,
@@ -154,5 +197,20 @@ def test_verify_restore_detects_undecryptable_refresh_token(owner: User, tmp_pat
     )
     with override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1):
         with pytest.raises(CommandError, match="no descifrable") as error:
+            call_command("verify_restore", verbosity=0)
+    assert "ciphertext-invalid" not in str(error.value)
+
+
+@pytest.mark.django_db
+def test_verify_restore_detects_undecryptable_integration_secret(
+    owner: User, tmp_path: Path
+) -> None:
+    IntegrationConfiguration.objects.create(
+        owner=owner,
+        outscraper_api_key_source=IntegrationConfiguration.SecretSource.ENCRYPTED,
+        outscraper_api_key_encrypted="v1:ciphertext-invalid",
+    )
+    with override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1):
+        with pytest.raises(CommandError, match="credencial Outscraper") as error:
             call_command("verify_restore", verbosity=0)
     assert "ciphertext-invalid" not in str(error.value)

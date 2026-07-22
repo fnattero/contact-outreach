@@ -19,6 +19,7 @@ from apps.campaigns.services import TERMINAL_DISCOVERY_STATES, transition_campai
 from apps.catalogs.services import verify_catalog
 from apps.compliance.models import ContactLedger, ContactOverride, SuppressionEntry
 from apps.compliance.services import lock_email_eligibility
+from apps.configuration.integrations import redact_provider_error
 from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
@@ -55,8 +56,8 @@ class SendEffect:
     idempotency_key: str
 
 
-def _error_text(error: Exception) -> str:
-    return " ".join(str(error).split())[:500] or error.__class__.__name__
+def _error_text(error: Exception, *, owner_id: int | None = None) -> str:
+    return redact_provider_error(error, owner_id=owner_id)
 
 
 def _backoff(attempt: int, *, retry_after: float | None = None) -> timedelta:
@@ -614,7 +615,7 @@ def _record_send_error(
     message = OutboundMessage.objects.select_for_update().get(pk=message_id)
     if message.state == OutboundMessage.State.SENT:
         return message.state
-    error_text = _error_text(error)
+    error_text = _error_text(error, owner_id=message.campaign.created_by_id)
     if permanent:
         message.state = OutboundMessage.State.SEND_FAILED
         message.next_attempt_at = None

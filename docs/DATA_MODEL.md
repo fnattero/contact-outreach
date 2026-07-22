@@ -16,6 +16,17 @@ Usuario Django con email/username único, password hasheada, `is_active` y últi
 
 Relación 1:1 con `User`: empresa, vendedor, teléfono, WhatsApp, descripción, productos, diferenciadores, domicilio, web, firma, instrucciones IA y umbral 0–100. `profile_version` aumenta al editar y permite construir snapshots.
 
+### IntegrationConfiguration
+
+Relación 1:1 con `User`. Guarda proveedor y parámetros operativos de Outscraper, proveedor/modelo y
+URLs base IA, y proveedor/client ID de Gmail. Los tres secretos (`Outscraper API key`, `LLM API key`,
+`Google OAuth client secret`) se guardan únicamente en campos ciphertext no editables por ModelForm.
+Cada uno tiene origen `ENVIRONMENT|ENCRYPTED|NONE`, propósito criptográfico independiente y
+restricción que exige ciphertext cuando el origen es `ENCRYPTED`. También conserva una revisión
+monotónica. No guarda `FIELD_ENCRYPTION_KEY`, contraseña del propietario, secretos Django/DB/Redis,
+refresh token Gmail ni barreras live. Las auditorías sólo registran proveedor, parámetros no
+secretos y estado configurado/no configurado.
+
 ### SearchCategory
 
 `name`, `normalized_name`, `active`, `sort_order`, `archived_at`. Restricción única case-insensitive sobre nombre no archivado.
@@ -116,4 +127,6 @@ Nombre de task, Celery task ID, idempotency key, entidad, cola, estado, attempts
 - Toda transición y todo envío se ejecutan en `transaction.atomic`; el efecto Gmail se rodea con estado durable y reconciliación.
 - La respuesta cruda de extractor y snapshots web se retienen 180 días por defecto; una tarea elimina contenido pero conserva hashes, métricas y auditoría. Mensajes relacionados se conservan hasta eliminación administrativa futura.
 - Supresiones, hashes de emails suprimidos y evidencias mínimas se conservan permanentemente para evitar recontacto.
-- Un backup necesita base, volumen privado y clave de cifrado; sin los tres no se considera restaurable.
+- Un backup necesita base, volumen privado y clave de cifrado; sin los tres no se considera
+  restaurable. `verify_restore` prueba tanto refresh tokens Gmail como credenciales de integración
+  cuyo origen sea `ENCRYPTED` sin imprimir ciphertext.

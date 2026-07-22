@@ -10,6 +10,13 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from apps.configuration.integrations import (
+    configured_integration_owner_id,
+    get_gmail_oauth_client_secret,
+    get_llm_api_key,
+    get_outscraper_api_key,
+    runtime_integration_configuration,
+)
 from apps.integrations.gmail import GMAIL_SCOPES
 from apps.mailbox.models import GmailConnection
 
@@ -56,12 +63,15 @@ def degraded(request: HttpRequest) -> JsonResponse:
     except OSError:
         free_bytes = 0
         storage = "unavailable"
+    integration_owner_id: int | None = None
     try:
+        integration_owner_id = configured_integration_owner_id()
+        runtime = runtime_integration_configuration(integration_owner_id)
         gmail = GmailConnection.objects.order_by("-created_at").first()
-        provider_supported = settings.GMAIL_PROVIDER in {"api", "fake"}
-        local_configuration_ready = settings.GMAIL_PROVIDER == "fake" or bool(
-            settings.GMAIL_OAUTH_CLIENT_ID
-            and settings.GMAIL_OAUTH_CLIENT_SECRET
+        provider_supported = runtime.gmail_provider in {"api", "fake"}
+        local_configuration_ready = runtime.gmail_provider == "fake" or bool(
+            runtime.gmail_oauth_client_id
+            and get_gmail_oauth_client_secret(integration_owner_id)
             and settings.FIELD_ENCRYPTION_KEY
         )
         if not provider_supported:
@@ -76,19 +86,37 @@ def degraded(request: HttpRequest) -> JsonResponse:
             gmail_status = "not_ready"
     except Exception:
         gmail_status = "unavailable"
+        runtime = None
+    try:
+        extractor_status = (
+            "fake"
+            if runtime is not None and runtime.extractor_provider == "fake"
+            else (
+                "configured"
+                if get_outscraper_api_key(integration_owner_id)
+                else "missing_configuration"
+            )
+        )
+    except Exception:
+        extractor_status = "unavailable"
+    try:
+        llm_status = (
+            "fake"
+            if runtime is not None and runtime.llm_provider == "fake"
+            else (
+                "configured"
+                if runtime is not None
+                and (runtime.llm_provider == "ollama" or get_llm_api_key(integration_owner_id))
+                else "missing_configuration"
+            )
+        )
+    except Exception:
+        llm_status = "unavailable"
     components = {
         "storage": storage,
         "gmail": gmail_status,
-        "extractor": "fake"
-        if settings.EXTRACTOR_PROVIDER == "fake"
-        else ("configured" if settings.OUTSCRAPER_API_KEY else "missing_configuration"),
-        "llm": "fake"
-        if settings.LLM_PROVIDER == "fake"
-        else (
-            "configured"
-            if settings.LLM_PROVIDER == "ollama" or settings.LLM_API_KEY
-            else "missing_configuration"
-        ),
+        "extractor": extractor_status,
+        "llm": llm_status,
     }
     healthy_values = {"ok", "fake", "configured", "ready"}
     status = "ok" if all(value in healthy_values for value in components.values()) else "degraded"

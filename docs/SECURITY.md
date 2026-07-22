@@ -19,9 +19,23 @@ Adversarios considerados: sitio que intenta SSRF o prompt injection, archivo mal
 
 ## 3. Secretos y OAuth
 
-- Secrets sólo en variables/archivos fuera del repositorio; `.env.example` contiene placeholders.
-- API keys LLM/Outscraper no se editan ni persisten en claro desde el dashboard.
-- Refresh token Gmail se cifra con una clave versionada externa (`FIELD_ENCRYPTION_KEY`); access tokens viven en memoria cuando sea posible.
+- La raíz de confianza (`FIELD_ENCRYPTION_KEY`), secretos Django/DB/Redis, contraseña de bootstrap y
+  barreras live sólo viven en variables/archivos fuera del repositorio; `.env.example` contiene
+  placeholders. Nunca son editables desde el dashboard.
+- API keys LLM/Outscraper y Google OAuth client secret se pueden ingresar desde el dashboard por
+  POST autenticado, CSRF y reingreso de contraseña con throttling por propietario/IP. Se persisten
+  sólo como ciphertext Fernet autenticado; después son write-only y la UI muestra únicamente
+  estado/origen. Los parámetros y variables sensibles se marcan para los reportes de error; además,
+  un fallo inesperado al guardar devuelve un error genérico sin volver a renderizar sus valores.
+- La creación de campañas no acepta overrides de proveedor, endpoint ni modelo enviados por el
+  navegador: esos campos están deshabilitados y el servidor congela los valores reautenticados de
+  Integraciones. Así una sesión autenticada sin la contraseña no puede redirigir una API key.
+- Las subclaves se derivan con HMAC-SHA256 desde `FIELD_ENCRYPTION_KEY` y un propósito versionado
+  distinto para Outscraper, LLM y Google. Intercambiar ciphertext entre campos falla al descifrar.
+- El fallback de entorno es explícito por credencial (`ENVIRONMENT|ENCRYPTED|NONE`); eliminar desde
+  UI fija `NONE` y no reactiva silenciosamente un valor viejo de `.env`.
+- Refresh token Gmail se cifra con la clave externa; access tokens viven en memoria cuando sea
+  posible. Cambiar client ID/secret exige desconectar primero y elimina el token local al revocar.
 - Nunca se loguean tokens, authorization codes, client secrets, API keys ni URLs con credenciales.
 - Desconectar revoca cuando sea posible y elimina ciphertext/cursor local, conservando auditoría sin secreto.
 - Scopes: `gmail.send` y `gmail.readonly`, nunca `mail.google.com`. `gmail.readonly` es restringido y su uso/almacenamiento puede requerir verificación y evaluación de Google: [documentación de scopes](https://developers.google.com/workspace/gmail/api/auth/scopes).
@@ -68,18 +82,22 @@ No se ejecuta JavaScript, se descargan imágenes ni se aceptan `file:`, `ftp:`, 
 
 Logs normales guardan IDs, estados, latencias, contadores y errores redactados. No guardan cuerpos completos, HTML, raw JSON, prompts, recipients ni secretos. Debug explícito tiene duración acotada, redacción y aviso visible; los payloads completos permanecen en almacenamiento de dominio con acceso autenticado.
 
-`AuditEvent` es append-only. Se auditan login, configuración live, conexión Gmail, campaña, overrides, supresiones, uploads, transiciones, envíos y respuestas manuales. No se registran ciphertext ni tokens.
+`AuditEvent` es append-only. Se auditan login, configuración live/integraciones, conexión Gmail,
+campaña, overrides, supresiones, uploads, transiciones, envíos y respuestas manuales. No se
+registran ciphertext, valores enviados en formularios, tokens ni claves. Errores persistidos se
+redactan también contra el valor descifrado vigente por si un proveedor lo refleja accidentalmente.
 
 Raw extractor y snapshots web tienen retención inicial de 180 días. Supresiones se conservan permanentemente con datos mínimos. Backups se cifran, tienen permisos restrictivos, rotación documentada y restore probado.
 
 ## 9. Checklist para live
 
 - Bind/proxy/orígenes/cookies revisados y TLS si no es loopback.
-- Secrets fuera del repo, clave de cifrado respaldada por separado y logs redactados.
+- Raíz de confianza fuera del repo, credenciales de integración sólo como ciphertext, clave de
+  cifrado respaldada por separado y logs/auditoría verificados sin secretos.
 - OAuth publicado/configurado; refresh token estable y scopes exactos confirmados.
 - Identidad legal, domicilio, reply-to y BAJA completos; revisión legal registrada externamente.
 - Catálogo hash válido, Gmail test exitoso, límites conservadores y supresión cargada.
 - Backup y restore probados; kill switch comprobado antes de desactivarlo.
-- `verify_restore` confirma migraciones, hashes, margen de disco y descifrado de refresh tokens con
-  el kill switch activo; la clave de cifrado tiene backup separado.
+- `verify_restore` confirma migraciones, hashes, margen de disco y descifrado de refresh tokens y
+  credenciales de integración con el kill switch activo; la clave de cifrado tiene backup separado.
 - Confirmaciones UI revisadas para iniciar, pausar, reanudar, cancelar y seleccionar campaña LIVE.

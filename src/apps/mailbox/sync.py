@@ -13,6 +13,7 @@ from apps.audit.services import record_event
 from apps.campaigns.models import OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import normalize_email, suppress_email
+from apps.configuration.integrations import redact_provider_error
 from apps.integrations.contracts import (
     AuthenticationError,
     GmailCursor,
@@ -173,16 +174,18 @@ def _persist_candidate(
                 related.campaign.llm_provider,
                 base_url=related.campaign.llm_base_url,
                 model=related.campaign.llm_model,
+                owner_id=related.campaign.created_by_id,
             )
         except (ImproperlyConfigured, ProviderError, ValueError) as exc:
             classification = InboundMessage.Classification.OTHER
             confidence = 0.0
-            error = str(exc)[:500]
+            error = redact_provider_error(exc, owner_id=related.campaign.created_by_id)
         else:
             classification, confidence, error = classify_message(
                 message=message,
                 provider=provider,
                 apply_deterministic=False,
+                owner_id=related.campaign.created_by_id,
             )
     message.classification = classification
     message.classification_confidence = Decimal(str(confidence))
@@ -267,9 +270,9 @@ def _sync_gmail_connection_locked(
 
 
 def _persist_sync_failure(connection_id: uuid.UUID | str, error: Exception) -> None:
-    text = " ".join(str(error).split())[:500] or error.__class__.__name__
     with transaction.atomic():
         connection = GmailConnection.objects.select_for_update().get(pk=connection_id)
+        text = redact_provider_error(error, owner_id=connection.owner_id)
         connection.status = GmailConnection.Status.ERROR
         connection.error = text
         connection.save(update_fields=("status", "error", "updated_at"))

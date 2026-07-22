@@ -50,6 +50,18 @@ Validar score/confidence bounds, JSON inválido, evidence inexistente, cuerpo fi
 
 Parsear MIME con librería estándar: texto plano UTF-8, un To, sin CC/BCC, PDF correcto, headers, Message-ID estable y tamaño. Probar respuesta con threadId/References/In-Reply-To, 403/429, auth revocada, timeout ambiguo y reconciliación sin segundo envío.
 
+### Configuración cifrada de integraciones
+
+Probar reingreso de contraseña con throttling, login, CSRF y `no-store`; inputs secretos write-only
+incluso cuando el formulario falla o interviene el reporter de errores. Verificar ciphertext
+aleatorio, descifrado correcto, rechazo al usar propósito
+de otro proveedor, fallback de entorno y eliminación explícita sin fallback. Confirmar que factory,
+workers, health y OAuth usan la fila del propietario sin reinicio; una conexión Gmail activa bloquea
+rotación de client ID/secret. Buscar valores y ciphertext en HTML, redirects, logs, audit, errores,
+jobs y snapshots. Restore debe rechazar ciphertext corrupto sin imprimirlo. Los transports LLM no
+siguen redirects y rechazan URLs remotas HTTP o con credenciales/query/fragment. Un POST de campaña
+no puede reemplazar proveedor, endpoint ni modelo del snapshot fijado por Integraciones.
+
 ## 4. Integración con base y workers
 
 - Conflictos concurrentes creando la misma identidad/email producen un prospecto canónico; dos campañas sobre el mismo `ContactLedger` asignan una sola autorización.
@@ -71,7 +83,8 @@ Parsear MIME con librería estándar: texto plano UTF-8, un To, sin CC/BCC, PDF 
 - Respuesta manual no sale con GET, sin login, sin CSRF ni sin clic; doble POST conserva un envío. El worker revalida una supresión tardía y una ambigüedad se reconcilia por Message-ID sin permitir otra fila para el mismo inbound.
 - Headers RFC sobredimensionados no envenenan el cursor y cuerpos de texto detached se recuperan sin importar archivos adjuntos.
 - Sanitización de HTML/email, filenames/path traversal, PDF falso/oversize y CSV formula injection.
-- Tokens/API keys/cuerpos no aparecen en logs, errores, auditoría ni snapshots mostrados.
+- Tokens/API keys/client secrets/ciphertext/cuerpos no aparecen en HTML, redirects, logs, errores,
+  auditoría, tasks ni snapshots mostrados.
 - Permisos: usuario anónimo sólo accede login/health permitido; archivos privados requieren sesión.
 
 ## 6. E2E fake
@@ -79,7 +92,7 @@ Parsear MIME con librería estándar: texto plano UTF-8, un To, sin CC/BCC, PDF 
 Escenario principal:
 
 1. Bootstrap de propietario y seeds; login.
-2. Configurar perfil, cargar PDF fixture y crear campaña objetivo pequeño.
+2. Configurar perfil e integraciones fake desde dashboard, cargar PDF fixture y crear campaña objetivo pequeño.
 3. Fake extractor devuelve válidos, sin email, duplicado e irrelevante.
 4. Fake web/LLM produce calificados y un error reintentable.
 5. Ejecutar dry-run, validar contadores y cero llamadas Gmail reales.

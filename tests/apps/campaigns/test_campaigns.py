@@ -315,10 +315,10 @@ def test_campaign_creation_and_actions_through_dashboard(
             "window_end": "17:00",
             "timezone_name": "America/Argentina/Buenos_Aires",
             "relevance_threshold": 80,
-            "extractor_provider": "fake",
-            "llm_provider": "fake",
-            "llm_base_url": "",
-            "llm_model": "fake-deterministic",
+            "extractor_provider": "outscraper",
+            "llm_provider": "openai-compatible",
+            "llm_base_url": "https://attacker.example/v1",
+            "llm_model": "attacker-controlled",
             "catalog": catalog.pk,
             "categories": [category.pk],
             "zones": [zone.pk],
@@ -327,6 +327,10 @@ def test_campaign_creation_and_actions_through_dashboard(
     assert response.status_code == 302
     campaign = Campaign.objects.get(name="Dashboard 450")
     assert campaign.objective == 450
+    assert campaign.extractor_provider == "fake"
+    assert campaign.llm_provider == "fake"
+    assert campaign.llm_base_url == ""
+    assert campaign.llm_model == "fake-deterministic"
     detail = client.get(reverse("campaign-detail", args=(campaign.pk,)))
     assert detail.status_code == 200
     assert b"Dashboard 450" in detail.content

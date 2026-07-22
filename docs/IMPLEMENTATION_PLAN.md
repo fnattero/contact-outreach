@@ -32,6 +32,11 @@ pantallas de error, health degradado, ENOSPC, confirmaciones de acciones/live, s
 UI, backup/restore con checksums y verificación de catálogos/tokens. La aceptación fake completa y
 los runbooks están en `tests/e2e/`, `docs/OPERATIONS.md` y `docs/HARDENING_AUDIT.md`. Esto completa
 evidencia de FR-14, FR-15, FR-16, FR-17, OPS-02 y QA-01 sin cambiar la arquitectura.
+El incremento posterior de configuración segura extiende fases 1, 2, 6, 8, 11 y 12 con
+`IntegrationConfiguration`, credenciales write-only cifradas por propósito, reautenticación,
+fallback de entorno explícito, resolución dinámica en workers, URLs/redirects endurecidos y
+verificación de restore. Actualiza evidencia de FR-05, FR-06, FR-10, FR-14, FR-16, FR-17, DM-01 y
+QA-01. La raíz de cifrado, infraestructura y las dos barreras globales de envío siguen externas.
 El objetivo
 calificado corta sobre prospectos `QUEUED` creados por el análisis sobre umbral; nunca se cuenta
 `EMAIL_FOUND` como calificado. `SEND_MODE` y el kill switch permanecen como controles de
@@ -63,8 +68,12 @@ despliegue de sólo lectura.
 
 - **Objetivo:** perfil comercial, rubros, barrios y catálogo privado versionado.
 - **Archivos/módulos:** `configuration`, `catalogs`, forms/views/templates, comandos de seed.
-- **Migraciones:** `BusinessProfile`, `SearchCategory`, `SearchZone`, `Catalog`; constraints de nombre/version/hash y seed data migration con 23 rubros/48 barrios.
-- **Pruebas:** CRUD/archivado, idempotencia de seeds, validación PDF/MIME/magic/size/path, hash/inmutabilidad y descarga autenticada.
+- **Migraciones:** `BusinessProfile`, `IntegrationConfiguration`, `SearchCategory`, `SearchZone`,
+  `Catalog`; constraints de credenciales/configuración, nombre/version/hash y seed data migration con
+  23 rubros/48 barrios.
+- **Pruebas:** CRUD/archivado, configuración cifrada write-only con reautenticación/CSRF,
+  idempotencia de seeds, validación PDF/MIME/magic/size/path, hash/inmutabilidad y descarga
+  autenticada.
 - **Verificación:** `make check`; aplicar migraciones dos veces sobre base limpia; cargar fixtures PDF válidos/falsos.
 - **Terminado:** configuración completa desde dashboard; archivos fuera del público; editar catálogo crea versión nueva.
 - **Dependencias:** fase 1.
@@ -129,9 +138,12 @@ despliegue de sólo lectura.
 ## Fase 8 - OAuth Gmail y MIME
 
 - **Objetivo:** conectar/probar/desconectar Gmail, cifrar token y construir mensajes correctos sin enviar automáticamente aún.
-- **Archivos/módulos:** `mailbox`, `GmailProvider` API/fake, OAuth callback, token crypto, MIME builder y página Gmail.
+- **Archivos/módulos:** `mailbox`, `configuration`, `GmailProvider` API/fake, OAuth callback,
+  credenciales de aplicación cifradas, token crypto, MIME builder y páginas Integraciones/Gmail.
 - **Migraciones:** `GmailConnection`; ampliar `OutboundMessage` con MIME hash, IDs Gmail y thread. La FK a inbound se agrega en fase 10.
-- **Pruebas:** state OAuth, scopes exactos, cifrado/redacción/revocación, MIME texto+PDF, tamaño, headers y fake.
+- **Pruebas:** state OAuth, scopes exactos, reautenticación, client secret/refresh token
+  cifrados y no visibles, bloqueo de rotación con conexión activa, redacción/revocación, MIME
+  texto+PDF, tamaño, headers y fake.
 - **Verificación:** `make check`; inspección MIME con parser estándar; búsqueda de secretos en logs/diff.
 - **Terminado:** fake funciona end-to-end; API real sólo se prueba manualmente con credenciales externas y no en CI.
 - **Dependencias:** fases 1, 2 y 6.
@@ -190,21 +202,21 @@ despliegue de sólo lectura.
 | FR-03 | 2, 11 | seeds y CRUD |
 | FR-04 | 5 | fetch seguro/fallback |
 | FR-05 | 6 | schemas, prompt, cache y threshold |
-| FR-06 | 2, 6, 11 | perfil/config no secreta |
+| FR-06 | 1, 2, 6, 8, 11, 12 | perfil, parámetros y credenciales cifradas |
 | FR-07 | 7 | lifecycle y recovery |
 | FR-08 | 7, 9 | scheduler, cuotas y safety stop |
 | FR-09 | 2, 9 | catálogo/version/hash |
-| FR-10 | 8, 9 | OAuth, MIME, IDs e idempotencia |
+| FR-10 | 1, 2, 8, 9, 12 | credenciales OAuth, conexión, MIME, IDs e idempotencia |
 | FR-11 | 10 | history/fallback/hilos |
 | FR-12 | 4, 10 | clasificación, invalidez y supresión |
 | FR-13 | 10 | reply manual thread-safe |
 | FR-14 | 2, 3, 9–11 | vistas, filtros y CSV |
 | FR-15 | 1, 4, 7, 9, 10 | estados, locks, audit e idempotencia |
-| FR-16 | 0, 1, 2, 5, 8, 12 | auth, bind, secrets, SSRF y upload |
+| FR-16 | 0, 1, 2, 5, 8, 11, 12 | auth, bind, secretos cifrados, SSRF y upload |
 | FR-17 | 0, 3, 5, 6, 8, 12 | contratos/fakes/E2E |
 | OPS-01 | 0 | stack y migraciones |
 | OPS-02 | 0, 2, 12 | Compose, Makefile, seeds, ops y README |
-| DM-01 | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 | todas las entidades mínimas y extensiones de integridad |
+| DM-01 | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 | entidades, configuración cifrada y extensiones de integridad |
 | QA-01 | 0–12 | suites incrementales y E2E final |
 
 ### Cobertura de las secciones originales
@@ -215,10 +227,10 @@ despliegue de sólo lectura.
 | 2. Objetivo de campaña | FR-02 | 3, 7, 11 |
 | 3. Rubros y barrios | FR-03 | 2, 11 |
 | 4. Enriquecimiento web | FR-04 | 5 |
-| 5. IA y perfil comercial | FR-05, FR-06 | 2, 6, 11 |
+| 5. IA y perfil comercial | FR-05, FR-06 | 1, 2, 6, 8, 11, 12 |
 | 6. Campañas y envío | FR-07, FR-08 | 7, 9 |
 | 7. Catálogo PDF | FR-09 | 2, 9 |
-| 8. Gmail | FR-10 | 8, 9 |
+| 8. Gmail | FR-10 | 1, 2, 8, 9, 12 |
 | 9. Sincronización/clasificación | FR-11, FR-12 | 4, 10 |
 | 10. Respuesta manual | FR-13 | 10 |
 | 11. Dashboard/CSV | FR-14 | 2, 3, 9, 10, 11 |

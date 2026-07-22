@@ -18,11 +18,33 @@ from contact_outreach.tasks import healthcheck
 @pytest.mark.e2e
 @pytest.mark.django_db
 def test_owner_dashboard_fake_provider_and_worker_flow(client: Client) -> None:
-    User.objects.create_user(username="owner", password="correct-password")
+    owner = User.objects.create_user(username="owner", password="correct-password")
     assert client.login(username="owner", password="correct-password")
     assert client.get(reverse("dashboard")).status_code == 200
 
-    batch = get_extractor_provider().extract(
+    configured = client.post(
+        reverse("integrations"),
+        {
+            "extractor_provider": "fake",
+            "outscraper_api_key": "",
+            "outscraper_base_url": "https://api.outscraper.cloud",
+            "outscraper_max_cost_per_result": "0.010000",
+            "outscraper_batch_size": "20",
+            "outscraper_poll_seconds": "30",
+            "llm_provider": "fake",
+            "llm_model": "fake-deterministic",
+            "ollama_base_url": "http://127.0.0.1:11434",
+            "openai_compatible_base_url": "",
+            "llm_api_key": "",
+            "gmail_provider": "fake",
+            "gmail_oauth_client_id": "",
+            "gmail_oauth_client_secret": "",
+            "current_password": "correct-password",
+        },
+    )
+    assert configured.status_code == 302
+
+    batch = get_extractor_provider(owner_id=owner.pk).extract(
         SearchRequest(query="demo", correlation_id="e2e", idempotency_key="e2e")
     )
     assert batch.records

@@ -1,6 +1,6 @@
 # Auditoría específica de hardening
 
-Fecha: 2026-07-16. Alcance: implementación local, proveedores fake y adaptadores aislados.
+Fecha: 2026-07-21. Alcance: implementación local, configuración cifrada, proveedores fake y adaptadores aislados.
 Resultado: no se identificó un camino conocido que eluda las barreras live, supresión o
 reconciliación. Gmail no ofrece exactly-once absoluto y la estabilidad del refresh token depende de
 Google; ambos siguen siendo riesgos operativos explícitos.
@@ -10,7 +10,8 @@ Google; ambos siguen siendo riesgos operativos explícitos.
 | Envíos duplicados | `ContactLedger` por email, uniques de secuencia/idempotency/Message-ID/Gmail ID, misma fila por retry y reconciliación antes de repetir. Regresiones de delivery/manual y aceptación fake. | Cubierto; riesgo residual externo documentado. |
 | Transiciones inválidas | Servicios de campaña, discovery, pipeline y delivery validan el grafo bajo transacción; views/tasks coordinan. | Cubierto. |
 | Pérdida de refresh token | Ciphertext Fernet con clave externa; disconnect elimina local; backup excluye la clave y `verify_restore` prueba descifrado. README advierte expiración en OAuth Testing. | Cubierto localmente; depende de backup separado y Google. |
-| Exposición de secretos | Entorno, redacción de audit/logs, sin query/body/recipient en log y errores sin excepción. `.env`, backups y private ignorados. | Cubierto; escaneo obligatorio antes de live. |
+| Exposición de secretos | Root key externa; API keys/client secret como Fernet write-only ligado a propósito; reautenticación+CSRF; sin secretos/ciphertext en HTML, redirect, task, snapshot, audit, log o error; restore prueba descifrado. | Cubierto frente a DB/backup/UI/log aislados; compromiso conjunto de host+root key sigue siendo riesgo residual inevitable. |
+| Cambio malicioso de proveedor | Reingreso de contraseña con throttling, campaña sin overrides POST, URLs sin userinfo/query/fragment, HTTP sólo local/privado, Outscraper limitado a hosts oficiales y LLM sin redirects con Authorization. Gmail exige disconnect antes de rotar OAuth. | Cubierto para sesión robada sin contraseña; revisar TLS si deja loopback. |
 | SSRF | HTTP/S 80/443, DNS validado, IP fijada, redirects revalidados y límites de bytes/tiempo/páginas. | Cubierto por matriz SSRF. |
 | Prompt injection | Web `UNTRUSTED_DATA`, sin tools, evidencia limitada a fact IDs y output/copy validado localmente. | Cubierto. |
 | Archivos maliciosos | Nombre generado, extensión/MIME/magic/EOF/tamaño/hash, storage privado, sin render, integridad antes de send y ENOSPC atómico. | Cubierto para v1; antivirus fuera de alcance documentado. |

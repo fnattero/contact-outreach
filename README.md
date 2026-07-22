@@ -97,16 +97,22 @@ de CABA; el comando demo continúa creando únicamente el propietario.
 Después de iniciar sesión:
 
 1. Completar el perfil comercial.
-2. Revisar o editar rubros y zonas.
-3. Cargar un PDF válido de hasta 15 MiB en Catálogos.
-4. Crear una campaña, seleccionando al menos un rubro, una zona y una versión de catálogo.
-5. Ajustar objetivo, máximo crudo, costo, límite diario, intervalo, horario, zona horaria y umbral.
-6. Iniciar el borrador para congelar perfil, configuración, selecciones, catálogo y consultas.
+2. Revisar Integraciones; los defaults permanecen fake hasta habilitarlos expresamente.
+3. Revisar o editar rubros y zonas.
+4. Cargar un PDF válido de hasta 15 MiB en Catálogos.
+5. Crear una campaña, seleccionando al menos un rubro, una zona y una versión de catálogo.
+6. Ajustar objetivo, máximo crudo, costo, límite diario, intervalo, horario, zona horaria y umbral.
+7. Iniciar el borrador para congelar perfil, configuración, selecciones, catálogo y consultas.
 
 El objetivo inicial es 300. `SEND_MODE` y `SEND_KILL_SWITCH` se muestran en el dashboard pero sólo
 se configuran por entorno. Con los defaults, cualquier campaña es dry-run, el kill switch está
 activo y web/IA usan fakes sin sockets. La extracción mock usa también un resolver MX
 determinístico; la extracción Outscraper usa DNS MX real desde el worker.
+
+Antes de guardar la primera credencial, definir una única `FIELD_ENCRYPTION_KEY` aleatoria en
+`.env` y respaldarla por un canal cifrado separado. Puede generarse sin reutilizar ninguna
+contraseña existente con `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Perderla
+impide recuperar tokens y credenciales; copiarla junto con la base anula la separación de seguridad.
 
 Cada prospecto con email obtiene un snapshot de la home y hasta tres páginas internas. Luego una
 única llamada lógica evalúa relevancia y redacta JSON estructurado. Sólo un resultado enteramente
@@ -127,20 +133,14 @@ ambiguo se reconcilia y no ofrece ese botón.
 El proveedor fake permite probar todo el flujo sin red desde la pantalla Gmail. Para OAuth real:
 
 1. Crear credenciales OAuth de aplicación web en Google Cloud.
-2. Registrar exactamente `GMAIL_OAUTH_REDIRECT_URI` (por defecto,
-   `http://127.0.0.1:8000/gmail/oauth/callback/`).
-3. Configurar fuera del repositorio:
-
-   ```bash
-   GMAIL_PROVIDER=api
-   GMAIL_OAUTH_CLIENT_ID=replace-with-client-id
-   GMAIL_OAUTH_CLIENT_SECRET=replace-with-client-secret
-   GMAIL_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/gmail/oauth/callback/
-   FIELD_ENCRYPTION_KEY=replace-with-an-independent-random-secret
-   ```
+2. Abrir **Integraciones**, seleccionar `Google Gmail` y copiar la redirect URI mostrada.
+3. Registrar exactamente esa URI en Google Cloud.
+4. Ingresar client ID, un nuevo client secret y la contraseña actual; guardar.
+5. Abrir **Gmail** y pulsar **Conectar con Google**.
 
 La autorización solicita sólo `gmail.send` y `gmail.readonly`, valida state y PKCE, y cifra el
-refresh token. Después de conectar es obligatorio usar “Enviar prueba a mi Gmail”; el servidor
+refresh token. El client secret también se cifra y nunca se vuelve a mostrar; cambiarlo exige
+desconectar primero. Después de conectar es obligatorio usar “Enviar prueba a mi Gmail”; el servidor
 fija el destinatario a la misma cuenta conectada y no acepta uno enviado por el formulario. Como
 esa prueba es un envío real, también exige `SEND_MODE=live` y `SEND_KILL_SWITCH=false`.
 
@@ -156,39 +156,30 @@ El fetch HTTP real se activa globalmente con `WEBSITE_FETCHER=http`. Sólo acept
 límites de páginas, bytes, redirects y tiempo. El contenido resultante siempre se trata como dato
 no confiable.
 
-Al crear una campaña se puede elegir `Ollama` u `OpenAI compatible`, indicando URL base y modelo.
-Los valores externos se configuran sólo por entorno:
+En **Integraciones** se puede elegir `Ollama` u `OpenAI compatible`, indicar URL base/modelo y, para
+el proveedor remoto, ingresar una API key. Guardar exige la contraseña actual. La key queda como
+ciphertext write-only; la página sólo informa si está configurada y su origen. Dejar el campo vacío
+conserva el valor; marcar eliminar lo borra y desactiva el fallback de entorno.
 
-```bash
-# Ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-
-# API compatible con /v1/chat/completions
-OPENAI_COMPATIBLE_BASE_URL=https://proveedor.example
-LLM_API_KEY=replace-with-your-key
-```
-
-La URL/modelo se congelan en la campaña. `LLM_API_KEY` nunca se persiste. Ambos adaptadores exigen
-salida JSON schema y vuelven a validarla localmente; los tests sustituyen sus transportes y
-mantienen todos los sockets bloqueados.
+La URL/modelo elegidos se congelan en cada campaña. Esos campos se muestran de sólo lectura al
+crear la campaña y el servidor ignora overrides POST, de modo que redirigir una API key siempre
+exige reautenticarse en Integraciones. HTTP sólo se acepta para servicios locales/privados; URLs
+con credenciales/query/fragment y redirects se rechazan para evitar reenviar el header de
+autorización. Ambos adaptadores exigen salida JSON schema y vuelven a validarla localmente; los
+tests sustituyen sus transports y mantienen todos los sockets bloqueados.
 
 ## Habilitar Outscraper
 
-Revisar primero el precio vigente y ajustar la reserva conservadora. Luego definir sólo por entorno:
+Revisar primero el precio vigente. En **Integraciones**, seleccionar Outscraper, ingresar la API key,
+ajustar reserva conservadora, tamaño de lote y polling, confirmar la contraseña actual y guardar.
 
-```bash
-EXTRACTOR_PROVIDER=outscraper
-OUTSCRAPER_API_KEY=replace-with-your-key
-OUTSCRAPER_MAX_COST_PER_RESULT=0.010000
-OUTSCRAPER_BATCH_SIZE=20
-OUTSCRAPER_POLL_SECONDS=30
-```
-
-Al crear la campaña, seleccionar `Outscraper`. Iniciar crea un `SearchRun` durable; el worker envía
-la consulta asíncrona con enrichment de contactos, guarda el ID y el JSON crudo, y Beat reanuda el
-polling después de reinicios. Los errores y el uso/costo estimado aparecen en el detalle de campaña.
-La API key no se guarda en base, no se incluye en la URL y no aparece en auditoría. No existe
-fallback de scraping directo.
+Las campañas nuevas toman `Outscraper` como snapshot de sólo lectura desde esa configuración.
+Iniciar crea un `SearchRun` durable; el worker envía la consulta asíncrona con enrichment de
+contactos, guarda el ID y el JSON crudo, y Beat reanuda el polling después de reinicios. Los errores
+y el uso/costo estimado aparecen en el detalle de campaña.
+La API key se guarda sólo como ciphertext ligado a Outscraper; no se incluye en URL, task, snapshot,
+HTML, log ni auditoría. Web/workers leen la configuración vigente desde PostgreSQL, por lo que una
+rotación no requiere reinicio. No existe fallback de scraping directo.
 
 ## Detener y limpiar
 
@@ -210,7 +201,7 @@ make up
 
 El backup incluye un dump consistente de PostgreSQL y el volumen privado de catálogos, con hashes
 SHA-256 y permisos restrictivos. No incluye `FIELD_ENCRYPTION_KEY`: respaldarla separadamente es
-obligatorio para recuperar Gmail OAuth.
+obligatorio para recuperar Gmail OAuth y las credenciales cifradas de Integraciones.
 
 ```bash
 make backup
@@ -226,7 +217,7 @@ make restore BACKUP=backups/20260716T120000Z
 
 Restore verifica checksums, restaura base/catálogos con propiedad del usuario no privilegiado
 `app`, aplica migraciones, recalcula hashes y prueba que los refresh tokens se puedan descifrar
-antes de reiniciar workers. Ver incidentes de disco, proveedores y reinicios en
+junto con cada credencial cifrada antes de reiniciar workers. Ver incidentes de disco, proveedores y reinicios en
 [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Quality gates

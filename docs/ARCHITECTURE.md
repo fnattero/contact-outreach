@@ -82,7 +82,24 @@ Al iniciar worker o en un barrido periódico:
 
 ## 6. Configuración y modos
 
-Variables de entorno contienen secretos e infraestructura. La base guarda parámetros editables no secretos y snapshots de campaña. `SEND_MODE=dry-run|live` y `SEND_KILL_SWITCH=true|false` son controles de despliegue; live requiere `SEND_MODE=live` y kill switch falso. El dashboard los muestra como sólo lectura.
+Variables de entorno contienen la raíz de confianza e infraestructura: `FIELD_ENCRYPTION_KEY`,
+`DJANGO_SECRET_KEY`, credenciales de PostgreSQL/Redis, hosts/TLS y bootstrap del propietario. La base
+guarda parámetros editables, snapshots de campaña y ciphertext de credenciales de integración. Cada
+campo secreto usa Fernet autenticado con una subclave derivada por propósito, de modo que un
+ciphertext no pueda intercambiarse entre LLM, Outscraper y Google OAuth. El dashboard nunca devuelve
+secretos ni ciphertext y exige sesión, CSRF y reingreso de contraseña para modificarlos.
+
+`IntegrationConfiguration` es 1:1 con el propietario. Una credencial puede tener origen
+`ENVIRONMENT`, `ENCRYPTED` o `NONE`; esto conserva compatibilidad durante la migración pero una
+eliminación explícita no vuelve silenciosamente al entorno. Web, workers y Beat resuelven la fila al
+construir cada adaptador, por lo que una rotación no requiere reiniciar procesos. Campañas conservan
+proveedor/base/modelo no secretos como snapshot, nunca la clave; el formulario los muestra
+deshabilitados y el servidor ignora overrides POST para que cambiarlos siempre exija la
+reautenticación de Integraciones. Una conexión Gmail activa debe
+desconectarse antes de cambiar client ID/secret para no dejar un refresh token ligado a otra app.
+
+`SEND_MODE=dry-run|live` y `SEND_KILL_SWITCH=true|false` permanecen controles de despliegue externos;
+live requiere `SEND_MODE=live` y kill switch falso. El dashboard los muestra como sólo lectura.
 
 Los adaptadores activos se eligen por configuración: mocks por defecto, Outscraper opcional, LLM mock/Ollama/OpenAI-compatible y Gmail fake/API. Cambiar proveedor no cambia el dominio.
 
@@ -101,7 +118,9 @@ Health checks separados:
 - readiness con PostgreSQL y Redis;
 - estado degradado para Gmail/proveedores, sin marcar la web como caída.
 
-El backup consistente incluye PostgreSQL y volumen privado de catálogos; la clave de cifrado se respalda separadamente. Restore verifica migraciones, hashes de catálogo y capacidad de descifrar tokens antes de habilitar live.
+El backup consistente incluye PostgreSQL —también ciphertext de integración— y volumen privado de
+catálogos; la clave de cifrado se respalda separadamente. Restore verifica migraciones, hashes de
+catálogo y capacidad de descifrar tokens y credenciales antes de habilitar live.
 Los scripts publican backups sólo tras dump/copia/checksums completos, exigen confirmación para
 restore y rechazan live efectivo con kill switch desactivado. Health degradado informa margen de
 disco y configuración local sin hacer llamadas remotas.

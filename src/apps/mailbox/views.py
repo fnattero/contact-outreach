@@ -4,7 +4,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -17,6 +16,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.campaigns.models import OutboundMessage
+from apps.configuration.integrations import runtime_integration_configuration
 from apps.dashboard.csv_export import csv_download
 from apps.dashboard.queries import owner_campaigns, response_queryset
 from apps.integrations.contracts import ProviderError
@@ -53,8 +53,9 @@ def gmail_settings(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
     connection = GmailConnection.objects.filter(owner=owner).first()
+    runtime = runtime_integration_configuration(owner.pk)
     fake_outbound = OutboundMessage.objects.none()
-    if settings.GMAIL_PROVIDER == "fake":
+    if runtime.gmail_provider == "fake":
         fake_outbound = OutboundMessage.objects.filter(
             campaign__created_by=owner,
             state=OutboundMessage.State.SENT,
@@ -64,7 +65,8 @@ def gmail_settings(request: HttpRequest) -> HttpResponse:
         "mailbox/settings.html",
         {
             "connection": connection,
-            "fake_mode": settings.GMAIL_PROVIDER == "fake",
+            "fake_mode": runtime.gmail_provider == "fake",
+            "gmail_provider": runtime.gmail_provider,
             "fake_outbound": fake_outbound,
             "fake_form": FakeInboundForm(),
         },
@@ -74,19 +76,27 @@ def gmail_settings(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def gmail_connect(request: HttpRequest) -> HttpResponse:
+    owner = request.user
+    assert isinstance(owner, User)
     state, verifier, challenge = oauth_material()
     request.session[OAUTH_STATE_SESSION_KEY] = state
     request.session[OAUTH_VERIFIER_SESSION_KEY] = verifier
     callback = request.build_absolute_uri(reverse("gmail-oauth-callback"))
     redirect_uri = oauth_redirect_uri(callback)
-    return redirect(
-        authorization_url(
+    try:
+        url = authorization_url(
+            owner=owner,
             state=state,
             verifier=verifier,
             challenge=challenge,
             redirect_uri=redirect_uri,
         )
-    )
+    except (ValidationError, ProviderError, ValueError) as exc:
+        request.session.pop(OAUTH_STATE_SESSION_KEY, None)
+        request.session.pop(OAUTH_VERIFIER_SESSION_KEY, None)
+        messages.error(request, str(exc))
+        return redirect("gmail-settings")
+    return redirect(url)
 
 
 @login_required
@@ -205,10 +215,10 @@ def response_export(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def fake_inbound(request: HttpRequest) -> HttpResponse:
-    if settings.GMAIL_PROVIDER != "fake":
-        raise Http404
     owner = request.user
     assert isinstance(owner, User)
+    if runtime_integration_configuration(owner.pk).gmail_provider != "fake":
+        raise Http404
     form = FakeInboundForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Elegí un envío y un escenario fake válido.")

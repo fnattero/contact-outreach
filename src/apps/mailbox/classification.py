@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from apps.configuration.integrations import redact_provider_error
 from apps.integrations.contracts import (
     LLMProvider,
     ProviderError,
@@ -84,6 +85,7 @@ def classify_message(
     message: InboundMessage,
     provider: LLMProvider,
     apply_deterministic: bool = True,
+    owner_id: int | None = None,
 ) -> tuple[str, float, str]:
     if apply_deterministic:
         deterministic = deterministic_classification(
@@ -103,7 +105,11 @@ def classify_message(
             )
         )
     except ProviderError as exc:
-        return InboundMessage.Classification.OTHER, 0.0, str(exc)[:500]
+        return (
+            InboundMessage.Classification.OTHER,
+            0.0,
+            redact_provider_error(exc, owner_id=owner_id),
+        )
     if result.classification not in _VALID_CLASSIFICATIONS:
         return InboundMessage.Classification.OTHER, 0.0, "Clasificación IA desconocida."
     confidence = max(0.0, min(1.0, result.confidence))

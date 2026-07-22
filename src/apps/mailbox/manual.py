@@ -14,6 +14,7 @@ from apps.audit.services import record_event
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
+from apps.configuration.integrations import redact_provider_error
 from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
@@ -366,19 +367,19 @@ def _execute_manual_effect(
         return _finish_manual_reply(
             message,
             state=OutboundMessage.State.RECONCILING,
-            error=str(exc),
+            error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
         )
     except (AuthenticationError, PermanentProviderError, ValidationProviderError) as exc:
         return _finish_manual_reply(
             message,
             state=OutboundMessage.State.SEND_FAILED,
-            error=str(exc),
+            error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
         )
     except (ProviderError, ValidationError) as exc:
         return _finish_manual_reply(
             message,
             state=OutboundMessage.State.RECONCILING,
-            error=str(exc),
+            error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
         )
     return _finish_manual_reply(
         message,
@@ -426,7 +427,7 @@ def reconcile_manual_reply(
             return _finish_manual_reply(
                 locked,
                 state=OutboundMessage.State.RECONCILING,
-                error=str(exc),
+                error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
             )
     except ProviderError as exc:
         with transaction.atomic():
@@ -434,7 +435,7 @@ def reconcile_manual_reply(
             return _finish_manual_reply(
                 locked,
                 state=OutboundMessage.State.SEND_FAILED,
-                error=str(exc),
+                error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
             )
     except ValidationError as exc:
         with transaction.atomic():
@@ -442,7 +443,7 @@ def reconcile_manual_reply(
             return _finish_manual_reply(
                 locked,
                 state=OutboundMessage.State.SEND_FAILED,
-                error=str(exc),
+                error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
             )
     with transaction.atomic():
         locked = (
