@@ -1,27 +1,11 @@
 {% extends "base.html" %}
-
 {% block title %}Campañas · Contact Outreach{% endblock %}
-
+{% block breadcrumb %}Campañas{% endblock %}
+{% block page_title %}Campañas{% endblock %}
 {% block content %}
-<div class="actions"><h1>Campañas</h1><a class="button" href="{% url 'campaign-create' %}">Crear campaña</a></div>
-<form method="get" class="card filters" role="search">
-    <div><label for="campaign-q">Buscar nombre o ubicación</label><input id="campaign-q" type="search" name="q" value="{{ request.GET.q }}"></div>
-    <div><label for="campaign-state">Estado</label><select id="campaign-state" name="state"><option value="">Todos</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{% url 'campaigns' %}">Limpiar</a></div>
-</form>
-<table>
-    <thead><tr><th>Nombre</th><th>Estado</th><th>Objetivo</th><th>Crudos máx.</th><th>Catálogo</th></tr></thead>
-    <tbody>
-    {% for campaign in campaigns %}
-        <tr>
-            <td><a href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a></td>
-            <td>{{ campaign.get_state_display }}</td>
-            <td>{{ campaign.objective }}</td>
-            <td>{{ campaign.max_raw_records }}</td>
-            <td>{{ campaign.catalog }}</td>
-        </tr>
-    {% empty %}<tr><td colspan="5">Todavía no hay campañas.</td></tr>{% endfor %}
-    </tbody>
-</table>
+<header class="page-header"><div class="page-header__copy"><h1>Campañas</h1><p>Gestioná borradores, pipelines activos y operaciones que requieren atención.</p></div><div class="page-header__actions"><a class="button" href="{% url 'campaign-create' %}"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nueva campaña</a></div></header>
+<form method="get" class="panel filters" role="search"><div class="filters__grid"><div class="field"><label class="field__label" for="campaign-q">Buscar campaña</label><input id="campaign-q" type="search" name="q" value="{{ request.GET.q }}" placeholder="Nombre o ubicación"></div><div class="field"><label class="field__label" for="campaign-state">Estado</label><select id="campaign-state" name="state"><option value="">Todos los estados</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div><div class="filters__actions"><button class="button" type="submit">Aplicar filtros</button>{% if request.GET.q or request.GET.state %}<a class="button button--secondary" href="{% url 'campaigns' %}">Limpiar</a>{% endif %}</div></div></form>
+<p class="muted">{{ page_obj.paginator.count }} campaña{{ page_obj.paginator.count|pluralize }}.</p>
+{% if campaigns %}<div class="table-scroll"><table><thead><tr><th>Campaña</th><th>Estado</th><th>Modo</th><th data-align="right">Objetivo</th><th data-align="right">Máximo crudo</th><th>Catálogo</th><th>Creada</th></tr></thead><tbody>{% for campaign in campaigns %}<tr><td><a class="table-primary" href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a><span class="table-meta">{{ campaign.location_text }}</span></td><td><span class="badge badge--{{ campaign.state|lower }}">{{ campaign.get_state_display }}</span>{% if campaign.status_reason %}<span class="table-meta">{{ campaign.status_reason|truncatechars:60 }}</span>{% endif %}</td><td><span class="badge badge--{{ campaign.delivery_mode|lower }}">{{ campaign.get_delivery_mode_display }}</span></td><td data-align="right">{{ campaign.objective }}</td><td data-align="right">{{ campaign.max_raw_records }}</td><td>{{ campaign.catalog }}</td><td>{{ campaign.created_at|date:"d M Y" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<section class="panel empty-state"><div class="empty-state__icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 3v4m8-4v4M4 10h16"/></svg></div><h2>{% if request.GET.q or request.GET.state %}No encontramos campañas{% else %}Todavía no creaste una campaña{% endif %}</h2><p>{% if request.GET.q or request.GET.state %}Probá limpiar los filtros o buscar con otros términos.{% else %}Comenzá con un borrador en simulación para validar audiencia, límites y mensajes sin enviar correo real.{% endif %}</p>{% if request.GET.q or request.GET.state %}<a class="button button--secondary" href="{% url 'campaigns' %}">Limpiar filtros</a>{% else %}<a class="button" href="{% url 'campaign-create' %}">Crear primera campaña</a>{% endif %}</section>{% endif %}
 {% include "includes/pagination.html" %}
 {% endblock %}

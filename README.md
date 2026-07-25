@@ -54,7 +54,8 @@ make --version
 
 La web queda disponible en <http://127.0.0.1:8000/>. El arranque aplica las migraciones built-in
 de Django bajo un advisory lock de PostgreSQL y crea o rota el propietario configurado sin imprimir
-la contraseña. PostgreSQL y Redis no publican puertos al host.
+la contraseña. La imagen recolecta los archivos estáticos y Gunicorn los sirve mediante WhiteNoise;
+no se necesita un servidor Node ni un CDN. PostgreSQL y Redis no publican puertos al host.
 
 Para seguir los logs:
 

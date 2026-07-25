@@ -10,12 +10,12 @@ from django.db.models import Count, QuerySet, Sum
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from apps.audit.models import BackgroundJob
+from apps.audit.models import AuditEvent, BackgroundJob
 from apps.campaigns.models import Campaign, OutboundMessage, SearchRun
 from apps.catalogs.models import Catalog
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone
-from apps.mailbox.models import InboundMessage
+from apps.mailbox.models import GmailConnection, InboundMessage
 from apps.prospects.models import Prospect
 
 from .csv_export import csv_download
@@ -87,9 +87,18 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             classification=InboundMessage.Classification.INTERESTED
         ).count(),
     }
+    profile_configured = BusinessProfile.objects.filter(owner=owner).exists()
+    active_catalogs = Catalog.objects.filter(uploaded_by=owner, active=True, missing=False).count()
+    active_categories = SearchCategory.objects.filter(active=True, archived_at__isnull=True).count()
+    active_zones = SearchZone.objects.filter(active=True, archived_at__isnull=True).count()
+    owner_campaign_count = Campaign.objects.filter(created_by=owner).count()
+    campaign_started = (
+        Campaign.objects.filter(created_by=owner).exclude(state=Campaign.State.DRAFT).exists()
+    )
+    gmail_connection = GmailConnection.objects.filter(owner=owner).first()
     summary = {
-        "campaigns": Campaign.objects.count(),
-        "catalogs": Catalog.objects.filter(active=True, missing=False).count(),
+        "campaigns": owner_campaign_count,
+        "catalogs": active_catalogs,
         "categories": SearchCategory.objects.filter(active=True, archived_at__isnull=True).count(),
         "zones": SearchZone.objects.filter(active=True, archived_at__isnull=True).count(),
         "suppressions": SuppressionEntry.objects.count(),
@@ -109,12 +118,62 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 .annotate(total=Count("id"))
                 .values_list("state", "total")
             ),
-            "profile_configured": BusinessProfile.objects.filter(owner=owner).exists(),
-            "recent_campaigns": Campaign.objects.select_related("catalog")[:5],
+            "profile_configured": profile_configured,
+            "gmail_connection": gmail_connection,
+            "gmail_ready": bool(gmail_connection and gmail_connection.is_ready),
+            "checklist": (
+                (
+                    "Perfil comercial",
+                    profile_configured,
+                    "business-profile",
+                    "Completá identidad, firma y datos del vendedor.",
+                ),
+                (
+                    "Rubros activos",
+                    active_categories > 0,
+                    "categories",
+                    "Revisá qué actividades forman la audiencia.",
+                ),
+                (
+                    "Zonas activas",
+                    active_zones > 0,
+                    "zones",
+                    "Confirmá las áreas geográficas de búsqueda.",
+                ),
+                (
+                    "Catálogo vigente",
+                    active_catalogs > 0,
+                    "catalogs",
+                    "Cargá el PDF que acompañará los mensajes.",
+                ),
+                (
+                    "Primera campaña",
+                    owner_campaign_count > 0,
+                    "campaign-create",
+                    "Definí audiencia, objetivo y límites.",
+                ),
+                (
+                    "Campaña iniciada",
+                    campaign_started,
+                    "campaigns",
+                    "Iniciá un borrador cuando la configuración esté lista.",
+                ),
+            ),
+            "recent_campaigns": Campaign.objects.filter(created_by=owner).select_related("catalog")[
+                :5
+            ],
+            "attention_campaigns": Campaign.objects.filter(
+                created_by=owner,
+                state__in=(Campaign.State.PAUSED, Campaign.State.STOPPED_ERROR),
+            )[:5],
+            "problem_jobs": BackgroundJob.objects.filter(
+                state__in=(BackgroundJob.State.FAILED, BackgroundJob.State.RETRY_WAIT)
+            )[:5],
+            "recent_activity": AuditEvent.objects.select_related("actor")[:6],
             "recent_responses": InboundMessage.objects.select_related(
                 "related_outbound__campaign",
                 "related_outbound__prospect",
-            )[:5],
+            ).filter(related_outbound__campaign__created_by=owner)[:5],
         },
     )
 

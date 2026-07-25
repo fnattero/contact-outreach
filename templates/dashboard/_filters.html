@@ -1,10 +1,10 @@
-<form method="get" class="card filters" role="search">
-    <div><label for="filter-q">Buscar</label><input id="filter-q" type="search" name="q" value="{{ request.GET.q }}"></div>
-    <div><label for="filter-campaign">Campaña</label><select id="filter-campaign" name="campaign"><option value="">Todas</option>{% for campaign in campaigns %}<option value="{{ campaign.pk }}" {% if request.GET.campaign == campaign.pk|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>{% endfor %}</select></div>
-    {% if states %}<div><label for="filter-state">Estado</label><select id="filter-state" name="state"><option value="">Todos</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>{% endif %}
-    {% if kinds %}<div><label for="filter-kind">Tipo</label><select id="filter-kind" name="kind"><option value="">Todos</option>{% for value, label in kinds %}<option value="{{ value }}" {% if request.GET.kind == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>{% endif %}
-    <div><label for="filter-from">Desde</label><input id="filter-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
-    <div><label for="filter-to">Hasta</label><input id="filter-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
+<form method="get" class="panel filters" role="search"><div class="filters__grid">
+    <div class="field"><label class="field__label" for="filter-q">Buscar</label><input id="filter-q" type="search" name="q" value="{{ request.GET.q }}" placeholder="Nombre, email o asunto"></div>
+    <div class="field"><label class="field__label" for="filter-campaign">Campaña</label><select id="filter-campaign" name="campaign"><option value="">Todas las campañas</option>{% for campaign in campaigns %}<option value="{{ campaign.pk }}" {% if request.GET.campaign == campaign.pk|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>{% endfor %}</select></div>
+    {% if states %}<div class="field"><label class="field__label" for="filter-state">Estado</label><select id="filter-state" name="state"><option value="">Todos los estados</option>{% for value, label in states %}<option value="{{ value }}" {% if request.GET.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>{% endif %}
+    {% if kinds %}<div class="field"><label class="field__label" for="filter-kind">Tipo</label><select id="filter-kind" name="kind"><option value="">Todos los tipos</option>{% for value, label in kinds %}<option value="{{ value }}" {% if request.GET.kind == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>{% endif %}
+    <div class="field"><label class="field__label" for="filter-from">Desde</label><input id="filter-from" type="date" name="date_from" value="{{ request.GET.date_from }}"></div>
+    <div class="field"><label class="field__label" for="filter-to">Hasta</label><input id="filter-to" type="date" name="date_to" value="{{ request.GET.date_to }}"></div>
     {% block extra_filters %}{% endblock %}
-    <div class="actions"><button type="submit">Aplicar filtros</button><a class="button secondary" href="{{ request.path }}">Limpiar</a></div>
-</form>
+    <div class="filters__actions"><button class="button" type="submit">Aplicar filtros</button><a class="button button--secondary" href="{{ request.path }}">Limpiar</a></div>
+</div></form>

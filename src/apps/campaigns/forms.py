@@ -26,16 +26,19 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
             "Confirmo que revisé el checklist live y que una campaña LIVE puede enviar "
             "correos reales si los controles de despliegue también están habilitados"
         ),
+        help_text="Esta confirmación no reemplaza SEND_MODE, kill switch, Gmail ni los preflights.",
     )
     categories = forms.ModelMultipleChoiceField(
         queryset=SearchCategory.objects.filter(active=True, archived_at__isnull=True),
         label="Rubros",
         widget=forms.CheckboxSelectMultiple,
+        help_text="Cada rubro se combina con cada zona para generar consultas determinísticas.",
     )
     zones = forms.ModelMultipleChoiceField(
         queryset=SearchZone.objects.filter(active=True, archived_at__isnull=True),
         label="Zonas",
         widget=forms.CheckboxSelectMultiple,
+        help_text="Usá las zonas activas que realmente querés recorrer en esta campaña.",
     )
     weekdays = forms.MultipleChoiceField(
         choices=WEEKDAY_CHOICES,
@@ -82,6 +85,7 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
             "catalog",
         )
         widgets = {
+            "delivery_mode": forms.RadioSelect,
             "window_start": forms.TimeInput(attrs={"type": "time"}),
             "window_end": forms.TimeInput(attrs={"type": "time"}),
         }

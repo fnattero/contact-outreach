@@ -5,13 +5,13 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from apps.campaigns.forms import CampaignForm
-from apps.campaigns.models import Campaign
+from apps.campaigns.models import Campaign, OutboundMessage
 from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.configuration.models import BusinessProfile
@@ -91,7 +91,18 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
                 return redirect("campaign-detail", campaign_id=campaign.pk)
     else:
         form = CampaignForm(initial=initial)
-    return render(request, "campaigns/form.html", {"form": form})
+    selected_category_count = len(form["categories"].value() or [])
+    selected_zone_count = len(form["zones"].value() or [])
+    return render(
+        request,
+        "campaigns/form.html",
+        {
+            "form": form,
+            "selected_category_count": selected_category_count,
+            "selected_zone_count": selected_zone_count,
+            "query_count": selected_category_count * selected_zone_count,
+        },
+    )
 
 
 @login_required
@@ -110,7 +121,41 @@ def campaign_detail(request: HttpRequest, campaign_id: str) -> HttpResponse:
         pk=campaign_id,
         created_by=request.user,
     )
-    return render(request, "campaigns/detail.html", {"campaign": campaign})
+    prospects = campaign.prospects.all()
+    first_contacts = campaign.messages.filter(kind=OutboundMessage.Kind.FIRST_CONTACT)
+    raw_total = campaign.search_runs.aggregate(value=Sum("raw_count"))["value"] or 0
+    metrics = {
+        "raw": raw_total,
+        "with_email": prospects.exclude(
+            pipeline_state__in=(
+                Prospect.PipelineState.DISCOVERED,
+                Prospect.PipelineState.SKIPPED_NO_EMAIL,
+            )
+        ).count(),
+        "qualified": prospects.filter(pipeline_state=Prospect.PipelineState.QUEUED).count(),
+        "queued": first_contacts.filter(
+            state__in=(
+                OutboundMessage.State.PREPARED,
+                OutboundMessage.State.QUEUED,
+                OutboundMessage.State.SENDING,
+                OutboundMessage.State.RECONCILING,
+            )
+        ).count(),
+        "sent": first_contacts.filter(state=OutboundMessage.State.SENT).count(),
+        "simulated": first_contacts.filter(state=OutboundMessage.State.DRY_RUN_COMPLETED).count(),
+        "errors": prospects.filter(pipeline_state=Prospect.PipelineState.ERROR).count()
+        + first_contacts.filter(state=OutboundMessage.State.SEND_FAILED).count(),
+    }
+    progress_percent = min(100, round(metrics["qualified"] * 100 / campaign.objective))
+    return render(
+        request,
+        "campaigns/detail.html",
+        {
+            "campaign": campaign,
+            "metrics": metrics,
+            "progress_percent": progress_percent,
+        },
+    )
 
 
 @login_required

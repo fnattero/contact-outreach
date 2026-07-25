@@ -1,13 +1,73 @@
 {% extends "base.html" %}
-
 {% block title %}Nueva campaña · Contact Outreach{% endblock %}
-
+{% block breadcrumb %}Campañas / Nueva{% endblock %}
+{% block page_title %}Crear campaña{% endblock %}
 {% block content %}
-<h1>Nueva campaña</h1>
-<p class="muted">El objetivo inicial es 300. Podés ajustar todos los límites antes de crear el borrador.</p>
-<form method="post" class="card form-card checkbox-list">
-    {% csrf_token %}{{ form.as_p }}
-    <p class="muted">SEND_MODE y kill switch son controles de despliegue de sólo lectura: {{ runtime_send_mode }} / {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}.</p>
-    <button type="submit">Crear borrador</button>
+<header class="page-header">
+    <div class="page-header__copy"><h1>Nueva campaña</h1><p>Definí la audiencia y los límites del pipeline. La campaña se crea como borrador y no ejecuta trabajo hasta que la inicies.</p></div>
+    <div class="page-header__actions"><a class="button button--secondary" href="{% url 'campaigns' %}">Cancelar</a></div>
+</header>
+
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert"><div><strong>No pudimos crear la campaña.</strong>{{ form.non_field_errors }}</div></div>{% endif %}
+
+<form method="post" class="campaign-form" novalidate>
+    {% csrf_token %}
+    <div class="section-stack">
+        <section class="panel form-section" id="basic">
+            <div class="panel__header"><div><h2><span class="form-section__number">1</span>Información básica</h2><p class="muted">Un nombre reconocible y la ubicación general del descubrimiento.</p></div></div>
+            <div class="panel__body form-grid">{% include "includes/field.html" with field=form.name %}{% include "includes/field.html" with field=form.location_text %}</div>
+        </section>
+
+        <section class="panel form-section" id="audience">
+            <div class="panel__header"><div><h2><span class="form-section__number">2</span>Audiencia</h2><p class="muted">Seleccioná rubros y zonas activas. Cada par genera una consulta de extracción.</p></div></div>
+            <div class="panel__body">
+                <fieldset class="field{% if form.categories.errors %} field--error{% endif %}"><legend class="field__label">Rubros <span class="required-mark" aria-hidden="true">*</span></legend><div class="selection-toolbar"><input type="search" placeholder="Filtrar rubros…" aria-label="Filtrar rubros" data-choice-filter="category-choices"><span class="badge"><span data-category-count>{{ selected_category_count }}</span> seleccionados</span></div><div class="choice-grid" id="category-choices">{{ form.categories }}</div>{% if form.categories.errors %}<div class="field__error" role="alert">{{ form.categories.errors }}</div>{% endif %}<p class="field__help">{{ form.categories.help_text }}</p></fieldset>
+                <fieldset class="field{% if form.zones.errors %} field--error{% endif %}"><legend class="field__label">Zonas <span class="required-mark" aria-hidden="true">*</span></legend><div class="selection-toolbar"><input type="search" placeholder="Filtrar zonas…" aria-label="Filtrar zonas" data-choice-filter="zone-choices"><span class="badge"><span data-zone-count>{{ selected_zone_count }}</span> seleccionadas</span></div><div class="choice-grid" id="zone-choices">{{ form.zones }}</div>{% if form.zones.errors %}<div class="field__error" role="alert">{{ form.zones.errors }}</div>{% endif %}<p class="field__help">{{ form.zones.help_text }}</p></fieldset>
+                <div class="query-calculation" aria-live="polite"><strong><span data-category-count>{{ selected_category_count }}</span> rubros</strong><span aria-hidden="true">×</span><strong><span data-zone-count>{{ selected_zone_count }}</span> zonas</strong><span aria-hidden="true">=</span><strong><span data-query-count>{{ query_count }}</span> consultas</strong></div>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="limits">
+            <div class="panel__header"><div><h2><span class="form-section__number">3</span>Objetivo y límites</h2><p class="muted">El objetivo cuenta prospectos únicos, relevantes y con email; no resultados crudos.</p></div></div>
+            <div class="panel__body form-grid form-grid--3">{% include "includes/field.html" with field=form.objective %}{% include "includes/field.html" with field=form.max_raw_records %}{% include "includes/field.html" with field=form.relevance_threshold %}{% include "includes/field.html" with field=form.cost_limit %}{% include "includes/field.html" with field=form.cost_currency %}</div>
+        </section>
+
+        <section class="panel form-section" id="extraction">
+            <div class="panel__header"><div><h2><span class="form-section__number">4</span>Extracción</h2><p class="muted">El proveedor fake no abre red. Outscraper requiere credenciales externas y costo en USD.</p></div></div>
+            <div class="panel__body">{% include "includes/field.html" with field=form.extractor_provider %}</div>
+        </section>
+
+        <section class="panel form-section" id="ai">
+            <div class="panel__header"><div><h2><span class="form-section__number">5</span>Enriquecimiento e IA</h2><p class="muted">La web aporta contexto hostil y acotado; la IA sólo puede usar hechos suministrados.</p></div></div>
+            <div class="panel__body form-grid">{% include "includes/field.html" with field=form.llm_provider %}{% include "includes/field.html" with field=form.llm_model %}{% include "includes/field.html" with field=form.llm_base_url full=True %}</div>
+        </section>
+
+        <section class="panel form-section" id="catalog">
+            <div class="panel__header"><div><h2><span class="form-section__number">6</span>Catálogo</h2><p class="muted">La versión seleccionada queda congelada y su integridad se revalida antes de cada entrega.</p></div><a href="{% url 'catalogs' %}">Administrar catálogos</a></div>
+            <div class="panel__body">{% include "includes/field.html" with field=form.catalog %}</div>
+        </section>
+
+        <section class="panel form-section" id="schedule">
+            <div class="panel__header"><div><h2><span class="form-section__number">7</span>Calendario y ritmo</h2><p class="muted">Los límites diarios, intervalo y ventana se evalúan en la zona horaria de la campaña.</p></div></div>
+            <div class="panel__body form-grid form-grid--3">{% include "includes/field.html" with field=form.daily_limit %}{% include "includes/field.html" with field=form.message_interval_minutes %}{% include "includes/field.html" with field=form.timezone_name %}{% include "includes/field.html" with field=form.window_start %}{% include "includes/field.html" with field=form.window_end %}<fieldset class="field field--full{% if form.weekdays.errors %} field--error{% endif %}"><legend class="field__label">Días de envío <span class="required-mark" aria-hidden="true">*</span></legend><div class="choice-grid">{{ form.weekdays }}</div>{% if form.weekdays.errors %}<div class="field__error" role="alert">{{ form.weekdays.errors }}</div>{% endif %}</fieldset></div>
+        </section>
+
+        <section class="panel form-section" id="mode">
+            <div class="panel__header"><div><h2><span class="form-section__number">8</span>Simulación o live</h2><p class="muted">Elegí el alcance de la campaña. El despliegue conserva controles independientes.</p></div></div>
+            <div class="panel__body">
+                <fieldset class="field{% if form.delivery_mode.errors %} field--error{% endif %}"><legend class="field__label">Modo de entrega <span class="required-mark" aria-hidden="true">*</span></legend><div class="radio-cards">{% for radio in form.delivery_mode %}<div><label>{{ radio.tag }}<span><strong>{{ radio.choice_label }}</strong><small>{% if radio.data.value == 'DRY_RUN' %}Recomendado. Construye y valida el mensaje sin llamar Gmail.{% else %}Operación sensible. Puede enviar correo real si todas las barreras están habilitadas.{% endif %}</small></span></label></div>{% endfor %}</div>{% if form.delivery_mode.errors %}<div class="field__error" role="alert">{{ form.delivery_mode.errors }}</div>{% endif %}</fieldset>
+                <div class="alert alert--warning"><div><strong>Controles efectivos del despliegue</strong><br>SEND_MODE: <strong>{{ runtime_send_mode }}</strong> · kill switch: <strong>{% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}</strong>. Estos valores son de sólo lectura.</div></div>
+                <div class="field{% if form.confirm_live.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.confirm_live }}<span>{{ form.confirm_live.label }}</span></label>{% if form.confirm_live.help_text %}<p class="field__help">{{ form.confirm_live.help_text }}</p>{% endif %}{% if form.confirm_live.errors %}<div class="field__error" role="alert">{{ form.confirm_live.errors }}</div>{% endif %}</div>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="summary">
+            <div class="panel__header"><div><h2><span class="form-section__number">9</span>Resumen final</h2><p class="muted">Verificá alcance, volumen, costo y entrega antes de crear el borrador.</p></div></div>
+            <div class="panel__body"><div class="form-summary"><div class="summary-item"><span class="summary-item__label">Consultas derivadas</span><span class="summary-item__value"><span data-query-count>{{ query_count }}</span> combinaciones</span></div><div class="summary-item"><span class="summary-item__label">Objetivo</span><span class="summary-item__value">{{ form.objective.value|default:"300" }} prospectos calificados</span></div><div class="summary-item"><span class="summary-item__label">Límite de costo</span><span class="summary-item__value">{{ form.cost_currency.value|default:"USD" }} {{ form.cost_limit.value|default:"10.00" }}</span></div><div class="summary-item"><span class="summary-item__label">Ritmo</span><span class="summary-item__value">{{ form.daily_limit.value|default:"30" }} por día</span></div><div class="summary-item"><span class="summary-item__label">Catálogo</span><span class="summary-item__value">Versión seleccionada arriba</span></div><div class="summary-item"><span class="summary-item__label">Resultado inmediato</span><span class="summary-item__value">Borrador, sin ejecución automática</span></div></div></div>
+            <div class="panel__footer actions"><button class="button" type="submit">Crear borrador</button><a class="button button--secondary" href="{% url 'campaigns' %}">Cancelar</a><span class="muted">Los campos con <span class="required-mark">*</span> son obligatorios.</span></div>
+        </section>
+    </div>
+
+    <aside class="card campaign-form__nav" aria-label="Secciones del formulario"><h2>Configuración</h2><ol class="form-steps"><li><a href="#basic">Información básica</a></li><li><a href="#audience">Audiencia</a></li><li><a href="#limits">Objetivo y límites</a></li><li><a href="#extraction">Extracción</a></li><li><a href="#ai">Enriquecimiento e IA</a></li><li><a href="#catalog">Catálogo</a></li><li><a href="#schedule">Calendario y ritmo</a></li><li><a href="#mode">Simulación o live</a></li><li><a href="#summary">Resumen final</a></li></ol></aside>
 </form>
 {% endblock %}

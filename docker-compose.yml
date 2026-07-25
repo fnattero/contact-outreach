@@ -3,8 +3,7 @@ name: contact-outreach
 x-app: &app
   image: contact-outreach:local
   env_file:
-    - path: .env
-      required: false
+    - .env
   environment: &app-environment
     APP_ENV: ${APP_ENV:-development}
     DJANGO_DEBUG: ${DJANGO_DEBUG:-true}

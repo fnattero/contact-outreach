@@ -5,6 +5,7 @@ role="${1:-web}"
 
 case "$role" in
     web)
+        python src/manage.py collectstatic --noinput
         python src/manage.py migrate_safe
         python src/manage.py bootstrap_owner --if-configured
         exec gunicorn contact_outreach.wsgi:application \

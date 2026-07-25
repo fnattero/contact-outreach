@@ -1,13 +1,2 @@
-{% extends "base.html" %}
-
-{% block title %}Perfil comercial · Contact Outreach{% endblock %}
-
-{% block content %}
-<h1>Perfil comercial</h1>
-<p class="muted">Estos datos se congelan en cada campaña al iniciarla. Versión actual: {{ profile.profile_version|default:"sin guardar" }}.</p>
-<form method="post" class="card form-card">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Guardar perfil</button>
-</form>
-{% endblock %}
+{% extends "base.html" %}{% block title %}Perfil comercial · Contact Outreach{% endblock %}{% block breadcrumb %}Configuración / Perfil{% endblock %}{% block page_title %}Perfil comercial{% endblock %}
+{% block content %}<header class="page-header"><div class="page-header__copy"><h1>Perfil comercial</h1><p>Estos datos se congelan al iniciar cada campaña. Versión actual: <strong>{{ profile.profile_version|default:"sin guardar" }}</strong>.</p></div></header>{% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}<form method="post" class="section-stack" novalidate>{% csrf_token %}<section class="panel"><div class="panel__header"><div><h2>Identidad comercial</h2><p class="muted">Datos visibles y de contacto usados para construir el snapshot.</p></div></div><div class="panel__body form-grid">{% include "includes/field.html" with field=form.company_name %}{% include "includes/field.html" with field=form.salesperson_name %}{% include "includes/field.html" with field=form.phone %}{% include "includes/field.html" with field=form.whatsapp %}{% include "includes/field.html" with field=form.address %}{% include "includes/field.html" with field=form.website %}</div></section><section class="panel"><div class="panel__header"><div><h2>Propuesta comercial</h2><p class="muted">La IA sólo puede usar hechos explícitos de este perfil y del prospecto.</p></div></div><div class="panel__body form-grid">{% include "includes/field.html" with field=form.description full=True %}{% include "includes/field.html" with field=form.products full=True %}{% include "includes/field.html" with field=form.differentiators full=True %}</div></section><section class="panel"><div class="panel__header"><div><h2>Mensajes y calificación</h2><p class="muted">Firma, instrucciones adicionales y umbral por defecto para campañas nuevas.</p></div></div><div class="panel__body form-grid">{% include "includes/field.html" with field=form.signature full=True %}{% include "includes/field.html" with field=form.additional_instructions full=True %}{% include "includes/field.html" with field=form.relevance_threshold %}</div><div class="panel__footer"><button class="button" type="submit">Guardar perfil</button></div></section></form>{% endblock %}

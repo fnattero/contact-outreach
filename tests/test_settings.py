@@ -21,6 +21,13 @@ def test_safe_runtime_defaults_use_fake_providers() -> None:
     assert settings.GMAIL_PROVIDER == "fake"
 
 
+def test_static_files_are_configured_for_gunicorn() -> None:
+    assert settings.MIDDLEWARE[1] == "whitenoise.middleware.WhiteNoiseMiddleware"
+    assert settings.STORAGES["staticfiles"]["BACKEND"] == (
+        "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )
+
+
 def test_test_settings_override_live_parent_environment() -> None:
     environment = os.environ.copy()
     environment.update(
