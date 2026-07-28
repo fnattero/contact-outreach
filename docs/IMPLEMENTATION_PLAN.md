@@ -165,19 +165,22 @@ sin DNS en request, restriction UI, Spanish labels/accessibility/cache.
 
 **Objetivo:** analizar respuestas de forma medible sin autorizar Gmail.
 
-- Crear KnowledgeFact/Revision con approval y área “Información que puede usar la respuesta
-  automática”; no parsear PDFs.
+- Crear contexto general versionado, KnowledgeFact/Revision con approval y área “Información para
+  responder consultas”; no parsear PDFs.
+- Crear `EmbeddingProvider`, configuración de proveedor/modelo/dimensiones, embeddings cacheados de
+  facts aprobados y búsqueda semántica que selecciona hasta tres facts o escala por baja/ambigua.
 - Persistir Gmail/deterministic effects y publicar LLM on_commit fuera del sync lock.
 - Extraer <=10 EmailCandidates literales/regionales y resolver sintaxis/MX/restricción/ownership.
-- Crear ConversationMemory source-linked y bounded context builder de 24k con mandatory/recent/facts
-  rules. Overflow mandatory crea HumanTask.
+- Crear ConversationMemory source-linked y bounded context builder de 24k con mandatory/global
+  context/recent/memory/RAG facts rules. Overflow mandatory crea HumanTask.
 - Extender LLMProvider con strict `decide_reply`; dynamic candidate/fact/action enums, manifest/hash
   y no raw invalid output.
 - Crear ReplyDecision, feedback admin y OFF/SHADOW(default)/LIVE setting; SHADOW cero Gmail.
 - Calcular gate >=30/>=10/>=90%/cero unsafe y exigir reauth para enable LIVE.
 
-**Pruebas:** candidates/IDN/quoted/obfuscated, prompt injection, cross-thread bounded context,
-unknown IDs/schema, zero SHADOW effects, qualification boundaries.
+**Pruebas:** candidates/IDN/quoted/obfuscated, embeddings/RAG low/ambiguous/cache/provider,
+prompt injection, cross-thread bounded context, unknown IDs/schema, zero SHADOW effects,
+qualification boundaries.
 
 **Terminado:** admins pueden revisar qué habría hecho, facts usados y exactitud con trazabilidad
 acotada.
@@ -270,7 +273,7 @@ Internet go-live. Todas las automatizaciones conservan kill switches independien
 | FR-08 Sending/same-day | 4, 5, 8 | reservations, executor/reconciliation/barriers |
 | FR-09 One reminder | 5 | scheduling, cancellation y completion |
 | FR-10 Gmail/promotion | 2, 5, 7 | sync on_commit, Contact/Conversation, reminder cancellation |
-| FR-11 Knowledge/candidates/context | 7 | revisions, extractor, memory, manifests |
+| FR-11 Knowledge/candidates/context | 7 | global context, revisions, embeddings/RAG, extractor, memory, manifests |
 | FR-12 Decisions/SHADOW/LIVE gate | 7, 8 | provider schema, feedback, qualification/policy |
 | FR-13 Auto/redirect/human tasks | 8 | policy, saga, rate limits y suspension |
 | FR-14 Human alerts | 8 | task badge y NotificationDelivery |

@@ -251,6 +251,13 @@ LLM_MODEL = os.getenv("LLM_MODEL", "fake-deterministic")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OPENAI_COMPATIBLE_BASE_URL = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "")
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "fake")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
+if EMBEDDING_PROVIDER not in {"fake", "openai-compatible"}:
+    raise ImproperlyConfigured("EMBEDDING_PROVIDER must be fake or openai-compatible")
+if not 64 <= EMBEDDING_DIMENSIONS <= 3072:
+    raise ImproperlyConfigured("EMBEDDING_DIMENSIONS must be between 64 and 3072")
 GMAIL_PROVIDER = os.getenv("GMAIL_PROVIDER", "fake")
 GMAIL_OAUTH_CLIENT_ID = os.getenv("GMAIL_OAUTH_CLIENT_ID", "")
 GMAIL_OAUTH_CLIENT_SECRET = os.getenv("GMAIL_OAUTH_CLIENT_SECRET", "")

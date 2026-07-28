@@ -19,6 +19,9 @@ class LLMProvider(Protocol):
         self, request: ScheduledContactDraftRequest
     ) -> ScheduledContactDraftResult: ...
 
+class EmbeddingProvider(Protocol):
+    def embed(self, request: EmbeddingRequest) -> EmbeddingResult: ...
+
 class GmailProvider(Protocol):
     def authorization_url(self, state: str, redirect_uri: str) -> str: ...
     def exchange_code(self, code: str, redirect_uri: str) -> GmailConnectionData: ...
@@ -88,7 +91,7 @@ Esta extracción de prospecting es distinta de `EmailCandidate`: al importar un 
 aplicación analiza texto plano y mailto ya sanitizado, no WebsiteFetcher, y conserva hasta diez
 literales por regiones NEW_CONTENT/SIGNATURE/QUOTED.
 
-## 4. Proveedores LLM
+## 4. Proveedores LLM y embeddings
 
 Implementaciones:
 
@@ -100,6 +103,18 @@ Implementaciones:
 URLs rechazan userinfo/query/fragment; HTTP sólo para destinos locales/privados explícitamente
 permitidos y no siguen redirects con Authorization. API key se resuelve desde ciphertext/fallback
 de entorno al construir el adaptador.
+
+Embeddings:
+
+- `FakeEmbeddingProvider`: embeddings léxicos determinísticos para desarrollo y tests, sin red.
+- `OpenAICompatibleEmbeddingProvider`: endpoint `/embeddings`, `encoding_format=float`,
+  modelo configurable —por defecto `text-embedding-3-small`— y dimensiones configurables.
+
+La app usa embeddings sólo para buscar facts puntuales aprobados antes de construir el request LLM.
+El proveedor de embeddings no recibe Gmail ni puede ejecutar acciones; si falla, devuelve dimensión
+inválida o la selección queda baja/ambigua, la automatización no inventa una respuesta. A escala
+mayor se puede reemplazar el cache relacional por un vector store sin cambiar el contrato de
+dominio.
 
 ### 4.1 Campañas nuevas y compatibilidad
 
@@ -113,25 +128,28 @@ read-only y nunca se regenera para enviar una campaña completada.
 La aplicación construye, en este orden, hasta 24.000 caracteres:
 
 1. completos y obligatorios: texto recién escrito del inbound, mensaje INITIAL o
-   REFERRED_PROPOSAL original y padre directo;
+   REFERRED_PROPOSAL original, padre directo y contexto general aprobado vigente;
 2. hasta seis mensajes recientes relevantes del Contacto, incluso de otros threads;
 3. `ConversationMemory` estructurada con IDs fuente para historia anterior;
-4. hasta ocho `KnowledgeFactRevision` aprobadas y relevantes.
+4. hasta tres `KnowledgeFactRevision` aprobadas, elegidas por embeddings según la consulta.
 
 PDFs y HTML crudo quedan fuera. Si el bloque obligatorio no entra no se invoca proveedor y se abre
-HumanTask. El contexto cruzado no es “todo el hilo”: el selector preserva causalidad sin saturar.
+HumanTask. Si la consulta no encuentra facts claros —similitud baja o empate ambiguo— no se agregan
+facts puntuales y la política debe pedir humano cuando una respuesta segura depende de esos datos.
+El contexto cruzado no es “todo el hilo”: el selector preserva causalidad sin saturar.
 
 El request incluye:
 
 - inbound/contact/conversation IDs opacos y versión de policy;
 - bloques rotulados por rol/proveniencia como untrusted data;
 - lista de `EmailCandidateRef(id, normalized, region, validation_state)`;
-- lista de `FactRevisionRef(id, version, text)` aprobada;
+- lista de `FactRevisionRef(id, version, text)` aprobada y seleccionada para esta consulta;
 - enums dinámicos de candidate/fact IDs y actions/intents;
 - instrucciones de que reuniones, precios y demás categorías de riesgo deben pedir humano.
 
 El hash canónico cubre IDs/versiones/orden/textos efectivos. DB persiste sólo manifest con IDs,
-versiones, char counts y hash; el cuerpo ya vive en sus tablas y no se duplica en logs/prompts.
+versiones, char counts, estado de retrieval, scores redondeados y hashes; el cuerpo ya vive en sus
+tablas y no se duplica en logs/prompts.
 
 ### 4.3 ReplyDecisionResult
 
@@ -233,6 +251,7 @@ marca delivery; HumanTask permanece.
 | Import provincial | retry manual/idempotente en partition no activa | FAILED; anterior sigue READY |
 | DNS MX | hasta 3 diferidos | invalid/inconclusive; retry visible en Contactos; humano si redirect |
 | Website | uno por página dentro de presupuesto | fallback auditable |
+| Embeddings | máximo 3 técnicos; no fallback a facts no seleccionados | HumanTask/provider failure cuando hacen falta facts |
 | LLM decide | máximo 3 técnicos; rate limits diferidos | HumanTask/provider failure; nunca auto fallback |
 | Gmail send/reply | no retry ciego | RECONCILING o FAILED/HumanTask |
 | Gmail sync | 3; fallback history 404 | conexión degradada, UI disponible |

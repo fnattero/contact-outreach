@@ -87,6 +87,9 @@ class RuntimeIntegrationConfiguration:
     llm_model: str
     ollama_base_url: str
     openai_compatible_base_url: str
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimensions: int
     llm_credential_source: str
     llm_credential_configured: bool
     gmail_provider: str
@@ -172,6 +175,9 @@ def runtime_integration_configuration(
             llm_model=settings.LLM_MODEL,
             ollama_base_url=settings.OLLAMA_BASE_URL,
             openai_compatible_base_url=settings.OPENAI_COMPATIBLE_BASE_URL,
+            embedding_provider=settings.EMBEDDING_PROVIDER,
+            embedding_model=settings.EMBEDDING_MODEL,
+            embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
             llm_credential_source=llm_source,
             llm_credential_configured=llm_configured,
             gmail_provider=settings.GMAIL_PROVIDER,
@@ -188,6 +194,9 @@ def runtime_integration_configuration(
         llm_model=configuration.llm_model,
         ollama_base_url=configuration.ollama_base_url,
         openai_compatible_base_url=configuration.openai_compatible_base_url,
+        embedding_provider=configuration.embedding_provider,
+        embedding_model=configuration.embedding_model,
+        embedding_dimensions=configuration.embedding_dimensions,
         llm_credential_source=llm_source,
         llm_credential_configured=llm_configured,
         gmail_provider=configuration.gmail_provider,
@@ -250,6 +259,9 @@ def integration_configuration_initial(owner_id: int) -> dict[str, object]:
         "llm_model": runtime.llm_model,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
+        "embedding_provider": runtime.embedding_provider,
+        "embedding_model": runtime.embedding_model,
+        "embedding_dimensions": runtime.embedding_dimensions,
         "gmail_provider": runtime.gmail_provider,
         "gmail_oauth_client_id": runtime.gmail_oauth_client_id,
     }
@@ -264,6 +276,9 @@ def _safe_snapshot(runtime: RuntimeIntegrationConfiguration) -> dict[str, object
         "llm_model": runtime.llm_model,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
+        "embedding_provider": runtime.embedding_provider,
+        "embedding_model": runtime.embedding_model,
+        "embedding_dimensions": runtime.embedding_dimensions,
         "llm_credential": "configured" if runtime.llm_credential_configured else "missing",
         "gmail_provider": runtime.gmail_provider,
         "gmail_client_id_configured": bool(runtime.gmail_oauth_client_id),
@@ -352,11 +367,14 @@ def save_integration_configuration(
         "website_fetcher",
         "llm_provider",
         "llm_model",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimensions",
         "gmail_provider",
         "gmail_oauth_client_id",
     )
     for field in editable_fields:
-        setattr(configuration, field, values[field])
+        setattr(configuration, field, values.get(field, getattr(current_runtime, field)))
     configuration.ollama_base_url = validate_integration_base_url(
         values["ollama_base_url"],
         label="Ollama",
@@ -385,7 +403,11 @@ def save_integration_configuration(
         purpose=GMAIL_CLIENT_SECRET_PURPOSE,
     )
 
-    if configuration.llm_provider == IntegrationConfiguration.LLMProvider.OPENAI_COMPATIBLE:
+    if (
+        configuration.llm_provider == IntegrationConfiguration.LLMProvider.OPENAI_COMPATIBLE
+        or configuration.embedding_provider
+        == IntegrationConfiguration.EmbeddingProvider.OPENAI_COMPATIBLE
+    ):
         configured = _candidate_secret_configured(
             configuration,
             source_field="llm_api_key_source",
@@ -393,9 +415,9 @@ def save_integration_configuration(
             environment_value=settings.LLM_API_KEY,
         )
         if not configured:
-            raise ValidationError(
-                "El proveedor compatible con OpenAI requiere una clave de acceso."
-            )
+            raise ValidationError("La conexión compatible con OpenAI requiere una clave de acceso.")
+        if not configuration.openai_compatible_base_url.strip():
+            raise ValidationError("La conexión compatible con OpenAI requiere una URL base.")
     if configuration.gmail_provider == IntegrationConfiguration.GmailProvider.API:
         configured = _candidate_secret_configured(
             configuration,

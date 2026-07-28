@@ -25,7 +25,9 @@ from apps.configuration.integrations import (
 )
 from apps.configuration.models import IntegrationConfiguration
 from apps.core.crypto import decrypt_secret, encrypt_secret
+from apps.integrations.embeddings import OpenAICompatibleEmbeddingProvider
 from apps.integrations.factory import (
+    get_embedding_provider,
     get_extractor_provider,
     get_gmail_provider,
     get_llm_provider,
@@ -48,6 +50,9 @@ def integration_values(**overrides: object) -> dict[str, object]:
         "openai_compatible_base_url": "",
         "llm_api_key": "",
         "remove_llm_api_key": False,
+        "embedding_provider": "fake",
+        "embedding_model": "text-embedding-3-small",
+        "embedding_dimensions": 1536,
         "gmail_provider": "fake",
         "gmail_oauth_client_id": "",
         "gmail_oauth_client_secret": "",
@@ -190,6 +195,9 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
             llm_model="provider-model",
             openai_compatible_base_url="https://llm.example.test/v1",
             llm_api_key="llm-dashboard-secret",
+            embedding_provider="openai-compatible",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
             gmail_provider="api",
             gmail_oauth_client_id="client-id.apps.googleusercontent.com",
             gmail_oauth_client_secret="google-dashboard-secret",
@@ -225,6 +233,9 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
     assert runtime.extractor_provider == "overture"
     assert runtime.website_fetcher == "http"
     assert runtime.llm_provider == "openai-compatible"
+    assert runtime.embedding_provider == "openai-compatible"
+    assert runtime.embedding_model == "text-embedding-3-small"
+    assert runtime.embedding_dimensions == 1536
     assert runtime.gmail_provider == "api"
     assert runtime.overture_min_confidence == Decimal("0.800")
 
@@ -236,9 +247,12 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
         owner_id=owner.pk,
     )
     gmail = get_gmail_provider(owner_id=owner.pk)
+    embedding = get_embedding_provider(owner_id=owner.pk)
     assert isinstance(extractor, OverturePlacesProvider)
     assert isinstance(llm, OpenAICompatibleProvider)
     assert llm.api_key == "llm-dashboard-secret"
+    assert isinstance(embedding, OpenAICompatibleEmbeddingProvider)
+    assert embedding.api_key == "llm-dashboard-secret"
     assert isinstance(gmail, GmailAPIProvider)
     assert gmail.client_secret == "google-dashboard-secret"
 
@@ -338,6 +352,28 @@ def test_integration_form_rejects_secret_bearing_and_insecure_remote_urls(owner:
 
     assert not form.is_valid()
     assert "openai_compatible_base_url" in form.errors
+
+
+@pytest.mark.django_db
+def test_embedding_provider_requires_openai_connection_details(owner: User) -> None:
+    runtime = runtime_integration_configuration(owner.pk)
+    form = IntegrationConfigurationForm(
+        integration_values(embedding_provider="openai-compatible"),
+        user=owner,
+        runtime=runtime,
+    )
+
+    assert not form.is_valid()
+    assert "openai_compatible_base_url" in form.errors
+
+    with pytest.raises(ValidationError, match="clave de acceso"):
+        save_integration_configuration(
+            owner=owner,
+            values=integration_values(
+                embedding_provider="openai-compatible",
+                openai_compatible_base_url="https://llm.example.test/v1",
+            ),
+        )
 
 
 @pytest.mark.django_db

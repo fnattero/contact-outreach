@@ -9,6 +9,7 @@ from pytest_socket import SocketBlockedError
 from apps.integrations.contracts import (
     AnalysisFact,
     AnalysisRequest,
+    EmbeddingRequest,
     GmailCursor,
     GmailReplyRequest,
     GmailSendRequest,
@@ -17,6 +18,7 @@ from apps.integrations.contracts import (
     WebsiteRequest,
 )
 from apps.integrations.factory import (
+    get_embedding_provider,
     get_extractor_provider,
     get_gmail_provider,
     get_llm_provider,
@@ -68,6 +70,22 @@ def test_fake_llm_analyzes_and_classifies_without_external_calls() -> None:
         )
     )
     assert classification.classification == "UNSUBSCRIBE"
+
+
+def test_fake_embeddings_work_without_external_calls() -> None:
+    provider = get_embedding_provider()
+    result = provider.embed(
+        EmbeddingRequest(
+            texts=("carbones",),
+            correlation_id="correlation",
+            idempotency_key="embedding-key",
+            model="fake-embedding",
+            dimensions=128,
+        )
+    )
+
+    assert len(result.vectors) == 1
+    assert len(result.vectors[0]) == 128
 
 
 def test_fake_gmail_deduplicates_message_id_and_keeps_reply_thread() -> None:

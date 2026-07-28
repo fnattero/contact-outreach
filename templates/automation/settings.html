@@ -23,35 +23,81 @@
     </div>
 </section>
 
-<section class="panel automation-knowledge">
+    <section class="panel automation-knowledge">
     <div class="panel__header">
         <div>
             <h2>Información para responder consultas</h2>
-            <p class="muted">Cargá acá las respuestas simples que el agente puede usar cuando un cliente pregunta algo por email.</p>
+            <p class="muted">Separá el contexto general de la empresa de las respuestas puntuales. Así el agente entiende el marco, pero sólo responde consultas concretas con datos aprobados y encontrados por el buscador.</p>
         </div>
     </div>
     <div class="panel__body section-stack">
         <div class="automation-guide" aria-label="Cómo funciona esta información">
             <article class="automation-guide__item">
                 <span class="automation-guide__number" aria-hidden="true">1</span>
-                <div><h3>Escribís un dato claro</h3><p>Por ejemplo: años de experiencia, productos disponibles, cómo pedir una medida o qué información necesitás del cliente.</p></div>
+                <div><h3>Contexto general</h3><p>Es el background estable: quiénes son, qué venden, tono y límites. Se agrega siempre, como una brújula.</p></div>
             </article>
             <article class="automation-guide__item">
                 <span class="automation-guide__number" aria-hidden="true">2</span>
-                <div><h3>Lo aprobás</h3><p>Mientras esté como borrador, el agente no lo usa. Esto evita que una idea incompleta termine en un correo real.</p></div>
+                <div><h3>Datos puntuales</h3><p>Son tarjetas cortas de FAQ: experiencia, productos, medidas, entregas o qué información pedirle al cliente. No lee catálogos PDF automáticamente.</p></div>
             </article>
             <article class="automation-guide__item">
                 <span class="automation-guide__number" aria-hidden="true">3</span>
-                <div><h3>El agente responde sólo con eso</h3><p>No lee catálogos PDF automáticamente y no debería inventar datos. Si la consulta pide precio, reunión o algo dudoso, crea una tarea para una persona.</p></div>
+                <div><h3>El buscador elige hasta 3</h3><p>Cuando llega una consulta, se buscan las tarjetas más parecidas. Si no hay algo claro, o la consulta pide precio/reunión/criterio comercial, va a una persona.</p></div>
             </article>
+        </div>
+
+        <div class="knowledge-layout">
+            <form method="post" action="{% url 'global-context-create' %}" class="card knowledge-editor" novalidate>
+                {% csrf_token %}
+                <div class="knowledge-editor__header">
+                    <h3>Contexto general que se agrega siempre</h3>
+                    <p class="muted">Usalo para explicar la empresa en pocas líneas. No hace falta repetir cada producto: eso conviene cargarlo como tarjetas puntuales.</p>
+                </div>
+                {% include "includes/field.html" with field=global_context_form.context_text %}
+                {% include "includes/field.html" with field=global_context_form.source_notes %}
+                <div class="alert alert--warning">
+                    <div><strong>Regla simple:</strong><br>Escribí cosas estables. Evitá precios, promesas especiales o condiciones que cambian según el cliente.</div>
+                </div>
+                <div class="actions">
+                    <button class="button" type="submit">Guardar contexto como borrador</button>
+                    <span class="muted">Después aprobalo para que empiece a usarse.</span>
+                </div>
+            </form>
+
+            <aside class="knowledge-help card" aria-labelledby="global-context-current-title">
+                <h3 id="global-context-current-title">Contexto aprobado actual</h3>
+                {% if global_current %}
+                    <div class="knowledge-card__body">{{ global_current.context_text|linebreaksbr }}</div>
+                    <p class="table-meta">Versión {{ global_current.version }} · aprobado {{ global_current.approved_at|date:"d/m/Y H:i" }}</p>
+                {% else %}
+                    <p class="muted">Todavía no hay contexto general aprobado. El agente igual puede trabajar con las tarjetas puntuales aprobadas, pero tendrá menos background.</p>
+                {% endif %}
+                {% if global_context_revisions %}
+                    <details class="section-gap">
+                        <summary>Ver versiones recientes</summary>
+                        <ul class="plain-list">
+                            {% for revision in global_context_revisions %}
+                                <li>Versión {{ revision.version }} · {% if revision.superseded_at %}reemplazada{% elif revision.approved_at %}aprobada{% else %}borrador{% endif %}
+                                    {% if not revision.approved_at %}
+                                    <form method="post" action="{% url 'global-context-approve' revision.pk %}" class="inline-form">
+                                        {% csrf_token %}
+                                        <button class="button button--secondary button--small" type="submit">Aprobar</button>
+                                    </form>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                {% endif %}
+            </aside>
         </div>
 
         <div class="knowledge-layout">
             <form method="post" action="{% url 'knowledge-create' %}" class="card knowledge-editor" novalidate>
                 {% csrf_token %}
                 <div class="knowledge-editor__header">
-                    <h3>Agregar información nueva</h3>
-                    <p class="muted">Pensalo como una mini respuesta aprobable. Mejor varias respuestas cortas que una explicación enorme.</p>
+                    <h3>Agregar dato puntual</h3>
+                    <p class="muted">Cada tarjeta debería responder una sola duda. El buscador compara la consulta del cliente con estas tarjetas y elige pocas.</p>
                 </div>
                 {% include "includes/field.html" with field=knowledge_form.title %}
                 {% include "includes/field.html" with field=knowledge_form.category %}
@@ -84,9 +130,39 @@
             </aside>
         </div>
 
+        <div class="knowledge-layout">
+            <form method="post" action="{% url 'knowledge-search-preview' %}" class="card knowledge-editor" novalidate>
+                {% csrf_token %}
+                <div class="knowledge-editor__header">
+                    <h3>Probar qué datos encontraría</h3>
+                    <p class="muted">Sirve para revisar si tus tarjetas están claras antes de dejar que el agente las use.</p>
+                </div>
+                {% include "includes/field.html" with field=knowledge_preview_form.query %}
+                <div class="actions"><button class="button button--secondary" type="submit">Probar búsqueda</button></div>
+            </form>
+            <aside class="knowledge-help card" aria-live="polite">
+                <h3>Resultado de la prueba</h3>
+                {% if knowledge_preview %}
+                    <p>{{ knowledge_preview.message }}</p>
+                    {% if knowledge_preview.scores %}
+                        <ul class="plain-list">
+                            {% for score in knowledge_preview.scores %}
+                                <li>
+                                    <strong>{{ score.revision.fact.title }}</strong>
+                                    <span class="muted">· similitud {{ score.score|floatformat:2 }} · {% if score.selected %}entraría al contexto{% else %}no entraría automáticamente{% endif %}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                {% else %}
+                    <p class="muted">Todavía no probaste ninguna consulta. Pegá una pregunta de ejemplo y mirá qué tarjetas aparecerían.</p>
+                {% endif %}
+            </aside>
+        </div>
+
         <div>
             <div class="section-heading section-heading--inline">
-                <div><h3>Información guardada</h3><p class="muted">Sólo las tarjetas marcadas como “Aprobada” pueden usarse para responder.</p></div>
+                <div><h3>Datos puntuales guardados</h3><p class="muted">Sólo las tarjetas marcadas como “Aprobada” pueden entrar al buscador. El agente recibe como máximo tres por consulta.</p></div>
             </div>
             <div class="knowledge-card-grid">
             {% for revision in revisions %}

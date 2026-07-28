@@ -16,6 +16,7 @@ from apps.automation.notifications import (
     reconcile_notification,
     recoverable_notification_ids,
 )
+from apps.automation.retrieval import refresh_knowledge_revision_embedding
 from apps.automation.scheduled import (
     complete_scheduled_contact_attempt,
     create_due_scheduled_attempts,
@@ -53,6 +54,11 @@ def reconcile_notification_task(delivery_id: str) -> str:
 @shared_task(name="automation.process_scheduled_contact_attempt")  # type: ignore[untyped-decorator]
 def process_scheduled_contact_attempt_task(attempt_id: str) -> str:
     return process_scheduled_contact_attempt(attempt_id).state
+
+
+@shared_task(name="automation.refresh_knowledge_revision_embedding")  # type: ignore[untyped-decorator]
+def refresh_knowledge_revision_embedding_task(revision_id: str) -> str:
+    return refresh_knowledge_revision_embedding(revision_id)
 
 
 @shared_task(name="automation.dispatch_scheduled_contacts")  # type: ignore[untyped-decorator]

@@ -224,26 +224,37 @@ IDs y relación con campaña sin modificar historia.
 
 ### FR-11 Conocimiento, candidatos y contexto acotado
 
-El admin gestiona revisiones de hechos/FAQ en “Información que puede usar la respuesta
-automática”. Sólo una revisión explícitamente aprobada puede fundamentar una respuesta; no se
-extraen hechos de PDFs automáticamente.
+El admin gestiona dos tipos de información desde “Información para responder consultas”:
+
+- contexto general aprobado, que se agrega siempre y sirve como background estable de la empresa,
+  tono y límites;
+- datos puntuales/FAQ aprobados, que son tarjetas cortas usadas para responder consultas
+  concretas.
+
+Sólo una revisión explícitamente aprobada puede fundamentar una respuesta; no se extraen hechos de
+PDFs automáticamente.
 
 Antes del LLM se extraen como máximo diez emails literales de texto plano y `mailto:`. Se
 normalizan/validan y marcan `NEW_CONTENT`, `SIGNATURE` o `QUOTED`; no se reconstruyen direcciones
 ofuscadas. El modelo sólo puede seleccionar IDs entregados en esa solicitud.
 
 Cada solicitud tiene máximo 24.000 caracteres de entrada. Siempre incluye completo: nuevo texto
-escrito por el remitente, mensaje inicial/referido original y padre directo. Después agrega hasta
-seis mensajes recientes relevantes del Contacto entre hilos, memoria estructurada con fuentes para
-historia antigua y hasta ocho revisiones aprobadas pertinentes. Nunca incluye PDFs completos, HTML
-crudo ni un historial ilimitado. Si lo obligatorio no entra, se crea tarea humana. Sólo se
-persiste el manifiesto con IDs/versiones/hash, no una copia gigante del prompt.
+escrito por el remitente, mensaje inicial/referido original, padre directo y contexto general
+aprobado vigente. Después agrega hasta seis mensajes recientes relevantes del Contacto entre hilos,
+memoria estructurada con fuentes para historia antigua y hasta tres revisiones aprobadas elegidas
+por búsqueda semántica con embeddings. Si la similitud es baja o varias tarjetas compiten de forma
+ambigua, no se agregan datos puntuales y la decisión debe escalar a humano cuando necesita esos
+datos para responder. Nunca incluye PDFs completos, HTML crudo ni un historial ilimitado. Si lo
+obligatorio no entra, se crea tarea humana. Sólo se persiste el manifiesto con IDs/versiones/hash,
+estado de recuperación y hashes de consulta, no una copia gigante del prompt.
 
 ### FR-12 Decisiones IA, SHADOW y habilitación live
 
 `LLMProvider.decide_reply(request)` devuelve salida estructurada: clasificación, intención/acción
 allowlisted, confianza, candidate ID opcional, IDs de revisiones de hechos, cuerpo propuesto y
-motivo humano. La aplicación rechaza campos o IDs desconocidos. El LLM jamás invoca Gmail.
+motivo humano. La aplicación rechaza campos o IDs desconocidos. El LLM jamás invoca Gmail ni decide
+qué información cargar en la base: sólo puede usar el contexto global y las tarjetas puntuales que
+la aplicación ya seleccionó para esa solicitud.
 
 Modos:
 
@@ -351,9 +362,9 @@ Las vistas/tasks no asignan estados directamente; llaman servicios de transició
 son idempotentes y usan constraints, transacciones y locks. `AuditEvent` append-only registra actor,
 acción, entidad, before/after redactado y correlación. No guarda secretos ni cuerpos completos.
 
-Servicios externos sólo se acceden mediante `ExtractorProvider`, `WebsiteFetcher`, `LLMProvider`
-y `GmailProvider`. Tests usan fakes y bloquean HTTP, DNS, Gmail, Overture y LLM reales. Los efectos
-de Gmail siempre permanecen fuera del modelo.
+Servicios externos sólo se acceden mediante `ExtractorProvider`, `WebsiteFetcher`,
+`EmbeddingProvider`, `LLMProvider` y `GmailProvider`. Tests usan fakes y bloquean HTTP, DNS, Gmail,
+Overture, embeddings y LLM reales. Los efectos de Gmail siempre permanecen fuera del modelo.
 
 ### FR-20 Usabilidad y accesibilidad
 

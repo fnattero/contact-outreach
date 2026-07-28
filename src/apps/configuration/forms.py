@@ -369,6 +369,37 @@ class IntegrationConfigurationForm(forms.Form):
             "Eliminar la credencial de inteligencia artificial y desactivar el respaldo del entorno"
         ),
     )
+    embedding_provider = forms.ChoiceField(
+        choices=(
+            (IntegrationConfiguration.EmbeddingProvider.FAKE, "Simulado (sin red)"),
+            (
+                IntegrationConfiguration.EmbeddingProvider.OPENAI_COMPATIBLE,
+                "OpenAI embeddings",
+            ),
+        ),
+        label="Buscador de datos para respuestas",
+        help_text=(
+            "Elige cómo se encuentran las tarjetas aprobadas que se le muestran al agente. "
+            "Esto no autoriza respuestas: sólo decide qué información entra al contexto."
+        ),
+    )
+    embedding_model = forms.CharField(
+        max_length=120,
+        label="Modelo de embeddings",
+        help_text=(
+            "Modelo usado para comparar la pregunta del cliente con tus datos aprobados. "
+            "Recomendado: text-embedding-3-small."
+        ),
+    )
+    embedding_dimensions = forms.IntegerField(
+        min_value=64,
+        max_value=3072,
+        label="Tamaño del vector",
+        help_text=(
+            "Cantidad de números que guarda cada dato para buscarlo. 1536 es el valor normal "
+            "de text-embedding-3-small; bajarlo ahorra espacio pero puede perder precisión."
+        ),
+    )
     gmail_provider = forms.ChoiceField(
         choices=(
             (IntegrationConfiguration.GmailProvider.FAKE, "Simulado (sin red)"),
@@ -476,4 +507,13 @@ class IntegrationConfigurationForm(forms.Form):
                 "openai_compatible_base_url",
                 "El proveedor OpenAI compatible requiere una URL base.",
             )
+        if (
+            cleaned.get("embedding_provider")
+            == IntegrationConfiguration.EmbeddingProvider.OPENAI_COMPATIBLE
+        ):
+            if not cleaned.get("openai_compatible_base_url"):
+                self.add_error(
+                    "openai_compatible_base_url",
+                    "El buscador con embeddings de OpenAI usa esta misma URL base.",
+                )
         return cleaned

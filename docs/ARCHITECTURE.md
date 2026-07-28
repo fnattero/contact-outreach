@@ -132,8 +132,11 @@ promueve Organization a Contact, crea/vincula Conversation y cancela recordatori
 publica una task de decisión. El lock ya está liberado antes de LLM.
 
 El análisis trabaja sobre un snapshot de contexto acotado. Extrae emails literales antes del LLM,
-construye el manifiesto y un schema dinámico con candidate IDs/fact revision IDs permitidos. Si
-falla o falta contexto obligatorio, crea HumanTask; nunca reconstruye prompts desde logs.
+inyecta el contexto general aprobado, usa `EmbeddingProvider` para elegir hasta tres facts
+puntuales aprobados por similitud y construye el manifiesto/schema dinámico con candidate IDs/fact
+revision IDs permitidos. Si la búsqueda semántica es pobre o ambigua, esos facts no entran; si la
+respuesta los necesitaba, el policy/LLM deriva a HumanTask. Si falla o falta contexto obligatorio,
+crea HumanTask; nunca reconstruye prompts desde logs.
 
 ### 4.5 Decisión y efecto automático
 
@@ -205,9 +208,10 @@ dos schedulers efectivos.
 ## 6. Configuración y secretos
 
 Workspace posee `BusinessProfile`, `IntegrationConfiguration`, `PromptConfiguration`, defaults de
-mensajes y knowledge. Credenciales se cifran con subclaves por propósito derivadas de
-`FIELD_ENCRYPTION_KEY`, son write-only y se resuelven al construir adaptador. Campañas guardan sólo
-snapshots no secretos.
+mensajes y knowledge. `IntegrationConfiguration` define también proveedor/modelo/dimensiones de
+embeddings; la variante OpenAI-compatible reutiliza la conexión OpenAI-compatible configurada. Las
+credenciales se cifran con subclaves por propósito derivadas de `FIELD_ENCRYPTION_KEY`, son
+write-only y se resuelven al construir adaptador. Campañas guardan sólo snapshots no secretos.
 
 Controles externos de despliegue:
 

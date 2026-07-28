@@ -85,6 +85,10 @@ class IntegrationConfiguration(TimestampedUUIDModel):
         OLLAMA = "ollama", "Ollama"
         OPENAI_COMPATIBLE = "openai-compatible", "OpenAI compatible"
 
+    class EmbeddingProvider(models.TextChoices):
+        FAKE = "fake", "Simulado (sin red)"
+        OPENAI_COMPATIBLE = "openai-compatible", "OpenAI embeddings"
+
     class WebsiteFetcher(models.TextChoices):
         FAKE = "fake", "Mock (sin red)"
         HTTP = "http", "HTTP real seguro"
@@ -133,6 +137,16 @@ class IntegrationConfiguration(TimestampedUUIDModel):
     )
     ollama_base_url = models.URLField(default="http://127.0.0.1:11434")
     openai_compatible_base_url = models.URLField(blank=True)
+    embedding_provider = models.CharField(
+        max_length=30,
+        choices=EmbeddingProvider.choices,
+        default=EmbeddingProvider.FAKE,
+    )
+    embedding_model = models.CharField(max_length=120, default="text-embedding-3-small")
+    embedding_dimensions = models.PositiveSmallIntegerField(
+        default=1536,
+        validators=(MinValueValidator(64), MaxValueValidator(3072)),
+    )
     gmail_provider = models.CharField(
         max_length=20,
         choices=GmailProvider.choices,
@@ -156,6 +170,10 @@ class IntegrationConfiguration(TimestampedUUIDModel):
             models.CheckConstraint(
                 condition=~Q(llm_api_key_source="ENCRYPTED") | ~Q(llm_api_key_encrypted=""),
                 name="integration_llm_cipher_required",
+            ),
+            models.CheckConstraint(
+                condition=Q(embedding_dimensions__gte=64, embedding_dimensions__lte=3072),
+                name="integration_embedding_dimensions_range",
             ),
             models.CheckConstraint(
                 condition=~Q(gmail_oauth_client_secret_source="ENCRYPTED")

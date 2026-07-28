@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from apps.integrations.contracts import (
+    EmbeddingProvider,
     ExtractedBusiness,
     ExtractedEmail,
     ExtractionBatch,
@@ -28,6 +29,7 @@ from apps.integrations.contracts import (
     WebsiteRequest,
     WebsiteResult,
 )
+from apps.integrations.embeddings import FakeEmbeddingProvider
 from apps.integrations.llm import MockLLMProvider
 
 FAKE_GMAIL_SCOPES = (
@@ -394,6 +396,8 @@ class FakeGmailProvider:
         )
 
 
-def assert_protocol_compatibility() -> tuple[LLMProvider, WebsiteFetcher, GmailProvider]:
+def assert_protocol_compatibility() -> tuple[
+    LLMProvider, EmbeddingProvider, WebsiteFetcher, GmailProvider
+]:
     """Static type-checking witness for the fake implementations."""
-    return FakeLLMProvider(), FakeWebsiteFetcher(), FakeGmailProvider()
+    return FakeLLMProvider(), FakeEmbeddingProvider(), FakeWebsiteFetcher(), FakeGmailProvider()

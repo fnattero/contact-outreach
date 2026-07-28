@@ -36,9 +36,10 @@ seguridad no se relajan desde el dashboard.
 | A-029 | Respuesta humana, Contact manual, unsubscribe o bounce cancelan reminder; auto-reply no. | Estado |
 | A-030 | Gmail sync corre cada minuto por default y nunca sostiene su lock durante LLM; publica análisis con transaction.on_commit. | Operación |
 | A-031 | Se extraen máximo diez emails literales inbound de plain text/mailto, con NEW_CONTENT/SIGNATURE/QUOTED; no se reconstruyen ofuscados. | Seguridad |
-| A-032 | Contexto LLM máximo 24.000 caracteres; inbound authored, original y padre son obligatorios; luego hasta seis recientes, memoria con fuentes y ocho facts aprobados. | Costo / seguridad |
-| A-033 | No entran PDFs ni raw HTML al LLM; sólo se persiste manifest de IDs/versiones/hash, no prompts gigantes duplicados. | Privacidad |
-| A-034 | El conocimiento sólo usa revisiones explícitamente aprobadas; no hay extracción automática desde catálogos. | Integridad |
+| A-032 | Contexto LLM máximo 24.000 caracteres; inbound authored, original, padre y contexto general aprobado son obligatorios; luego hasta seis recientes, memoria con fuentes y tres facts aprobados elegidos por embeddings. | Costo / seguridad |
+| A-033 | No entran PDFs ni raw HTML al LLM; sólo se persiste manifest de IDs/versiones/retrieval/hash, no prompts gigantes duplicados. | Privacidad |
+| A-034 | El conocimiento sólo usa revisiones explícitamente aprobadas; no hay extracción automática desde catálogos. Embeddings selecciona facts, no autoriza respuestas. | Integridad |
+| A-055 | Embeddings default `fake`; OpenAI-compatible usa modelo `text-embedding-3-small` y dimensiones configurables desde Integraciones. Similitud baja o selección ambigua no inyecta facts puntuales. | Integración IA |
 | A-035 | No se usa LangGraph. `decide_reply` produce JSON estructurado; policy/domain services ejecutan efectos sin tools para el modelo. | Arquitectura |
 | A-036 | Modos de respuesta: OFF, SHADOW default y LIVE. SHADOW produce cero autorizaciones Gmail. | Seguridad |
 | A-037 | LIVE exige >=30 decisiones revisadas, >=10 auto-elegibles, >=90% accuracy y cero unsafe auto; habilitar requiere reauth admin. | Seguridad |
@@ -89,7 +90,7 @@ denominación local. Un nombre repetido bajo otra provincia no se deduplica por 
    EmailAddress nuevo preserva la fuente inbound sin crear otra persona/empresa automáticamente.
 4. **Campañas futuras vs. no spam:** Contact excluye la organización; un no respondedor puede
    reaparecer, pero la reserva por email/día evita dos campañas simultáneas.
-5. **Contexto completo vs. saturación:** inbound/original/padre siempre completos; historia reciente
-   y memoria source-linked entran por presupuesto fijo.
+5. **Contexto completo vs. saturación:** inbound/original/padre y contexto global siempre completos;
+   historia reciente, memoria source-linked y RAG de hasta tres facts entran por presupuesto fijo.
 6. **Automático vs. humano:** policy por intención domina confidence; reuniones, precios y riesgo
    siempre crean tarea.

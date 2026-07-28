@@ -26,6 +26,7 @@ from apps.automation.models import (
     KnowledgeFactRevision,
     ReplyAutomationConfiguration,
     ReplyDecision,
+    WorkspaceKnowledgeContextRevision,
 )
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.integrations import runtime_integration_configuration
@@ -293,6 +294,76 @@ def approve_knowledge_revision(
     locked.save(update_fields=("approved_at", "approved_by", "updated_at"))
     record_event(
         action="knowledge.revision_approved",
+        entity=locked,
+        actor=actor,
+        after={"version": locked.version},
+    )
+    from apps.automation.tasks import refresh_knowledge_revision_embedding_task
+
+    transaction.on_commit(partial(refresh_knowledge_revision_embedding_task.delay, str(locked.pk)))
+    return locked
+
+
+@transaction.atomic
+def create_global_knowledge_context_revision(
+    *,
+    workspace: Workspace,
+    actor: User,
+    context_text: str,
+    source_notes: str = "",
+) -> WorkspaceKnowledgeContextRevision:
+    require_user_capability(actor, Capability.MANAGE_KNOWLEDGE, workspace_id=workspace.pk)
+    clean_context = context_text.strip()
+    if not clean_context:
+        raise ValidationError("Escribí el contexto general antes de guardarlo.")
+    latest = (
+        WorkspaceKnowledgeContextRevision.objects.select_for_update()
+        .filter(workspace=workspace)
+        .order_by("-version")
+        .first()
+    )
+    version = (latest.version if latest else 0) + 1
+    revision = WorkspaceKnowledgeContextRevision.objects.create(
+        workspace=workspace,
+        version=version,
+        context_text=clean_context,
+        source_notes=source_notes.strip(),
+        content_hash=sha256(clean_context.encode()).hexdigest(),
+    )
+    record_event(
+        action="knowledge.global_context_revision_created",
+        entity=revision,
+        actor=actor,
+        after={"version": version},
+    )
+    return revision
+
+
+@transaction.atomic
+def approve_global_knowledge_context_revision(
+    revision: WorkspaceKnowledgeContextRevision,
+    *,
+    actor: User,
+) -> WorkspaceKnowledgeContextRevision:
+    locked = WorkspaceKnowledgeContextRevision.objects.select_for_update().get(pk=revision.pk)
+    require_user_capability(
+        actor,
+        Capability.MANAGE_KNOWLEDGE,
+        workspace_id=locked.workspace_id,
+    )
+    if locked.approved_at is not None:
+        return locked
+    now = timezone.now()
+    WorkspaceKnowledgeContextRevision.objects.filter(
+        workspace=locked.workspace,
+        approved_at__isnull=False,
+        superseded_at__isnull=True,
+    ).update(superseded_at=now)
+    locked.approved_at = now
+    locked.approved_by = actor
+    locked.save(update_fields=("approved_at", "approved_by", "updated_at"))
+    record_event(
+        action="knowledge.global_context_revision_approved",
         entity=locked,
         actor=actor,
         after={"version": locked.version},

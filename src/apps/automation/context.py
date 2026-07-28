@@ -16,11 +16,16 @@ from apps.automation.models import (
     ContactCommunicationPlan,
     ConversationMemory,
     EmailCandidate,
-    KnowledgeFactRevision,
+)
+from apps.automation.retrieval import (
+    MAX_RAG_FACTS,
+    current_global_context_revision,
+    retrieve_relevant_fact_revisions,
 )
 from apps.campaigns.models import OutboundMessage
 from apps.integrations.contracts import (
     EmailCandidateRef,
+    EmbeddingProvider,
     FactRevisionRef,
     ReplyContextBlock,
     ReplyDecisionRequest,
@@ -36,7 +41,7 @@ from apps.mailbox.models import InboundMessage
 
 MAX_REPLY_CONTEXT_CHARS = MAX_LLM_INPUT_CHARACTERS
 MAX_RECENT_MESSAGES = 6
-MAX_FACTS = 8
+MAX_FACTS = MAX_RAG_FACTS
 _WORDS = re.compile(r"[\wáéíóúüñ]{3,}", re.IGNORECASE)
 
 
@@ -240,6 +245,21 @@ def _memory_blocks(inbound: InboundMessage) -> list[ReplyContextBlock]:
     ]
 
 
+def _global_context_blocks(workspace_id: uuid.UUID | str) -> list[ReplyContextBlock]:
+    revision = current_global_context_revision(workspace_id)
+    if revision is None:
+        return []
+    return [
+        _message_block(
+            source_id=revision.pk,
+            role="WORKSPACE",
+            provenance="GLOBAL_APPROVED_CONTEXT",
+            text=revision.context_text,
+            mandatory=True,
+        )
+    ]
+
+
 def reply_candidate_refs(inbound: InboundMessage) -> tuple[EmailCandidateRef, ...]:
     return tuple(
         EmailCandidateRef(
@@ -256,86 +276,13 @@ def reply_candidate_refs(inbound: InboundMessage) -> tuple[EmailCandidateRef, ..
     )
 
 
-def _relevant_facts(inbound: InboundMessage) -> list[KnowledgeFactRevision]:
-    if inbound.contact_id is None:
-        return []
-    contact = inbound.contact
-    if contact is None:
-        return []
-    incoming_tokens = _tokens(inbound.body_text)
-    revisions = list(
-        KnowledgeFactRevision.objects.select_related("fact")
-        .filter(
-            fact__workspace_id=contact.workspace_id,
-            fact__active=True,
-            approved_at__isnull=False,
-            superseded_at__isnull=True,
-        )
-        .order_by("fact_id", "-version")
-    )
-    latest: dict[object, KnowledgeFactRevision] = {}
-    for revision in revisions:
-        latest.setdefault(revision.fact_id, revision)
-    scored = sorted(
-        latest.values(),
-        key=lambda revision: (
-            -len(
-                incoming_tokens
-                & _tokens(" ".join((revision.fact.title, revision.fact.category, revision.text)))
-            ),
-            revision.fact.title.casefold(),
-        ),
-    )
-    overlapping = [
-        revision
-        for revision in scored
-        if incoming_tokens
-        & _tokens(" ".join((revision.fact.title, revision.fact.category, revision.text)))
-    ]
-    return (overlapping or scored)[:MAX_FACTS]
-
-
-def _relevant_workspace_facts(
-    *, workspace_id: uuid.UUID | str, query_text: str
-) -> list[KnowledgeFactRevision]:
-    query_tokens = _tokens(query_text)
-    revisions = list(
-        KnowledgeFactRevision.objects.select_related("fact")
-        .filter(
-            fact__workspace_id=workspace_id,
-            fact__active=True,
-            approved_at__isnull=False,
-            superseded_at__isnull=True,
-        )
-        .order_by("fact_id", "-version")
-    )
-    latest: dict[object, KnowledgeFactRevision] = {}
-    for revision in revisions:
-        latest.setdefault(revision.fact_id, revision)
-    scored = sorted(
-        latest.values(),
-        key=lambda revision: (
-            -len(
-                query_tokens
-                & _tokens(" ".join((revision.fact.title, revision.fact.category, revision.text)))
-            ),
-            revision.fact.title.casefold(),
-        ),
-    )
-    overlapping = [
-        revision
-        for revision in scored
-        if query_tokens
-        & _tokens(" ".join((revision.fact.title, revision.fact.category, revision.text)))
-    ]
-    return (overlapping or scored)[:MAX_FACTS]
-
-
 def _manifest_for(
     blocks: list[ReplyContextBlock],
     facts: list[FactRevisionRef],
+    *,
+    knowledge_retrieval: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    manifest: dict[str, Any] = {
         "blocks": [
             {
                 "source_id": block.source_id,
@@ -357,18 +304,25 @@ def _manifest_for(
             for fact in facts
         ],
     }
+    if knowledge_retrieval is not None:
+        manifest["knowledge_retrieval"] = knowledge_retrieval
+    return manifest
 
 
 def build_bounded_reply_context(
     inbound: InboundMessage,
     *,
+    embedding_provider: EmbeddingProvider | None = None,
     policy_version: str = "2026-07",
     schema_version: str = "1",
     max_characters: int = MAX_REPLY_CONTEXT_CHARS,
 ) -> BoundedReplyContext:
     if inbound.contact_id is None or inbound.conversation_id is None:
         raise ValidationError("La respuesta todavía no está vinculada a un Contacto.")
-    mandatory = _mandatory_blocks(inbound)
+    contact = inbound.contact
+    if contact is None:
+        raise ValidationError("La respuesta todavía no está vinculada a un Contacto.")
+    mandatory = _mandatory_blocks(inbound) + _global_context_blocks(contact.workspace_id)
     candidates = reply_candidate_refs(inbound)
 
     def input_count(blocks: list[ReplyContextBlock], facts: list[FactRevisionRef]) -> int:
@@ -401,7 +355,13 @@ def build_bounded_reply_context(
         blocks = candidate_blocks
 
     facts: list[FactRevisionRef] = []
-    for revision in _relevant_facts(inbound):
+    authored_block = next(block for block in mandatory if block.provenance == "NEW_INBOUND")
+    retrieval = retrieve_relevant_fact_revisions(
+        workspace_id=contact.workspace_id,
+        query_text=authored_block.text,
+        provider=embedding_provider,
+    )
+    for revision in retrieval.revisions:
         fact = FactRevisionRef(
             revision_id=str(revision.pk),
             version=revision.version,
@@ -413,7 +373,7 @@ def build_bounded_reply_context(
         facts = candidate_facts
 
     used = input_count(blocks, facts)
-    manifest = _manifest_for(blocks, facts)
+    manifest = _manifest_for(blocks, facts, knowledge_retrieval=retrieval.manifest)
     manifest["request"] = manifest_request_metadata(
         character_count=used,
         candidates=tuple(
@@ -561,6 +521,7 @@ def _scheduled_memory_blocks(plan: ContactCommunicationPlan) -> list[ReplyContex
 def build_bounded_scheduled_contact_context(
     plan: ContactCommunicationPlan,
     *,
+    embedding_provider: EmbeddingProvider | None = None,
     goal: str | None = None,
     schema_version: str = "1",
     max_characters: int = MAX_REPLY_CONTEXT_CHARS,
@@ -569,7 +530,8 @@ def build_bounded_scheduled_contact_context(
 
     if plan.contact_id is None or plan.preferred_email_id is None:
         raise ValidationError("El seguimiento necesita un contacto y un email preferido.")
-    mandatory = _scheduled_mandatory_blocks(plan)
+    scheduled_mandatory = _scheduled_mandatory_blocks(plan)
+    mandatory = scheduled_mandatory + _global_context_blocks(plan.contact.workspace_id)
     request_goal = (
         goal
         if goal is not None
@@ -594,7 +556,7 @@ def build_bounded_scheduled_contact_context(
         raise MandatoryContextOverflow(
             "El objetivo obligatorio es demasiado extenso para generar un mensaje seguro."
         )
-    query_text = " ".join(block.text for block in mandatory)
+    query_text = " ".join(block.text for block in scheduled_mandatory)
     blocks = list(mandatory)
     for block in _scheduled_recent_blocks(plan, query_text=query_text) + _scheduled_memory_blocks(
         plan
@@ -605,10 +567,12 @@ def build_bounded_scheduled_contact_context(
         blocks = candidate_blocks
 
     facts: list[FactRevisionRef] = []
-    for revision in _relevant_workspace_facts(
+    retrieval = retrieve_relevant_fact_revisions(
         workspace_id=plan.contact.workspace_id,
         query_text=query_text,
-    ):
+        provider=embedding_provider,
+    )
+    for revision in retrieval.revisions:
         fact = FactRevisionRef(
             revision_id=str(revision.pk),
             version=revision.version,
@@ -620,7 +584,7 @@ def build_bounded_scheduled_contact_context(
         facts = candidate_facts
 
     used = input_count(blocks, facts)
-    manifest = _manifest_for(blocks, facts)
+    manifest = _manifest_for(blocks, facts, knowledge_retrieval=retrieval.manifest)
     manifest["request"] = manifest_request_metadata(
         character_count=used,
         schema_version=schema_version,

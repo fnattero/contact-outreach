@@ -20,8 +20,11 @@ from apps.automation.views import (
     automation_mode,
     automation_settings,
     decision_review,
+    global_context_approve,
+    global_context_create,
     knowledge_approve,
     knowledge_create,
+    knowledge_search_preview,
 )
 from apps.campaigns.views import (
     campaign_action,
@@ -177,7 +180,22 @@ urlpatterns = [
     path("prompts/", prompts, name="prompts"),
     path("respuesta-automatica/", automation_settings, name="automation-settings"),
     path("respuesta-automatica/modo/", automation_mode, name="automation-mode"),
+    path(
+        "respuesta-automatica/contexto-general/nuevo/",
+        global_context_create,
+        name="global-context-create",
+    ),
+    path(
+        "respuesta-automatica/contexto-general/<uuid:revision_id>/aprobar/",
+        global_context_approve,
+        name="global-context-approve",
+    ),
     path("respuesta-automatica/informacion/nueva/", knowledge_create, name="knowledge-create"),
+    path(
+        "respuesta-automatica/informacion/probar-busqueda/",
+        knowledge_search_preview,
+        name="knowledge-search-preview",
+    ),
     path(
         "respuesta-automatica/informacion/<uuid:revision_id>/aprobar/",
         knowledge_approve,

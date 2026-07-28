@@ -88,7 +88,10 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
 - El LLM no recibe Gmail, HTTP, calendario, filesystem ni tool calling. Sólo devuelve JSON.
 - El schema enumera en cada request candidate IDs, fact revision IDs, intents y actions exactos.
   Campos/IDs extra, conflicto, multi-intent o output inválido fallan hacia HumanTask.
-- Los hechos sólo provienen de revisiones aprobadas; no se extraen PDFs ni se inventan claims.
+- Los hechos sólo provienen de revisiones aprobadas. El contexto global aprobado se inyecta siempre
+  como orientación, y los facts puntuales se recuperan con embeddings hasta un máximo pequeño; si
+  la búsqueda es baja o ambigua, no se usan como fundamento automático. No se extraen PDFs ni se
+  inventan claims.
 - Contexto máximo 24.000 caracteres: mandatory completo o HumanTask. Se limita historia y no se
   persiste prompt gigante/cuerpos duplicados en logs.
 - Emails candidatos se extraen literalmente, máximo diez, con región. No se reconstruyen
@@ -101,8 +104,9 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
 Envío inicial/live requiere simultáneamente `SEND_MODE=live`, `SEND_KILL_SWITCH=false`, campaign
 mode/approval, Gmail, ventana/cupo, recipient elegible y adjuntos íntegros. Respuesta automática
 además exige `AUTO_REPLY_KILL_SWITCH=false`, mode LIVE calificado, Conversation activa, intent
-allowlisted, contexto/facts válidos y reservas de rate limit. Comunicación programada usa además
-`RELATIONSHIP_KILL_SWITCH=false`.
+allowlisted, contexto/facts válidos y reservas de rate limit. La recuperación por embeddings sólo
+decide qué facts llegan al request; no autoriza Gmail ni puede saltarse política, kill switches o
+tareas humanas. Comunicación programada usa además `RELATIONSHIP_KILL_SWITCH=false`.
 
 Estas barreras se comprueban al preparar/autorizar/encolar y **otra vez inmediatamente antes de
 Gmail**. DB authorization nunca reemplaza la barrera externa. Headers de auto submitted/bulk/list,

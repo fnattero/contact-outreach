@@ -4,7 +4,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 
@@ -135,6 +135,112 @@ class KnowledgeFactRevision(TimestampedUUIDModel):
                     "Una revisión de información aprobada no se edita; creá otra versión."
                 )
         super().save(*args, **kwargs)
+
+
+class WorkspaceKnowledgeContextRevision(TimestampedUUIDModel):
+    """Approved global context injected into every automatic-reply request."""
+
+    objects: models.Manager[WorkspaceKnowledgeContextRevision] = models.Manager()
+
+    workspace = models.ForeignKey(
+        "accounts.Workspace",
+        on_delete=models.PROTECT,
+        related_name="knowledge_context_revisions",
+    )
+    version = models.PositiveIntegerField()
+    context_text = models.TextField(max_length=4000)
+    source_notes = models.TextField(blank=True)
+    content_hash = models.CharField(max_length=64)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="approved_workspace_knowledge_context_revisions",
+    )
+    superseded_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("workspace", "-version")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("workspace", "version"),
+                name="workspace_knowledge_context_revision_unique",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(approved_at__isnull=True, approved_by__isnull=True)
+                    | Q(approved_at__isnull=False, approved_by__isnull=False)
+                ),
+                name="workspace_knowledge_context_approval_consistent",
+            ),
+        ]
+
+    @property
+    def is_approved(self) -> bool:
+        return self.approved_at is not None and self.superseded_at is None
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            previous = type(self).objects.get(pk=self.pk)
+            immutable = [
+                "workspace_id",
+                "version",
+                "context_text",
+                "source_notes",
+                "content_hash",
+            ]
+            if previous.approved_at is not None:
+                immutable.extend(("approved_at", "approved_by_id"))
+            if any(getattr(previous, field) != getattr(self, field) for field in immutable):
+                raise ValidationError("El contexto aprobado no se edita; creá una nueva versión.")
+        super().save(*args, **kwargs)
+
+
+class KnowledgeFactEmbedding(TimestampedUUIDModel):
+    objects: models.Manager[KnowledgeFactEmbedding] = models.Manager()
+
+    class State(models.TextChoices):
+        READY = "READY", "Lista"
+        FAILED = "FAILED", "No se pudo generar"
+
+    revision = models.ForeignKey(
+        KnowledgeFactRevision,
+        on_delete=models.CASCADE,
+        related_name="embeddings",
+    )
+    provider = models.CharField(max_length=40)
+    model = models.CharField(max_length=120)
+    dimensions = models.PositiveSmallIntegerField(
+        validators=(MinValueValidator(64), MaxValueValidator(3072))
+    )
+    input_hash = models.CharField(max_length=64)
+    vector = models.JSONField(default=list)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.READY)
+    embedded_at = models.DateTimeField(blank=True, null=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("revision", "provider", "model", "dimensions")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("revision", "provider", "model", "dimensions"),
+                name="knowledge_embedding_revision_provider_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(dimensions__gte=64, dimensions__lte=3072),
+                name="knowledge_embedding_dimensions_range",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.state == self.State.READY:
+            if not isinstance(self.vector, list) or len(self.vector) != self.dimensions:
+                raise ValidationError("El embedding listo debe tener la dimensión configurada.")
+            if not all(isinstance(value, (int, float)) for value in self.vector):
+                raise ValidationError("El embedding sólo puede contener números.")
 
 
 class ConversationMemory(TimestampedUUIDModel):

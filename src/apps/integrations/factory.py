@@ -9,11 +9,13 @@ from apps.configuration.integrations import (
     runtime_integration_configuration,
 )
 from apps.integrations.contracts import (
+    EmbeddingProvider,
     ExtractorProvider,
     GmailProvider,
     LLMProvider,
     WebsiteFetcher,
 )
+from apps.integrations.embeddings import FakeEmbeddingProvider, OpenAICompatibleEmbeddingProvider
 from apps.integrations.fakes import (
     FakeExtractorProvider,
     FakeGmailProvider,
@@ -79,6 +81,29 @@ def get_llm_provider(
             api_key=get_llm_api_key(owner_id),
         )
     raise ImproperlyConfigured(f"LLM provider {selected!r} is not supported")
+
+
+def get_embedding_provider(
+    provider_name: str | None = None,
+    *,
+    model: str = "",
+    dimensions: int | None = None,
+    owner_id: int | None = None,
+) -> EmbeddingProvider:
+    runtime = runtime_integration_configuration(owner_id)
+    selected = provider_name or runtime.embedding_provider
+    selected_model = model or runtime.embedding_model
+    selected_dimensions = dimensions or runtime.embedding_dimensions
+    if selected == "fake":
+        return FakeEmbeddingProvider(dimensions=selected_dimensions)
+    if selected == "openai-compatible":
+        return OpenAICompatibleEmbeddingProvider(
+            base_url=runtime.openai_compatible_base_url,
+            api_key=get_llm_api_key(owner_id),
+            model=selected_model,
+            dimensions=selected_dimensions,
+        )
+    raise ImproperlyConfigured(f"Embedding provider {selected!r} is not supported")
 
 
 def get_gmail_provider(

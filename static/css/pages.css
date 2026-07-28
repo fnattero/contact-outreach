@@ -85,6 +85,9 @@
 .knowledge-help { background: var(--ink-50); }
 .knowledge-help h3 { margin: 0 0 .5rem; font-size: .95rem; }
 .knowledge-help h3:not(:first-child) { margin-top: var(--space-5); }
+.plain-list { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.plain-list li { padding: .65rem .75rem; border: 1px solid var(--ink-200); border-radius: var(--radius-md); background: var(--surface); }
+.inline-form { display: inline-flex; margin: .35rem 0 0; }
 .check-list, .cross-list { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
 .check-list li, .cross-list li { position: relative; padding-left: 1.45rem; color: var(--ink-700); font-size: .84rem; line-height: 1.45; }
 .check-list li::before, .cross-list li::before { position: absolute; left: 0; font-weight: 800; }

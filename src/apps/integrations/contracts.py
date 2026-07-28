@@ -225,6 +225,23 @@ class FactRevisionRef:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingRequest:
+    texts: tuple[str, ...]
+    correlation_id: str
+    idempotency_key: str
+    model: str
+    dimensions: int
+    timeout_seconds: float = 20.0
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingResult:
+    vectors: tuple[tuple[float, ...], ...]
+    model: str
+    dimensions: int
+
+
+@dataclass(frozen=True, slots=True)
 class ReplyDecisionRequest:
     context: tuple[ReplyContextBlock, ...]
     candidates: tuple[EmailCandidateRef, ...]
@@ -362,6 +379,10 @@ class LLMProvider(Protocol):
     def draft_scheduled_contact(
         self, request: ScheduledContactDraftRequest
     ) -> ScheduledContactDraftResult: ...
+
+
+class EmbeddingProvider(Protocol):
+    def embed(self, request: EmbeddingRequest) -> EmbeddingResult: ...
 
 
 class GmailProvider(Protocol):

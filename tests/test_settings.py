@@ -28,6 +28,7 @@ def test_safe_runtime_defaults_use_fake_providers() -> None:
     assert runtime_integration_configuration().extractor_provider == "fake"
     assert settings.WEBSITE_FETCHER == "fake"
     assert settings.LLM_PROVIDER == "fake"
+    assert settings.EMBEDDING_PROVIDER == "fake"
     assert settings.GMAIL_PROVIDER == "fake"
     assert settings.AUTO_REPLY_KILL_SWITCH is True
     assert settings.RELATIONSHIP_KILL_SWITCH is True
@@ -54,6 +55,7 @@ def test_test_settings_override_live_parent_environment() -> None:
             "EXTRACTOR_PROVIDER": "overture",
             "WEBSITE_FETCHER": "http",
             "LLM_PROVIDER": "openai-compatible",
+            "EMBEDDING_PROVIDER": "openai-compatible",
             "GMAIL_PROVIDER": "api",
         }
     )
@@ -75,6 +77,7 @@ from apps.configuration.integrations import runtime_integration_configuration
 assert runtime_integration_configuration().extractor_provider == "fake"
 assert settings.WEBSITE_FETCHER == "fake"
 assert settings.LLM_PROVIDER == "fake"
+assert settings.EMBEDDING_PROVIDER == "fake"
 assert settings.GMAIL_PROVIDER == "fake"
 """
     subprocess.run(

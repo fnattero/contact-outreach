@@ -125,6 +125,7 @@ HUMAN_REASONS = (
     "INSUFFICIENT_CONTEXT",
     "PROVIDER_OR_SCHEMA_FAILURE",
 )
+MAX_FACT_IDS_PER_DECISION = 3
 
 
 class StructuredReplyDecision(BaseModel):
@@ -135,7 +136,7 @@ class StructuredReplyDecision(BaseModel):
     action: str = Field(pattern=f"^({'|'.join(REPLY_ACTIONS)})$")
     confidence: float = Field(ge=0, le=1)
     candidate_id: str | None = None
-    fact_revision_ids: list[str] = Field(default_factory=list, max_length=8)
+    fact_revision_ids: list[str] = Field(default_factory=list, max_length=MAX_FACT_IDS_PER_DECISION)
     proposed_body: str | None = Field(default=None, max_length=4000)
     human_reason: str | None = Field(
         default=None,
@@ -149,7 +150,7 @@ class StructuredScheduledContactDraft(BaseModel):
     status: str = Field(pattern="^(DRAFT|HUMAN)$")
     subject: str | None = Field(default=None, max_length=160)
     body_text: str | None = Field(default=None, max_length=4000)
-    fact_revision_ids: list[str] = Field(default_factory=list, max_length=8)
+    fact_revision_ids: list[str] = Field(default_factory=list, max_length=MAX_FACT_IDS_PER_DECISION)
     human_reason: str | None = Field(
         default=None,
         pattern="^(INSUFFICIENT_CONTEXT|UNSUPPORTED_GOAL)$",

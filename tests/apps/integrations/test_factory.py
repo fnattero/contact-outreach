@@ -6,8 +6,10 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
+from apps.integrations.embeddings import FakeEmbeddingProvider, OpenAICompatibleEmbeddingProvider
 from apps.integrations.factory import (
     _require_fake,
+    get_embedding_provider,
     get_gmail_provider,
     get_llm_provider,
     get_website_fetcher,
@@ -50,6 +52,32 @@ def test_get_llm_provider_builds_ollama_and_openai_compatible_from_explicit_args
 def test_unknown_llm_provider_is_rejected() -> None:
     with pytest.raises(ImproperlyConfigured, match="not supported"):
         get_llm_provider("carrier-pigeon", model="x")
+
+
+def test_get_embedding_provider_builds_fake_and_openai_compatible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = get_embedding_provider("fake", model="fake-embedding", dimensions=128)
+    assert isinstance(fake, FakeEmbeddingProvider)
+
+    monkeypatch.setattr("apps.integrations.factory.get_llm_api_key", lambda owner_id=None: "key")
+    monkeypatch.setattr(
+        "apps.integrations.factory.runtime_integration_configuration",
+        lambda owner_id=None: SimpleNamespace(
+            embedding_provider="openai-compatible",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=128,
+            openai_compatible_base_url="https://llm.example/v1",
+        ),
+    )
+    provider = get_embedding_provider()
+    assert isinstance(provider, OpenAICompatibleEmbeddingProvider)
+    assert provider.base_url == "https://llm.example/v1"
+
+
+def test_unknown_embedding_provider_is_rejected() -> None:
+    with pytest.raises(ImproperlyConfigured, match="not supported"):
+        get_embedding_provider("carrier-pigeon", model="x", dimensions=128)
 
 
 def test_get_gmail_provider_builds_api_provider_from_runtime_configuration(

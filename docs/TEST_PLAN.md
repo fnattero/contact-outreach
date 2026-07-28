@@ -138,10 +138,14 @@ nunca sustituye negativos.
 - Deterministic unsubscribe/bounce/auto precedence prevents LLM effect.
 - Candidate extraction: plain/mailto, punctuation, Unicode/IDN, dedupe, maximum ten,
   NEW_CONTENT/SIGNATURE/QUOTED, quoted markers, obfuscated rejected, multiple ambiguous -> human.
-- Context always contains full authored inbound/original/direct parent; up to 6 cross-thread recent,
-  source-linked memory and <=8 approved facts. No PDF/raw HTML/unapproved facts.
+- Context always contains full authored inbound/original/direct parent plus approved global context;
+  up to 6 cross-thread recent, source-linked memory and <=3 approved facts selected by embeddings.
+  No PDF/raw HTML/unapproved facts.
+- RAG retrieval: deterministic fake embeddings, OpenAI-compatible adapter payload validation,
+  cached embedding reuse, model/dimension hash invalidation, low similarity -> no facts, ambiguous
+  near-tie -> no facts/human path, and provider/schema failure -> HumanTask when facts are needed.
 - Mandatory exact boundary/overflow -> HumanTask without provider; total <=24.000 chars and stable
-  manifest IDs/versions/hash. DB/logs do not duplicate prompt bodies.
+  manifest IDs/versions/retrieval status/hash. DB/logs do not duplicate prompt bodies.
 - Prompt injection in inbound/signature/quoted/memory/fact cannot change schema/action/fact IDs.
 
 ## 10. Reply decisions, SHADOW y policy

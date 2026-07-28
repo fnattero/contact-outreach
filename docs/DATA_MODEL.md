@@ -55,10 +55,12 @@ mensajes fijos; la campaña copia texto y versión.
 
 ### IntegrationConfiguration y PromptConfiguration
 
-Relación 1:1 Workspace. Integration guarda proveedores/parámetros no secretos, ciphertext
-write-only para LLM/Google y revisión. Prompt conserva preferencias usadas sólo por respuestas y
-comunicación con Contactos; no modifica campañas iniciales ni reglas de búsqueda. Root keys, barreras
-live e infraestructura no se guardan.
+Relación 1:1 Workspace. Integration guarda proveedores/parámetros no secretos, incluyendo
+proveedor/modelo/dimensiones de embeddings; ciphertext write-only para LLM/Google y revisión. La
+configuración OpenAI-compatible de embeddings usa la misma conexión OpenAI-compatible y credencial
+del LLM, pero detrás de un contrato separado. Prompt conserva preferencias usadas sólo por
+respuestas y comunicación con Contactos; no modifica campañas iniciales ni reglas de búsqueda. Root
+keys, barreras live e infraestructura no se guardan.
 
 ### WorkspaceMessageTemplateRevision
 
@@ -71,6 +73,19 @@ edita; otra fila la reemplaza para campañas futuras.
 Fact agrupa una pregunta/hecho con categoría y estado. Revision contiene texto aprobado, fuentes
 humanas, version, hash, `approved_at/by`, superseded flag y timestamps. Sólo revisiones aprobadas
 entran al contexto. PDFs no se parsean automáticamente.
+
+### WorkspaceKnowledgeContextRevision
+
+Contexto global del Workspace: texto breve de background, fuente humana, version, hash,
+`approved_at/by` y superseded flag. Una versión aprobada no se edita; aprobar una nueva reemplaza
+la anterior para solicitudes futuras. Se inyecta siempre como orientación, pero no alcanza por sí
+sola para fundamentar respuestas que requieran un dato puntual.
+
+### KnowledgeFactEmbedding
+
+Embedding cacheado por `KnowledgeFactRevision` aprobada, provider, model, dimensions e input hash.
+Guarda vector normalizado cuando está `READY` o error redactado cuando está `FAILED`. Cambiar texto,
+modelo, proveedor o dimensiones produce una fila nueva; no muta la revisión aprobada.
 
 ### SearchCategory y SearchCategoryRule
 
@@ -315,6 +330,7 @@ contadores en estas filas; se derivan del dominio.
 - Un reminder como máximo por initial y se cancela ante evento humano/restricción.
 - Todos los PDFs requeridos deben verificar; no existe envío parcial.
 - LLM sólo referencia candidate/fact IDs incluidos en su request; policy determina efecto.
+- Embeddings sólo seleccionan facts candidatos para el contexto; nunca autorizan un envío.
 - HumanTask OPEN suspende automation; limits/kill switches se leen justo antes de Gmail.
 - Los modelos de history y auditoría no se eliminan desde UI.
 

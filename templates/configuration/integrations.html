@@ -25,8 +25,13 @@
     </section>
 
     <section class="panel">
-        <div class="panel__header"><div><h2>Proveedor de inteligencia artificial</h2><p class="muted">El proveedor, el modelo y la dirección del servicio quedan fijos por campaña. La clave de API cifrada no vuelve a mostrarse.</p></div></div>
+        <div class="panel__header"><div><h2>Proveedor de inteligencia artificial</h2><p class="muted">Esta parte redacta o decide qué hacer con una respuesta. La clave de API cifrada no vuelve a mostrarse.</p></div></div>
         <div class="panel__body form-grid">{% include "includes/field.html" with field=form.llm_provider %}{% include "includes/field.html" with field=form.llm_model %}{% include "includes/field.html" with field=form.ollama_base_url %}{% include "includes/field.html" with field=form.openai_compatible_base_url %}{% include "includes/field.html" with field=form.llm_api_key full=True %}<div class="field field--full{% if form.remove_llm_api_key.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.remove_llm_api_key }}<span>{{ form.remove_llm_api_key.label }}</span></label>{% if form.remove_llm_api_key.errors %}<div class="field__error" role="alert">{{ form.remove_llm_api_key.errors }}</div>{% endif %}</div></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Buscador de datos para respuestas</h2><p class="muted">Antes de llamar a la IA, este buscador elige hasta tres datos aprobados parecidos a la consulta del cliente. Si no encuentra algo claro, la respuesta queda para una persona.</p></div></div>
+        <div class="panel__body form-grid">{% include "includes/field.html" with field=form.embedding_provider %}{% include "includes/field.html" with field=form.embedding_model %}{% include "includes/field.html" with field=form.embedding_dimensions %}<div class="field field--full"><span class="field__label">Conexión usada</span><p class="field__help">Si elegís OpenAI embeddings, usa la misma URL base compatible con OpenAI y la misma clave de API de la sección anterior. No envía correos; sólo calcula similitud entre textos.</p></div></div>
     </section>
 
     <section class="panel">

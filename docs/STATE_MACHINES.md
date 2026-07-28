@@ -142,7 +142,9 @@ Estados: `PENDING`, `SHADOW_RECORDED`, `NO_ACTION`, `AUTO_ELIGIBLE`, `AUTHORIZED
 | PENDING/AUTO_ELIGIBLE/AUTHORIZED/EXECUTING | FAILED | Error persistido; sin reclamo de éxito |
 
 Confianza >=0,90 es necesaria, nunca suficiente. IDs no incluidos o campos extra producen
-`HUMAN_REQUIRED/FAILED`, no fallback. Una Conversation `SUSPENDED_HUMAN` impide nuevas
+`HUMAN_REQUIRED/FAILED`, no fallback. El contexto válido incluye contexto global aprobado y, para
+respuestas fundamentadas, facts puntuales seleccionados por embeddings; similitud baja o selección
+ambigua no autoriza una respuesta por sí sola. Una Conversation `SUSPENDED_HUMAN` impide nuevas
 autorizaciones automáticas.
 
 ### Saga de redirección
