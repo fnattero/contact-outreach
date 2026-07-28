@@ -1,90 +1,95 @@
 {% extends "base.html" %}
-
 {% block title %}{{ campaign.name }} · Contact Outreach{% endblock %}
-
+{% block breadcrumb %}Campañas / Detalle{% endblock %}
+{% block page_title %}{{ campaign.name }}{% endblock %}
 {% block content %}
-<h1>{{ campaign.name }}</h1>
-<p><strong>{{ campaign.get_state_display }}</strong> · descubrimiento: {{ campaign.get_discovery_state_display }}</p>
-{% if campaign.status_reason %}<p class="card">{{ campaign.status_reason }}</p>{% endif %}
-
-<div class="actions">
-    {% if campaign.state == "DRAFT" %}
-        <details class="confirm"><summary>Iniciar campaña</summary><p>Iniciar congela la configuración y autoriza el pipeline. Si la campaña es LIVE y las barreras externas están habilitadas, autoriza primeros envíos.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'start' %}">{% csrf_token %}<button type="submit">Confirmar inicio</button></form></details>
-    {% elif campaign.state == "RUNNING" %}
-        <details class="confirm"><summary>Pausar campaña</summary><p>No se tomarán tareas nuevas; los efectos ya aceptados por un proveedor no se revierten.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'pause' %}">{% csrf_token %}<label for="pause-reason">Motivo</label><input id="pause-reason" name="reason" required><button type="submit">Confirmar pausa</button></form></details>
-    {% elif campaign.state == "PAUSED" %}
-        <details class="confirm"><summary>Reanudar campaña</summary><p>Se vuelven a validar catálogo, proveedores y controles live antes de continuar.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'resume' %}">{% csrf_token %}<button type="submit">Confirmar reanudación</button></form></details>
-    {% endif %}
-    {% if campaign.state == "DRAFT" or campaign.state == "RUNNING" or campaign.state == "PAUSED" %}
-        <details class="confirm"><summary>Cancelar campaña</summary><p>La cancelación es terminal y no revierte correos ya aceptados por Gmail.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'cancel' %}">{% csrf_token %}<label for="cancel-reason">Motivo</label><input id="cancel-reason" name="reason" required><button class="danger" type="submit">Confirmar cancelación</button></form></details>
-    {% endif %}
+<div class="campaign-hero">
+    <div>
+        <p><a href="{% url 'campaigns' %}">← Volver a campañas</a></p>
+        <h1>{{ campaign.name }}</h1>
+        <div class="campaign-hero__meta"><span class="badge badge--{{ campaign.state|lower }}">{{ campaign.get_state_display }}</span><span class="badge badge--{{ campaign.delivery_mode|lower }}">{{ campaign.get_delivery_mode_display }}</span><span class="muted">Creada {{ campaign.created_at|date:"d M Y · H:i" }}</span></div>
+    </div>
+    {% if is_admin %}<div class="actions">
+        {% if campaign.state == "DRAFT" %}<details class="confirm"><summary>Buscar destinatarios</summary><div class="confirm__body"><p>La búsqueda encontrará la audiencia completa sin enviar correos. Cuando termine, vas a poder revisar los destinatarios, el mensaje fijo, los PDFs y el calendario antes de aprobar.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'start' %}">{% csrf_token %}<button class="button" type="submit">Confirmar búsqueda</button></form></div></details>{% endif %}
+        {% if campaign.state == "AWAITING_APPROVAL" and campaign.approval_mode == "CAMPAIGN" %}<details class="confirm"><summary>Aprobar campaña</summary><div class="confirm__body"><p>Esta confirmación congela la audiencia final, el mensaje, la firma, los PDFs y el calendario. Antes de cada envío se volverá a comprobar que el destinatario siga habilitado.</p><form method="post" action="{% url 'campaign-approve' campaign.pk %}">{% csrf_token %}<button class="button" type="submit">Aprobar e iniciar entrega</button></form></div></details>{% endif %}
+        {% if campaign.state == "AWAITING_APPROVAL" and campaign.approval_mode == "PER_MESSAGE" %}<details class="confirm"><summary>Iniciar mensajes aprobados</summary><div class="confirm__body"><p>{{ individually_approved_count }} mensaje{{ individually_approved_count|pluralize }} aprobado{{ individually_approved_count|pluralize }}. Al continuar, los mensajes que no aprobaste quedarán fuera y sólo se encolarán los aprobados.</p><div class="actions"><a class="button button--secondary" href="{% url 'outbound-messages' %}?campaign={{ campaign.pk }}&state=REVIEW_READY">Revisar mensajes</a><form method="post" action="{% url 'campaign-start-approved' campaign.pk %}">{% csrf_token %}<button class="button" type="submit">Iniciar aprobados</button></form></div></div></details>{% endif %}
+        {% if campaign.state == "RUNNING" %}<details class="confirm"><summary>Pausar</summary><div class="confirm__body"><p>No se tomarán tareas nuevas. Los efectos ya aceptados por un proveedor no se revierten.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'pause' %}">{% csrf_token %}<div class="field"><label class="field__label" for="pause-reason">Motivo</label><input id="pause-reason" name="reason" required></div><button class="button button--secondary" type="submit">Confirmar pausa</button></form></div></details>{% endif %}
+        {% if campaign.state == "PAUSED" %}<details class="confirm"><summary>Reanudar</summary><div class="confirm__body"><p>Se volverán a validar el catálogo, la copia local de datos y los proveedores antes de continuar.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'resume' %}">{% csrf_token %}<button class="button" type="submit">Confirmar reanudación</button></form></div></details>{% endif %}
+        {% if campaign.state == "DRAFT" or campaign.state == "DISCOVERING" or campaign.state == "AWAITING_APPROVAL" or campaign.state == "RUNNING" or campaign.state == "PAUSED" %}<details class="confirm"><summary class="error-text">Cancelar</summary><div class="confirm__body"><p>La cancelación es terminal. No revierte correo ya aceptado por Gmail.</p><form method="post" action="{% url 'campaign-action' campaign.pk 'cancel' %}">{% csrf_token %}<div class="field"><label class="field__label" for="cancel-reason">Motivo de cancelación</label><input id="cancel-reason" name="reason" required></div><button class="button button--danger" type="submit">Cancelar definitivamente</button></form></div></details>{% endif %}
+    </div>{% endif %}
 </div>
 
-<section class="grid">
-    <article class="card"><h2>Objetivo y extracción</h2><p>Objetivo: {{ campaign.objective }}</p><p>Máximo crudo: {{ campaign.max_raw_records }}</p><p>Cap: {{ campaign.cost_currency }} {{ campaign.cost_limit }}</p></article>
-    <article class="card"><h2>Entrega</h2><p>{{ campaign.daily_limit }} por día · cada {{ campaign.message_interval_minutes }} min</p><p>{{ campaign.window_start }}–{{ campaign.window_end }}</p><p>{{ campaign.timezone_name }}</p></article>
-    <article class="card"><h2>Análisis</h2><p>Umbral: {{ campaign.relevance_threshold }}</p><p>Extractor: {{ campaign.extractor_provider }}</p><p>IA: {{ campaign.llm_provider }} / {{ campaign.llm_model }}</p></article>
-    <article class="card"><h2>Catálogo</h2><p>{{ campaign.catalog }}</p><p><code>{{ campaign.catalog.sha256|slice:":16" }}…</code></p></article>
+{% if campaign.status_reason and is_admin %}<div class="alert {% if campaign.state == 'STOPPED_ERROR' %}alert--error{% else %}alert--warning{% endif %}" role="status"><div><strong>Motivo del estado actual</strong><br>{{ campaign.status_reason }}</div></div>{% endif %}
+
+{% if is_admin %}
+<div class="stage-bar" aria-label="Etapas de la campaña"><div class="stage-bar__item stage-bar__item--done">Configuración</div><div class="stage-bar__item {% if campaign.discovery_state != 'PENDING' %}stage-bar__item--active{% endif %}">Búsqueda</div><div class="stage-bar__item {% if metrics.with_email %}stage-bar__item--active{% endif %}">Preparación</div><div class="stage-bar__item {% if metrics.review_ready or metrics.queued or metrics.sent or metrics.simulated %}stage-bar__item--active{% endif %}">{% if campaign.delivery_mode == "REVIEW_ONLY" %}Revisión{% else %}Entrega{% endif %}</div></div>
+
+{% if campaign.state == "AWAITING_APPROVAL" %}
+<section class="panel">
+    <div class="panel__header"><div><h2>Todo listo para revisar</h2><p class="muted">La búsqueda terminó. Todavía no se envió ningún correo.</p></div><span class="badge">{{ metrics.qualified }} destinatarios</span></div>
+    <div class="panel__body section-stack">
+        <div class="form-summary">
+            <div class="summary-item"><span class="summary-item__label">Aprobación</span><span class="summary-item__value">{{ campaign.get_approval_mode_display }}</span></div>
+            <div class="summary-item"><span class="summary-item__label">Asunto</span><span class="summary-item__value">{{ campaign.initial_subject_snapshot }}</span></div>
+            <div class="summary-item"><span class="summary-item__label">Recordatorio</span><span class="summary-item__value">{% if campaign.reminder_enabled %}Uno, después de {{ campaign.reminder_delay_days }} días sin respuesta{% else %}Desactivado{% endif %}</span></div>
+            <div class="summary-item"><span class="summary-item__label">PDFs</span><span class="summary-item__value">{{ campaign.attachments.count }} archivo{{ campaign.attachments.count|pluralize }}</span></div>
+        </div>
+        <details><summary>Ver mensaje exacto y PDFs</summary><div class="section-stack section-gap"><div><h3>{{ campaign.initial_subject_snapshot }}</h3><div class="message-body">{{ campaign.initial_body_snapshot|linebreaksbr }}{% if campaign.signature_snapshot %}<br><br>{{ campaign.signature_snapshot|linebreaksbr }}{% endif %}</div></div><div><h3>Archivos adjuntos</h3><ol>{% for attachment in campaign.attachments.all %}<li>{{ attachment.catalog.name }} · versión {{ attachment.catalog.version }}</li>{% endfor %}</ol></div></div></details>
+        {% if campaign.approval_mode == "PER_MESSAGE" %}<p><a class="button button--secondary" href="{% url 'outbound-messages' %}?campaign={{ campaign.pk }}&state=REVIEW_READY">Revisar y aprobar cada mensaje</a></p>{% endif %}
+    </div>
+</section>
+{% endif %}
+
+<section class="metrics-grid" aria-label="Métricas de campaña">
+    <article class="card metric"><p class="metric__label"><span class="help-term" data-tooltip="Registros encontrados antes de quitar duplicados, validar el correo y analizar su relevancia.">Registros iniciales</span></p><p class="metric__value">{{ metrics.raw }}</p><p class="metric__context">Máximo: {{ campaign.max_raw_records }} · {{ metrics.duplicates }} duplicados</p></article>
+    <article class="card metric"><p class="metric__label">Con correo válido</p><p class="metric__value">{{ metrics.with_email }}</p><p class="metric__context">{{ metrics.irrelevant }} excluidos durante la preparación</p></article>
+    <article class="card metric"><p class="metric__label">Destinatarios listos</p><p class="metric__value">{{ metrics.qualified }}</p><p class="metric__context">Objetivo: {{ campaign.objective }}</p></article>
+    <article class="card metric"><p class="metric__label">{% if campaign.delivery_mode == "REVIEW_ONLY" %}Listos para revisar{% elif campaign.delivery_mode == "LIVE" %}Enviados{% else %}Simulados{% endif %}</p><p class="metric__value">{% if campaign.delivery_mode == "REVIEW_ONLY" %}{{ metrics.review_ready }}{% elif campaign.delivery_mode == "LIVE" %}{{ metrics.sent }}{% else %}{{ metrics.simulated }}{% endif %}</p><p class="metric__context">{% if campaign.delivery_mode == "LIVE" %}{{ metrics.review_ready }} por aprobar · {% endif %}{{ metrics.queued }} pendientes · {{ metrics.errors }} errores</p></article>
 </section>
 
-<p class="actions"><a class="button secondary" href="{% url 'prospects' %}?campaign={{ campaign.pk }}">Filtrar prospectos</a><a class="button secondary" href="{% url 'outbound-messages' %}?campaign={{ campaign.pk }}">Filtrar envíos</a><a class="button secondary" href="{% url 'responses' %}?campaign={{ campaign.pk }}">Filtrar respuestas</a></p>
+<section class="panel"><div class="panel__header"><div><h2>Progreso hacia el objetivo</h2><p class="muted">Empresas únicas, sin contacto previo y con un correo válido.</p></div><strong class="number">{{ metrics.qualified }} / {{ campaign.objective }}</strong></div><div class="panel__body"><progress class="progress-track" aria-label="Progreso de destinatarios preparados" value="{{ progress_percent }}" max="100">{{ progress_percent }}%</progress><p class="muted flush-top">Búsqueda: <span class="badge badge--{{ campaign.discovery_state|lower }}">{{ campaign.get_discovery_state_display }}</span>{% if campaign.discovery_stop_reason %} · {{ campaign.discovery_stop_reason|etiqueta_es }}{% endif %}</p></div></section>
 
-<section class="card">
-    <h2>Ejecuciones de extracción</h2>
-    {% if campaign.search_runs.all %}
-    <table>
-        <thead><tr><th>Estado</th><th>Trabajo</th><th>Crudos</th><th>Con email</th><th>Sin email</th><th>Duplicados</th><th>Uso / costo</th><th>Error</th></tr></thead>
-        <tbody>
-        {% for run in campaign.search_runs.all %}
-            <tr>
-                <td>{{ run.get_state_display }}</td>
-                <td>{{ run.provider_request_id|default:"—" }}</td>
-                <td>{{ run.raw_count }}</td>
-                <td>{{ run.email_count }}</td>
-                <td>{{ run.no_email_count }}</td>
-                <td>{{ run.duplicate_count }}</td>
-                <td>{% if run.cost_actual != None %}{{ run.currency }} {{ run.cost_actual }} real{% elif run.cost_estimated != None %}{{ run.currency }} {{ run.cost_estimated }} estimado{% else %}—{% endif %}</td>
-                <td>{{ run.error|default:"—" }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}<p>Todavía no hay ejecuciones.</p>{% endif %}
+<div class="actions section-actions"><a class="button button--secondary" href="{% url 'prospects' %}?campaign={{ campaign.pk }}">Ver audiencia</a><a class="button button--secondary" href="{% url 'outbound-messages' %}?campaign={{ campaign.pk }}">Ver correos</a><a class="button button--secondary" href="{% url 'responses' %}?campaign={{ campaign.pk }}">Ver respuestas</a>{% if campaign.overture_snapshot %}<a class="button button--secondary" href="{% url 'overture-datasets' %}">Ver datos de búsqueda</a>{% endif %}</div>
+
+<section class="panel">
+    <div class="panel__header"><div><h2>Configuración congelada</h2><p class="muted">Estos valores son inmutables después de iniciar.</p></div></div>
+    <div class="panel__body"><div class="form-summary">
+        <div class="summary-item"><span class="summary-item__label">Objetivo / máximo crudo</span><span class="summary-item__value">{{ campaign.objective }} / {{ campaign.max_raw_records }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Modo</span><span class="summary-item__value">{{ campaign.get_delivery_mode_display }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Umbral de relevancia</span><span class="summary-item__value">{{ campaign.relevance_threshold }} / 100</span></div>
+        <div class="summary-item"><span class="summary-item__label"><span class="help-term" data-tooltip="Versión inmutable del catálogo local de lugares que usa esta campaña.">Datos de Overture</span></span><span class="summary-item__value">{% if campaign.overture_snapshot %}{{ campaign.overture_snapshot.release_id }} · <code>{{ campaign.overture_snapshot.pk }}</code>{% else %}No fijados todavía{% endif %}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Confianza Overture</span><span class="summary-item__value">{{ campaign.overture_min_confidence }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Lectura de sitios web</span><span class="summary-item__value">{{ campaign.website_fetcher|etiqueta_es }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Inteligencia artificial</span><span class="summary-item__value">{{ campaign.llm_provider|etiqueta_es }} · {{ campaign.llm_model|etiqueta_es }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Preferencias de redacción</span><span class="summary-item__value">Revisión {{ campaign.prompt_snapshot.configuration_revision|default:"predeterminada" }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Catálogo</span><span class="summary-item__value">{{ campaign.catalog }} · <code>{{ campaign.catalog.sha256|slice:":12" }}…</code></span></div>
+        {% if campaign.delivery_mode != "REVIEW_ONLY" %}<div class="summary-item"><span class="summary-item__label">Entrega</span><span class="summary-item__value">{{ campaign.daily_limit }} por día · cada {{ campaign.message_interval_minutes }} min</span></div><div class="summary-item"><span class="summary-item__label">Ventana</span><span class="summary-item__value">{{ campaign.window_start|time:"H:i" }}–{{ campaign.window_end|time:"H:i" }}</span></div><div class="summary-item"><span class="summary-item__label">Zona horaria</span><span class="summary-item__value">{{ campaign.timezone_name }}</span></div>{% endif %}
+    </div>
+    {% if campaign.overture_snapshot %}<div class="alert section-gap"><div><strong>Procedencia de la copia local</strong><br><span class="help-term" data-tooltip="Versión de la estructura que define qué campos contiene cada registro.">Estructura</span> {{ campaign.overture_snapshot.schema_version }} · taxonomía {{ campaign.overture_snapshot.taxonomy_version }} · importador {{ campaign.overture_snapshot.importer_version }}{% if campaign.overture_snapshot.attribution %}<br>{{ campaign.overture_snapshot.attribution }}{% endif %}</div></div>{% endif %}
+    </div>
 </section>
 
-<section class="card">
-    <h2>Prospectos y mensajes preparados</h2>
-    {% if campaign.prospects.all %}
-    <table>
-        <thead><tr><th>Prospecto</th><th>Pipeline</th><th>Web</th><th>Score / razón</th><th>Mensaje</th><th>Error / IDs</th><th>Acción</th></tr></thead>
-        <tbody>
-        {% for prospect in campaign.prospects.all %}
-            {% with snapshot=prospect.web_snapshots.first analysis=prospect.analyses.first message=prospect.outbound_messages.first %}
-            <tr>
-                <td>{{ prospect.name }}<br><small>{{ prospect.emails.first.normalized_email|default:"—" }}</small></td>
-                <td>{{ prospect.get_pipeline_state_display }}{% if prospect.last_error %}<br><small>{{ prospect.last_error }}</small>{% endif %}</td>
-                <td>{% if snapshot %}{{ snapshot.get_status_display }} · {{ snapshot.pages|length }} pág.{% else %}—{% endif %}</td>
-                <td>{% if analysis and analysis.status == "VALID" %}{{ analysis.relevance_score }} · {{ analysis.relevance_reason }}{% elif analysis %}Error: {{ analysis.error }}{% else %}—{% endif %}</td>
-                <td>{% if message %}<strong>{{ message.subject }}</strong><br><small>{{ message.get_state_display }}</small>{% else %}—{% endif %}</td>
-                <td>{% if message %}{{ message.error|default:"—" }}{% if message.gmail_message_id %}<br><small>{{ message.gmail_message_id }} · {{ message.gmail_thread_id }}</small>{% endif %}{% else %}—{% endif %}</td>
-                <td>
-                    {% if snapshot and not message or message.state == "PREPARED" or message.state == "CANCELLED" %}
-                    <form method="post" action="{% url 'prospect-regenerate' campaign.pk prospect.pk %}">
-                        {% csrf_token %}<button type="submit">Regenerar</button>
-                    </form>
-                    {% else %}—{% endif %}
-                </td>
-            </tr>
-            {% endwith %}
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}<p>Todavía no hay prospectos.</p>{% endif %}
+<section class="panel"><div class="panel__header"><div><h2>Audiencia y consultas</h2><p class="muted">Reglas, límites y nombres quedan preservados aunque cambie la configuración general.</p></div><span class="badge">{{ campaign.search_queries.count }} consultas</span></div><div class="panel__body config-layout"><div><h3>Rubros ({{ campaign.category_selections.count }})</h3><ul>{% for item in campaign.category_selections.all %}<li>{{ item.name_snapshot }}{% if item.rules_snapshot %}<span class="table-meta">{{ item.rules_snapshot|length }} reglas congeladas</span>{% endif %}</li>{% empty %}<li class="muted">Sin rubros</li>{% endfor %}</ul></div><div><h3>Zonas ({{ campaign.zone_selections.count }})</h3><ul>{% for item in campaign.zone_selections.all %}<li>{{ item.name_snapshot }}{% if item.boundary_hash_snapshot %}<span class="table-meta"><code>{{ item.boundary_hash_snapshot|slice:":12" }}…</code></span>{% endif %}</li>{% empty %}<li class="muted">Sin zonas</li>{% endfor %}</ul></div></div></section>
+
+<section class="panel">
+    <div class="panel__header"><div><h2>Ejecuciones de extracción</h2><p class="muted">Páginas locales repetibles sin duplicar efectos, resultados y errores sin datos sensibles.</p></div></div>
+    {% if campaign.search_runs.all %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Estado</th><th>Página / copia local</th><th data-align="right">Iniciales</th><th data-align="right">Con correo</th><th data-align="right">Sin correo</th><th data-align="right">Duplicados</th><th>Uso / costo</th><th>Diagnóstico</th></tr></thead><tbody>{% for run in campaign.search_runs.all %}<tr><td><span class="badge badge--{{ run.state|lower }}">{{ run.get_state_display }}</span></td><td><code>{{ run.cursor|default:"inicio"|truncatechars:24 }}</code><span class="table-meta">{{ run.provider|etiqueta_es }}{% if run.overture_snapshot %} · {{ run.overture_snapshot.release_id }}{% endif %}</span></td><td data-align="right">{{ run.raw_count }}</td><td data-align="right">{{ run.email_count }}</td><td data-align="right">{{ run.no_email_count }}</td><td data-align="right">{{ run.duplicate_count }}</td><td>{% if run.provider == "overture" %}{{ run.raw_count }} filas · costo 0{% elif run.cost_actual != None %}{{ run.currency }} {{ run.cost_actual }} real{% elif run.cost_estimated != None %}{{ run.currency }} {{ run.cost_estimated }} estimado{% else %}—{% endif %}</td><td>{{ run.error|default:"—" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>La extracción todavía no comenzó</h3><p>{% if campaign.state == 'DRAFT' %}Iniciá la campaña cuando la configuración esté lista.{% else %}El coordinador aún no registró ejecuciones para esta campaña.{% endif %}</p></div>{% endif %}
 </section>
 
-<div class="grid">
-    <section><h2>Rubros</h2><ul>{% for item in campaign.category_selections.all %}<li>{{ item.name_snapshot }}</li>{% endfor %}</ul></section>
-    <section><h2>Zonas</h2><ul>{% for item in campaign.zone_selections.all %}<li>{{ item.name_snapshot }}</li>{% endfor %}</ul></section>
-    <section><h2>Consultas congeladas</h2><p>{{ campaign.search_queries.count }}</p></section>
-</div>
+<section class="panel">
+    <div class="panel__header"><div><h2>Destinatarios y correos</h2><p class="muted">Estado y procedencia de cada empresa encontrada para esta campaña.</p></div><a href="{% url 'prospects' %}?campaign={{ campaign.pk }}">Abrir audiencia completa</a></div>
+    {% if campaign.prospects.all %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Empresa</th><th>Proceso</th><th>Sitio web</th><th>Datos históricos</th><th>Correo</th><th>Procedencia</th><th>Diagnóstico</th><th>Uso</th></tr></thead><tbody>{% for prospect in campaign.prospects.all %}{% with snapshot=prospect.web_snapshots.first analysis=prospect.analyses.first message=prospect.outbound_messages.first %}<tr><td><span class="table-primary">{{ prospect.name }}</span><span class="table-meta">{{ prospect.emails.first.normalized_email|default:"Sin correo" }}</span></td><td><span class="badge badge--{{ prospect.pipeline_state|lower }}">{{ prospect.get_pipeline_state_display|etiqueta_es }}</span>{% if prospect.last_error %}<span class="table-meta error-text">{{ prospect.last_error }}</span>{% endif %}</td><td>{% if snapshot %}<span class="badge badge--{{ snapshot.status|lower }}">{{ snapshot.get_status_display }}</span><span class="table-meta">{{ snapshot.pages|length }} pág.</span>{% else %}—{% endif %}</td><td>{% if analysis and analysis.status == "VALID" %}<strong class="number">{{ analysis.relevance_score }}</strong><span class="table-meta">{{ analysis.relevance_reason }}</span>{% elif analysis %}<span class="error-text">{{ analysis.error }}</span>{% else %}<span class="muted">No se usó IA</span>{% endif %}</td><td>{% if message %}<a class="table-primary" href="{% url 'outbound-detail' message.pk %}">{{ message.subject }}</a><span class="table-meta"><span class="badge badge--{{ message.state|lower }}">{{ message.get_state_display }}</span> · <a href="{% url 'outbound-detail' message.pk %}">Ver contenido</a></span>{% else %}—{% endif %}</td><td><details><summary>Ver trazabilidad</summary>{% include "dashboard/_prospect_provenance.html" with prospect=prospect %}</details></td><td>{% if message %}{{ message.error|default:"—" }}{% if message.gmail_message_id %}<span class="table-meta"><code>{{ message.gmail_message_id }}</code></span>{% endif %}{% else %}—{% endif %}</td><td><span class="muted">Sólo lectura</span></td></tr>{% endwith %}{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>Sin destinatarios procesados</h3><p>Las empresas aparecerán cuando una búsqueda guarde resultados.</p></div>{% endif %}
+</section>
+{% else %}
+<section class="metrics-grid" aria-label="Resumen de la campaña">
+    <article class="card metric"><p class="metric__label">Correos enviados</p><p class="metric__value">{{ metrics.sent }}</p><p class="metric__context">Sólo se muestran entregas confirmadas.</p></article>
+</section>
+<section class="panel">
+    <div class="panel__body">
+        <h2>Seguimiento de conversaciones</h2>
+        <p>Podés consultar los correos enviados y las respuestas. La configuración y las acciones de la campaña están reservadas a administradores.</p>
+        <div class="actions"><a class="button button--secondary" href="{% url 'outbound-messages' %}?campaign={{ campaign.pk }}">Ver correos enviados</a><a class="button button--secondary" href="{% url 'responses' %}?campaign={{ campaign.pk }}">Ver respuestas</a></div>
+    </div>
+</section>
+{% endif %}
 {% endblock %}

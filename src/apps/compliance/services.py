@@ -8,6 +8,7 @@ from django.core.validators import validate_email
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 
+from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.compliance.models import SuppressionEntry
 
@@ -75,6 +76,8 @@ def suppress_email(
     source: str = "dashboard",
     evidence: str = "",
 ) -> SuppressionEntry:
+    if actor is not None:
+        require_user_capability(actor, Capability.MANAGE_CONTACTS)
     normalized = normalize_email(email)
     if reason not in SuppressionEntry.Reason.values:
         raise ValidationError("El motivo de supresión no es válido.")

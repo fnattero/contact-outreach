@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.cache import never_cache
 
+from apps.accounts.permissions import Capability, require_capability
 from apps.compliance.forms import SuppressionForm
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import suppress_email
 
 
-@login_required
+@require_capability(Capability.MANAGE_CONTACTS)
+@never_cache
 def suppression_list(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = SuppressionForm(request.POST)
@@ -24,7 +26,7 @@ def suppression_list(request: HttpRequest) -> HttpResponse:
                 evidence=form.cleaned_data["evidence"],
                 actor=owner,
             )
-            messages.success(request, "Email agregado a la lista de supresión.")
+            messages.success(request, "Correo agregado a la lista de supresión.")
             return redirect("suppressions")
     else:
         form = SuppressionForm()

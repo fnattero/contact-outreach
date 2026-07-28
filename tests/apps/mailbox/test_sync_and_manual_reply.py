@@ -15,16 +15,26 @@ from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.automation.models import EmailCandidate, ReplyDecision
 from apps.campaigns.delivery import deliver_message, pending_message_ids
 from apps.campaigns.models import Campaign, OutboundMessage, SearchQuery, SearchRun
 from apps.catalogs.services import create_catalog
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import suppress_email
+from apps.contacts.models import (
+    CommunicationRestriction,
+    Contact,
+    Conversation,
+    EmailAddress,
+    Organization,
+)
 from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
     GmailReplyRequest,
     GmailSendResult,
+    LLMProvider,
+    ReplyDecisionResult,
 )
 from apps.integrations.fakes import FakeGmailProvider
 from apps.integrations.gmail import GMAIL_SCOPES
@@ -33,12 +43,14 @@ from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.manual import (
     authorize_manual_reply,
     deliver_manual_reply,
+    pending_manual_reply_ids,
     reconcile_manual_reply,
     recoverable_manual_reply_ids,
 )
 from apps.mailbox.models import FakeGmailMessage, GmailConnection, InboundMessage
-from apps.mailbox.sync import sync_gmail_connection
+from apps.mailbox.sync import process_inbound_reply, sync_gmail_connection
 from apps.mailbox.tasks import deliver_manual_reply_task
+from apps.prospects.email_validation import MockMXResolver
 from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail
 
 NOW = datetime(2026, 7, 16, 15, 0, tzinfo=UTC)
@@ -190,7 +202,17 @@ def test_incremental_sync_imports_only_campaign_threads_and_is_idempotent(
     first = InboundMessage.objects.get(gmail_thread_id=root.gmail_thread_id)
     assert first.related_outbound == root
     assert first.related_outbound.prospect == root.prospect
-    assert first.classification == InboundMessage.Classification.INTERESTED
+    # Non-deterministic analysis is deliberately outside the transaction that holds the
+    # Gmail synchronization lock. The durable reply and Contact are available first.
+    assert first.classification == InboundMessage.Classification.OTHER
+    assert first.contact_id is not None
+    assert first.conversation_id is not None
+    assert process_inbound_reply(first.pk, resolver=MockMXResolver()) == (
+        InboundMessage.Classification.OTHER
+    )
+    first.refresh_from_db()
+    assert first.classification == InboundMessage.Classification.OTHER
+    assert first.reply_decision.state == ReplyDecision.State.SHADOW_RECORDED
     assert "script" not in first.body_html_sanitized
     assert "onclick" not in first.body_html_sanitized
     assert "Tenemos interés" in first.body_text
@@ -198,12 +220,87 @@ def test_incremental_sync_imports_only_campaign_threads_and_is_idempotent(
     client.force_login(owner)
     dashboard = client.get(reverse("dashboard"))
     responses = client.get(reverse("responses"))
-    assert "2 respuestas de campañas" in dashboard.content.decode()
+    assert "2 mensajes recibidos" in dashboard.content.decode()
     assert root.prospect.name in responses.content.decode()
     assert "Mensaje ajeno" not in responses.content.decode()
     rfc_linked = InboundMessage.objects.get(gmail_thread_id="different-gmail-thread")
     rfc_thread = client.get(reverse("response-thread", args=(rfc_linked.pk,)))
     assert "Mensaje inicial con catálogo" in rfc_thread.content.decode()
+
+
+@pytest.mark.django_db
+def test_sync_preserves_the_direct_parent_inside_a_multi_message_thread(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    campaign, root = _thread_fixture(owner, suffix="direct-parent")
+    direct_parent = OutboundMessage.objects.create(
+        kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
+        campaign=campaign,
+        prospect=root.prospect,
+        prospect_email=root.prospect_email,
+        recipient=root.recipient,
+        recipient_normalized=root.recipient_normalized,
+        subject=root.subject,
+        body_text="Respuesta intermedia con información aprobada.",
+        catalog=root.catalog,
+        catalog_version=root.catalog_version,
+        state=OutboundMessage.State.SENT,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        idempotency_key="direct-parent-automatic",
+        message_id="<direct-parent-automatic@contact-outreach.local>",
+        gmail_message_id="gmail-direct-parent-automatic",
+        gmail_thread_id=root.gmail_thread_id,
+        sent_at=timezone.now(),
+    )
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Gracias, tengo otra pregunta.",
+        in_reply_to=direct_parent.message_id,
+        references=(root.message_id, direct_parent.message_id),
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+
+    inbound = InboundMessage.objects.get(gmail_thread_id=root.gmail_thread_id)
+    assert inbound.related_outbound == direct_parent
+
+
+@pytest.mark.django_db
+def test_sync_persists_literal_mailto_candidate_before_sanitizing_html(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    _, root = _thread_fixture(owner, suffix="mailto")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Envíenla a esta dirección.",
+        body_html=(
+            '<p>Envíenla a <a href="mailto:propuestas%40example.org">esta dirección</a>.</p>'
+        ),
+        in_reply_to=root.message_id,
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+
+    inbound = InboundMessage.objects.get(gmail_thread_id=root.gmail_thread_id)
+    candidate = EmailCandidate.objects.get(inbound=inbound)
+    assert candidate.normalized_email == "propuestas@example.org"
+    assert candidate.region == EmailCandidate.Region.NEW_CONTENT
+    assert candidate.source == EmailCandidate.Source.MAILTO
+    assert "mailto" not in inbound.body_html_sanitized
 
 
 @pytest.mark.django_db
@@ -250,6 +347,14 @@ def test_unsubscribe_suppresses_future_campaigns_and_bounce_invalidates_email(
     assert sync_gmail_connection(connection.pk, provider=fake) == 1
     suppression = SuppressionEntry.objects.get(normalized_email=root.recipient_normalized)
     assert suppression.reason == SuppressionEntry.Reason.UNSUBSCRIBE
+    root.refresh_from_db()
+    contact = Contact.objects.get(organization_id=root.organization_id)
+    assert contact.status == Contact.Status.UNSUBSCRIBED
+    assert CommunicationRestriction.objects.filter(
+        email_address__normalized_email=root.recipient_normalized,
+        kind=CommunicationRestriction.Kind.UNSUBSCRIBE,
+        revoked_at__isnull=True,
+    ).exists()
 
     later_analysis = AIAnalysis.objects.create(
         prospect=root.prospect,
@@ -276,29 +381,154 @@ def test_unsubscribe_suppresses_future_campaigns_and_bounce_invalidates_email(
         catalog=root.catalog,
         catalog_version=root.catalog_version,
         delivery_mode=Campaign.DeliveryMode.LIVE,
+        state=OutboundMessage.State.QUEUED,
+        approved_at=timezone.now(),
+        approved_by=owner,
         idempotency_key="future-after-unsubscribe",
     )
     with override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False):
-        assert deliver_message(later.pk, now=NOW) == OutboundMessage.State.SEND_FAILED
-    assert "suprimido" in OutboundMessage.objects.get(pk=later.pk).error
+        assert deliver_message(later.pk, now=NOW) == OutboundMessage.State.INELIGIBLE
+    assert "ya es un contacto" in OutboundMessage.objects.get(pk=later.pk).error
 
     # Bounce has deterministic precedence even when the quoted footer contains BAJA.
-    second_owner = User.objects.create_user(username="bounce-owner", password="password")
-    _, bounce_root = _thread_fixture(second_owner, suffix="bounce")
-    bounce_connection = _connection(second_owner)
-    bounce_fake = FakeGmailProvider(account_email=bounce_connection.email, persist=True)
-    bounce_fake.inject_inbound(
+    _, bounce_root = _thread_fixture(owner, suffix="bounce")
+    fake.inject_inbound(
         thread_id=bounce_root.gmail_thread_id,
         sender="mailer-daemon@example.net",
-        recipient=bounce_connection.email,
+        recipient=connection.email,
         subject="Delivery Status Notification (Failure)",
         body_text="User unknown\n\n> Si no querés recibir mensajes, respondé BAJA.",
         in_reply_to=bounce_root.message_id,
     )
-    assert sync_gmail_connection(bounce_connection.pk, provider=bounce_fake) == 1
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
     bounce_root.prospect_email.refresh_from_db()
+    bounce_root.refresh_from_db()
     assert bounce_root.prospect_email.is_invalid is True
+    assert not Contact.objects.filter(organization_id=bounce_root.organization_id).exists()
+    assert (
+        EmailAddress.objects.get(
+            organization_id=bounce_root.organization_id,
+            normalized_email=bounce_root.recipient_normalized,
+        ).validity
+        == EmailAddress.Validity.INVALID
+    )
     assert InboundMessage.objects.get(related_outbound=bounce_root).classification == "BOUNCE"
+
+
+@pytest.mark.django_db
+def test_auto_reply_is_persisted_without_promoting_a_contact(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    _, root = _thread_fixture(owner, suffix="automatic")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject="Respuesta automática: fuera de la oficina",
+        body_text="Estoy fuera de la oficina.",
+        in_reply_to=root.message_id,
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+    inbound = InboundMessage.objects.get(related_outbound=root)
+    root.refresh_from_db()
+    assert inbound.classification == InboundMessage.Classification.AUTO_REPLY
+    assert inbound.contact_id is None
+    assert not Contact.objects.filter(organization_id=root.organization_id).exists()
+
+
+@pytest.mark.django_db
+def test_human_reply_analysis_is_enqueued_only_after_commit(
+    owner: User,
+    private_catalog_dir: Path,
+    django_capture_on_commit_callbacks,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del private_catalog_dir
+    _, root = _thread_fixture(owner, suffix="post-commit")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Quisiera conocer más sobre el producto.",
+        in_reply_to=root.message_id,
+    )
+    decision_processor = Mock(side_effect=AssertionError("LLM ejecutado bajo el lock de sync"))
+    queued = Mock()
+    monkeypatch.setattr(
+        "apps.automation.services.process_inbound_decision",
+        decision_processor,
+    )
+    monkeypatch.setattr("apps.mailbox.tasks.process_inbound_reply_task.delay", queued)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        assert sync_gmail_connection(connection.pk, provider=fake) == 1
+
+    inbound = InboundMessage.objects.get(related_outbound=root)
+    decision_processor.assert_not_called()
+    queued.assert_called_once_with(str(inbound.pk))
+    assert inbound.contact_id is not None
+    assert inbound.conversation_id is not None
+
+
+@pytest.mark.django_db
+def test_shadow_reply_decision_is_idempotent_and_never_sends_gmail(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    _, root = _thread_fixture(owner, suffix="shadow-idempotent")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Mandá la propuesta a propuestas@example.org.",
+        in_reply_to=root.message_id,
+    )
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+    inbound = InboundMessage.objects.get(related_outbound=root)
+    provider = Mock(spec=LLMProvider)
+    provider.decide_reply.return_value = ReplyDecisionResult(
+        classification="INTERESTED",
+        intent="MEETING_OR_DATE",
+        action="HUMAN",
+        confidence=0.99,
+        candidate_id=None,
+        fact_revision_ids=(),
+        proposed_body=None,
+        human_reason="MEETING_OR_DATE",
+    )
+    resolver = MockMXResolver()
+
+    assert process_inbound_reply(inbound.pk, provider=provider, resolver=resolver) == (
+        InboundMessage.Classification.INTERESTED
+    )
+    assert process_inbound_reply(inbound.pk, provider=provider, resolver=resolver) == (
+        InboundMessage.Classification.INTERESTED
+    )
+
+    provider.decide_reply.assert_called_once()
+    decision = ReplyDecision.objects.get(inbound=inbound)
+    assert decision.state == ReplyDecision.State.SHADOW_RECORDED
+    assert decision.mode == "SHADOW"
+    assert EmailCandidate.objects.filter(
+        inbound=inbound,
+        normalized_email="propuestas@example.org",
+        region=EmailCandidate.Region.NEW_CONTENT,
+    ).exists()
+    assert not FakeGmailMessage.objects.filter(
+        direction=FakeGmailMessage.Direction.OUTBOUND
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -319,11 +549,14 @@ def test_deterministic_unsubscribe_runs_when_llm_provider_cannot_be_constructed(
         body_text="BAJA inmediata.",
         in_reply_to=root.message_id,
     )
-    provider_factory = Mock(side_effect=AuthenticationError("API key faltante"))
-    monkeypatch.setattr("apps.mailbox.sync.get_llm_provider", provider_factory)
+    decision_processor = Mock(side_effect=AuthenticationError("API key faltante"))
+    monkeypatch.setattr(
+        "apps.automation.services.process_inbound_decision",
+        decision_processor,
+    )
 
     assert sync_gmail_connection(connection.pk, provider=fake) == 1
-    provider_factory.assert_not_called()
+    decision_processor.assert_not_called()
     assert InboundMessage.objects.get().classification == "UNSUBSCRIBE"
     assert SuppressionEntry.objects.filter(
         normalized_email=root.recipient_normalized,
@@ -390,7 +623,7 @@ def test_manual_reply_is_explicit_idempotent_and_stays_in_thread(
     assert inbound.message_id in manual.references
     assert OutboundMessage.objects.filter(kind=OutboundMessage.Kind.MANUAL_REPLY).count() == 1
     assert manual.pk not in pending_message_ids()
-    with pytest.raises(ValidationError, match="POST explícito"):
+    with pytest.raises(ValidationError, match="confirmación explícita"):
         deliver_message(manual.pk)
 
     fake_reply = FakeGmailMessage.objects.get(
@@ -447,6 +680,155 @@ def test_manual_reply_rechecks_late_suppression_before_gmail_effect(
     assert deliver_manual_reply(manual.pk, provider=fake) == OutboundMessage.State.SEND_FAILED
     manual.refresh_from_db()
     assert "suprimido" in manual.error
+    assert not FakeGmailMessage.objects.filter(
+        direction=FakeGmailMessage.Direction.OUTBOUND,
+        rfc_message_id=manual.message_id,
+    ).exists()
+
+
+@pytest.mark.django_db
+@override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
+def test_contact_only_thread_can_authorize_and_deliver_a_manual_reply(
+    client: Client,
+    owner: User,
+) -> None:
+    workspace = owner.membership.workspace
+    connection = _connection(owner)
+    organization = Organization.objects.create(
+        workspace=workspace,
+        name="Cliente actual",
+        normalized_name="cliente actual",
+    )
+    email = EmailAddress.objects.create(
+        workspace=workspace,
+        organization=organization,
+        original_email="cliente@example.com",
+        normalized_email="cliente@example.com",
+        domain="example.com",
+        is_preferred=True,
+        validity=EmailAddress.Validity.VALID,
+    )
+    contact = Contact.objects.create(
+        workspace=workspace,
+        organization=organization,
+        preferred_email=email,
+        name="Cliente actual",
+        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
+        created_by=owner,
+    )
+    conversation = Conversation.objects.create(
+        workspace=workspace,
+        contact=contact,
+        connection=connection,
+        gmail_thread_id="contact-only-thread",
+        subject="Seguimiento",
+    )
+    root = OutboundMessage.objects.create(
+        kind=OutboundMessage.Kind.SCHEDULED_CONTACT,
+        organization=organization,
+        contact=contact,
+        conversation=conversation,
+        email_address=email,
+        recipient=email.original_email,
+        recipient_normalized=email.normalized_email,
+        subject="Seguimiento",
+        body_text="¿Cómo resultó el producto?",
+        state=OutboundMessage.State.SENT,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        idempotency_key="scheduled:contact-only",
+        message_id="<contact-only-root@example.invalid>",
+        gmail_message_id="contact-only-root",
+        gmail_thread_id=conversation.gmail_thread_id,
+        sent_at=timezone.now() - timedelta(hours=1),
+    )
+    inbound = InboundMessage.objects.create(
+        connection=connection,
+        organization=organization,
+        contact=contact,
+        conversation=conversation,
+        related_outbound=root,
+        gmail_message_id="contact-only-inbound",
+        gmail_thread_id=conversation.gmail_thread_id,
+        message_id="<contact-only-inbound@example.invalid>",
+        in_reply_to=root.message_id,
+        references=[root.message_id],
+        sender=email.original_email,
+        recipients=[connection.email],
+        subject="Re: Seguimiento",
+        external_at=timezone.now(),
+        received_at=timezone.now(),
+        body_text="Funcionó muy bien.",
+        is_human=True,
+    )
+
+    client.force_login(owner)
+    thread_page = client.get(reverse("response-thread", args=(inbound.pk,)))
+    outbound_page = client.get(reverse("outbound-detail", args=(root.pk,)))
+    outbound_export = client.get(reverse("outbound-export"))
+    response_export = client.get(reverse("responses-export"))
+    assert thread_page.status_code == outbound_page.status_code == 200
+    assert "¿Cómo resultó el producto?" in thread_page.content.decode()
+    assert "Cliente actual" in outbound_page.content.decode()
+    assert "Sin campaña" in outbound_export.content.decode()
+    assert "Sin campaña" in response_export.content.decode()
+
+    manual, created = authorize_manual_reply(
+        actor=owner,
+        inbound_id=inbound.pk,
+        body_text="Muchas gracias por contarnos.",
+        request_key=uuid.uuid4(),
+    )
+
+    assert created
+    assert manual.campaign is None
+    assert manual.prospect is None
+    assert manual.catalog is None
+    assert manual.contact == contact
+    assert manual.email_address == email
+    assert manual.pk in pending_manual_reply_ids()
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    assert deliver_manual_reply(manual.pk, provider=fake) == OutboundMessage.State.SENT
+
+
+@pytest.mark.django_db
+@override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
+def test_manual_reply_mode_mismatch_never_reaches_gmail_or_recovery(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    campaign, root = _thread_fixture(owner, suffix="review-mismatch")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Me interesa.",
+        in_reply_to=root.message_id,
+    )
+    sync_gmail_connection(connection.pk, provider=fake)
+    manual, _ = authorize_manual_reply(
+        actor=owner,
+        inbound_id=InboundMessage.objects.get().pk,
+        body_text="Te llamo mañana.",
+        request_key=uuid.uuid4(),
+    )
+    Campaign.objects.filter(pk=campaign.pk).update(delivery_mode=Campaign.DeliveryMode.REVIEW_ONLY)
+    provider = Mock()
+
+    assert manual.pk not in pending_manual_reply_ids()
+    assert deliver_manual_reply(manual.pk, provider=provider) == OutboundMessage.State.SEND_FAILED
+    provider.reply.assert_not_called()
+
+    OutboundMessage.objects.filter(pk=manual.pk).update(
+        state=OutboundMessage.State.RECONCILING,
+        next_attempt_at=NOW - timedelta(minutes=1),
+    )
+    assert manual.pk not in recoverable_manual_reply_ids(NOW)
+    assert reconcile_manual_reply(manual.pk, provider=provider) == OutboundMessage.State.SEND_FAILED
+    provider.find_by_message_id.assert_not_called()
     assert not FakeGmailMessage.objects.filter(
         direction=FakeGmailMessage.Direction.OUTBOUND,
         rfc_message_id=manual.message_id,

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Datos de búsqueda · Contact Outreach{% endblock %}
+{% block breadcrumb %}Integraciones / Datos de búsqueda{% endblock %}
+{% block page_title %}Datos de búsqueda{% endblock %}
+{% block content %}
+<header class="page-header"><div class="page-header__copy"><h1>Datos de búsqueda por provincia</h1><p>Actualizá sólo las provincias que quieras usar. Cada una conserva su propia copia lista y un problema en una provincia no interrumpe las demás.</p></div><div class="page-header__actions"><a class="button button--secondary" href="{% url 'integrations' %}">Volver a Integraciones</a></div></header>
+<div class="alert"><div><strong>La actualización no envía correos</strong><br>Se ejecuta en segundo plano y lee una provincia por vez. La copia anterior sigue disponible hasta que la nueva termina todas las validaciones.</div></div>
+
+<div class="grid">
+    <section class="panel"><div class="panel__header"><div><h2>Actualizar una provincia</h2><p class="muted">Elegí la provincia que necesitás para una campaña.</p></div>{% if release_catalog %}<span class="badge badge--succeeded">Versión disponible</span>{% else %}<span class="badge badge--failed">No disponible</span>{% endif %}</div><div class="panel__body">{% if release_catalog %}<p>Versión oficial: <strong>{{ release_catalog.latest_release }}</strong></p>{% if release_error %}<p class="error-text" role="alert">{{ release_error }}</p>{% endif %}<form method="post" action="{% url 'overture-sync' %}" class="section-stack">{% csrf_token %}<input type="hidden" name="release_id" value="{{ release_catalog.latest_release }}"><div class="field"><label class="field__label" for="province-code">Provincia</label><select id="province-code" name="province_code" required><option value="">Elegí una provincia</option>{% for province in provinces %}<option value="{{ province.official_code }}">{{ province.name }}</option>{% endfor %}</select><p class="field__help">La actualización incluye todos sus distritos y puede demorar.</p></div><button class="button" type="submit">Actualizar provincia</button></form>{% else %}<p class="error-text" role="alert">{{ release_error }}</p>{% endif %}</div></section>
+
+    <section class="panel"><div class="panel__header"><div><h2>Copia local activa</h2><p class="muted">Fuente de datos para campañas nuevas.</p></div>{% if active_snapshot %}<span class="badge badge--succeeded">{{ active_snapshot.get_status_display }}</span>{% else %}<span class="badge badge--pending">Pendiente</span>{% endif %}</div><div class="panel__body">{% if active_snapshot %}<p class="metric__value metric__value--text">{{ active_snapshot.release_id }}</p><p>{{ active_snapshot.place_count }} lugares · {{ active_snapshot.zone_count }} zonas · {{ active_snapshot.taxonomy_code_count }} códigos.</p><p class="muted">Activada {{ active_snapshot.activated_at|date:"d M Y · H:i"|default:"—" }}<br><span class="help-term" data-tooltip="Versión de la estructura que define qué campos contiene cada registro.">Estructura</span> <code>{{ active_snapshot.schema_version }}</code> · taxonomía <code>{{ active_snapshot.taxonomy_version }}</code></p>{% else %}<p>No hay una copia local activa. Las campañas Overture no pueden iniciarse hasta completar una sincronización válida.</p>{% endif %}</div></section>
+
+    <section class="panel"><div class="panel__header"><div><h2>Última sincronización</h2><p class="muted">Incluye importaciones fallidas que no sustituyeron a la copia activa.</p></div>{% if latest_snapshot %}<span class="badge badge--{{ latest_snapshot.status|lower }}">{{ latest_snapshot.get_status_display }}</span>{% endif %}</div><div class="panel__body">{% if latest_snapshot %}<p class="metric__value metric__value--text">{{ latest_snapshot.release_id }}</p><p>{{ latest_snapshot.streamed_count }} filas leídas · {{ latest_snapshot.place_count }} lugares guardados.</p><p class="muted">Creada {{ latest_snapshot.created_at|date:"d M Y · H:i" }}</p>{% if latest_snapshot.error %}<p class="error-text" role="alert"><strong>Validación:</strong> {{ latest_snapshot.error }}</p>{% endif %}{% else %}<p>Todavía no se inició ninguna sincronización.</p>{% endif %}</div></section>
+</div>
+
+{% if active_snapshot %}
+<section class="panel"><div class="panel__header"><div><h2>Integridad y procedencia</h2><p class="muted">Valores verificados en una sola operación antes de activar la copia.</p></div></div><div class="panel__body"><dl class="definition-grid"><dt>Origen oficial de lugares</dt><dd><code>{{ active_snapshot.source_uri }}</code></dd><dt><span class="help-term" data-tooltip="Huella digital de la lista oficial de archivos usados en esta versión.">Huella de la lista de archivos</span></dt><dd><code>{{ active_snapshot.manifest_sha256 }}</code></dd><dt><span class="help-term" data-tooltip="Huella digital del conjunto exacto de límites territoriales incluidos.">Huella de cobertura</span></dt><dd><code>{{ active_snapshot.boundary_manifest_sha256 }}</code></dd><dt>Versiones</dt><dd>importador <code>{{ active_snapshot.importer_version }}</code> · reglas <code>{{ active_snapshot.mapping_version }}</code> · límites <code>{{ active_snapshot.boundary_version }}</code></dd><dt>Atribución</dt><dd>{{ active_snapshot.attribution|default:"—" }}</dd></dl>{% if active_snapshot.validation_results %}<p class="flush-top"><strong>Validación:</strong> <code>{{ active_snapshot.validation_results }}</code></p>{% endif %}{% if active_snapshot.source_counts %}<p><strong>Conteos por fuente:</strong> <code>{{ active_snapshot.source_counts }}</code></p>{% endif %}{% if active_snapshot.notices %}<h3>Avisos</h3><ul>{% for notice in active_snapshot.notices %}<li>{{ notice }}</li>{% endfor %}</ul>{% endif %}</div></section>
+
+<section class="panel"><div class="panel__header"><div><h2>Cobertura territorial</h2><p class="muted">Cada huella debe coincidir exactamente con el límite fijado por la campaña.</p></div></div>{% if coverage_zones %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Zona</th><th><span class="help-term" data-tooltip="Huella digital que identifica la geometría exacta del límite territorial.">Huella del límite</span></th><th>Fuente y revisión</th></tr></thead><tbody>{% for zone in coverage_zones %}<tr><td><span class="table-primary">{{ zone.name }}</span></td><td><code>{{ zone.boundary_hash }}</code></td><td>{{ zone.source }} · {{ zone.source_version }}{% if zone.attribution %}<span class="table-meta">{{ zone.attribution }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><p>No se importaron zonas de cobertura.</p></div>{% endif %}</section>
+
+<div class="grid"><section class="panel"><div class="panel__header"><h2>Fuentes territoriales</h2></div><div class="panel__body">{% if zone_source_counts %}<ul>{% for source in zone_source_counts %}<li>{{ source.source }} · {{ source.source_version }}: {{ source.zone_count }} zonas</li>{% endfor %}</ul>{% else %}<p class="muted">No hay fuentes territoriales registradas.</p>{% endif %}</div></section><section class="panel"><div class="panel__header"><h2>Licencias de Places</h2></div><div class="panel__body">{% if license_counts %}<ul>{% for item in license_counts %}<li>{{ item.license }}: {{ item.place_count }} lugares</li>{% endfor %}</ul>{% else %}<p class="muted">No se declararon licencias adicionales.</p>{% endif %}</div></section></div>
+{% endif %}
+
+<section class="panel">
+    <div class="panel__header">
+        <div>
+            <h2>Provincias disponibles</h2>
+            <p class="muted">“Lista” significa que ya puede usarse en una campaña.</p>
+        </div>
+    </div>
+    {% if partitions %}
+    <div class="table-scroll table-scroll--flush">
+        <table>
+            <thead><tr><th>Provincia</th><th>Estado</th><th>Versión</th><th>Lugares</th><th>Actualizada</th></tr></thead>
+            <tbody>
+            {% for partition in partitions %}
+                <tr>
+                    <td><span class="table-primary">{{ partition.province_name }}</span></td>
+                    <td><span class="badge badge--{{ partition.status|lower }}">{{ partition.get_status_display }}</span>{% if partition.is_active %}<span class="table-meta">Disponible para campañas</span>{% endif %}</td>
+                    <td>{{ partition.release.release_id }}</td>
+                    <td>{{ partition.place_count }}</td>
+                    <td>{{ partition.activated_at|date:"d M Y · H:i"|default:"Todavía no terminó" }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>Todavía no hay provincias listas. Elegí una arriba para actualizarla.</p></div>
+    {% endif %}
+</section>
+
+<section class="panel"><div class="panel__header"><div><h2>Atribución y avisos</h2><p class="muted">La lista efectiva depende de la copia importada.</p></div></div><div class="panel__body"><p>Datos de lugares: <strong>© Overture Maps Foundation y sus colaboradores</strong>. Los límites territoriales conservan su fuente y revisión en la cobertura.</p><p class="flush">Consultá los <a href="https://docs.overturemaps.org/attribution/" rel="noreferrer">requisitos oficiales de atribución de Overture</a> antes de redistribuir datos.</p></div></section>
+
+<section class="panel"><div class="panel__header"><div><h2>Historial de copias locales</h2><p class="muted">La activa, la anterior y las fijadas por campañas quedan protegidas.</p></div></div>{% if snapshots %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Versión</th><th>Estado</th><th>Activa</th><th>Conteos</th><th>Validación</th><th>Creada</th></tr></thead><tbody>{% for snapshot in snapshots %}<tr><td><code>{{ snapshot.release_id }}</code></td><td><span class="badge badge--{{ snapshot.status|lower }}">{{ snapshot.get_status_display }}</span></td><td>{% if snapshot.is_active %}<span class="badge badge--succeeded">Sí</span>{% else %}No{% endif %}</td><td>{{ snapshot.place_count }} lugares<span class="table-meta">{{ snapshot.zone_count }} zonas · {{ snapshot.taxonomy_code_count }} códigos</span></td><td>{% if snapshot.error %}<span class="error-text">{{ snapshot.error }}</span>{% else %}Sin errores{% endif %}</td><td>{{ snapshot.created_at|date:"d M Y · H:i" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><p>No hay copias locales registradas.</p></div>{% endif %}</section>
+{% endblock %}

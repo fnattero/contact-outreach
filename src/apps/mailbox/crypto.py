@@ -18,7 +18,7 @@ def _fernet() -> Fernet:
 
 def encrypt_token(token: str) -> str:
     if not token:
-        raise ValidationError("Google no devolvió un refresh token.")
+        raise ValidationError("Google no devolvió la credencial necesaria para renovar el acceso.")
     return _fernet().encrypt(token.encode("utf-8")).decode("ascii")
 
 
@@ -26,4 +26,4 @@ def decrypt_token(ciphertext: str) -> str:
     try:
         return _fernet().decrypt(ciphertext.encode("ascii")).decode("utf-8")
     except (InvalidToken, UnicodeError, ValueError) as exc:
-        raise ValidationError("No se pudo descifrar el token Gmail.") from exc
+        raise ValidationError("No se pudo descifrar la credencial de Gmail.") from exc

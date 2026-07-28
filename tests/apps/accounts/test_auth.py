@@ -27,9 +27,13 @@ def test_owner_can_login_view_dashboard_and_logout(client: Client) -> None:
 
     dashboard = client.get(reverse("dashboard"))
     assert dashboard.status_code == 200
-    assert b"Dashboard" in dashboard.content
-    assert b"dry-run" in dashboard.content
-    assert dashboard.content.count(b"fake") == 4
+    content = dashboard.content.decode()
+    assert "Panel operativo" in content
+    assert "SIMULACIÓN" in content
+    assert content.count("Simulado (sin red)") == 4
+    assert "Preferencias de IA" in content
+    assert "Tareas" in content
+    assert "data-tooltip=" in content
 
     assert client.get(reverse("logout")).status_code == 405
     assert client.post(reverse("logout")).status_code == 302

@@ -81,6 +81,8 @@ class ValidatedEmail:
     provider_order: int
     provider_primary: bool
     mx_status: MXStatus
+    source_url: str = ""
+    source_content_hash: str = ""
 
 
 class TransientMXError(RuntimeError):
@@ -108,6 +110,8 @@ def _normalize(candidate: ExtractedEmail) -> ValidatedEmail | None:
         provider_order=candidate.order,
         provider_primary=candidate.is_primary,
         mx_status=MXStatus.VALID,
+        source_url=candidate.source_url,
+        source_content_hash=candidate.source_content_hash,
     )
 
 
@@ -137,7 +141,18 @@ def validate_and_select_email(
     if not validated:
         if saw_transient:
             raise TransientMXError("La validación MX falló temporalmente.")
-        raise ValidationError("El negocio no tiene un email sintáctica y operativamente válido.")
+        raise ValidationError("El negocio no tiene un correo sintáctica y operativamente válido.")
+
+    return select_validated_email(tuple(validated), business_domain=business_domain), tuple(
+        validated
+    )
+
+
+def select_validated_email(
+    validated: tuple[ValidatedEmail, ...], *, business_domain: str
+) -> ValidatedEmail:
+    if not validated:
+        raise ValidationError("No hay correos validados para seleccionar.")
 
     def priority(email: ValidatedEmail) -> tuple[int, int, int, int]:
         role = email.local_part.casefold()
@@ -152,5 +167,4 @@ def validate_and_select_email(
             email.provider_order,
         )
 
-    selected = min(validated, key=priority)
-    return selected, tuple(validated)
+    return min(validated, key=priority)

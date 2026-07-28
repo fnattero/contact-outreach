@@ -10,24 +10,28 @@ import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Protocol
-from urllib.parse import SplitResult, urljoin, urlsplit, urlunsplit
+from urllib.parse import SplitResult, unquote, urljoin, urlsplit, urlunsplit
 
 import dns.exception
 import dns.resolver
-import tldextract
 
 from apps.integrations.contracts import (
+    WebsiteEmailCandidate,
     WebsiteErrorKind,
     WebsitePage,
     WebsiteRequest,
     WebsiteResult,
 )
+from apps.integrations.domains import registrable_domain_from_hostname
 
 MAX_PAGES = 4
 MAX_REDIRECTS = 3
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 MAX_PAGE_TEXT = 20_000
 MAX_TOTAL_TEXT = 50_000
+MAX_EMAIL_CANDIDATE_LENGTH = 320
+MAX_EMAIL_CANDIDATES_PER_PAGE = 20
+MAX_EMAIL_CANDIDATES_TOTAL = 40
 ALLOWED_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml", "text/plain"})
 BLOCKED_HOSTS = frozenset(
     {
@@ -51,11 +55,12 @@ RELEVANT_TERMS = (
     "mantenimiento",
     "contacto",
 )
-PUBLIC_SUFFIX_EXTRACTOR = tldextract.TLDExtract(
-    suffix_list_urls=(),
-    fallback_to_snapshot=True,
-    include_psl_private_domains=True,
-    cache_dir=None,
+VISIBLE_EMAIL_RE = re.compile(
+    r"(?<![\w@])"
+    r"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+"
+    r"@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?"
+    r"(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+",
+    flags=re.IGNORECASE,
 )
 
 
@@ -242,26 +247,37 @@ class _UsefulHTMLParser(HTMLParser):
     _ignored_tags = frozenset(
         {"script", "style", "nav", "header", "footer", "form", "svg", "iframe", "noscript"}
     )
+    _contact_ignored_tags = frozenset({"script", "style", "svg", "iframe", "noscript"})
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._ignored_depth = 0
+        self._contact_ignored_depth = 0
         self._anchor_href: str | None = None
         self._anchor_text: list[str] = []
         self.text_parts: list[str] = []
+        self.contact_text_parts: list[str] = []
         self.links: list[tuple[str, str]] = []
+        self.mailto_values: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         normalized = tag.casefold()
+        href = dict(attrs).get("href") if normalized == "a" else None
+        if not self._contact_ignored_depth and href and href.casefold().startswith("mailto:"):
+            self.mailto_values.extend(_mailto_values(href))
+        if normalized in self._contact_ignored_tags:
+            self._contact_ignored_depth += 1
         if normalized in self._ignored_tags:
             self._ignored_depth += 1
             return
         if self._ignored_depth == 0 and normalized == "a":
-            self._anchor_href = dict(attrs).get("href")
+            self._anchor_href = href
             self._anchor_text = []
 
     def handle_endtag(self, tag: str) -> None:
         normalized = tag.casefold()
+        if normalized in self._contact_ignored_tags and self._contact_ignored_depth:
+            self._contact_ignored_depth -= 1
         if normalized in self._ignored_tags and self._ignored_depth:
             self._ignored_depth -= 1
             return
@@ -271,9 +287,11 @@ class _UsefulHTMLParser(HTMLParser):
             self._anchor_text = []
 
     def handle_data(self, data: str) -> None:
+        cleaned = re.sub(r"\s+", " ", data).strip()
+        if cleaned and not self._contact_ignored_depth:
+            self.contact_text_parts.append(cleaned)
         if self._ignored_depth:
             return
-        cleaned = re.sub(r"\s+", " ", data).strip()
         if cleaned:
             self.text_parts.append(cleaned)
             if self._anchor_href:
@@ -290,8 +308,69 @@ def _decode_body(body: bytes, content_type: str) -> str:
 
 
 def _registrable_domain(hostname: str) -> str:
-    extracted = PUBLIC_SUFFIX_EXTRACTOR(hostname.rstrip("."))
-    return extracted.top_domain_under_public_suffix or hostname.rstrip(".")
+    return registrable_domain_from_hostname(hostname)
+
+
+def _bounded_email_value(value: str) -> str | None:
+    candidate = value.strip().strip("<>()[]{}.,;:\"'")
+    if (
+        not candidate
+        or len(candidate) > MAX_EMAIL_CANDIDATE_LENGTH
+        or "@" not in candidate
+        or any(character.isspace() or ord(character) < 32 for character in candidate)
+    ):
+        return None
+    return candidate
+
+
+def _mailto_values(href: str) -> tuple[str, ...]:
+    try:
+        path = unquote(urlsplit(href).path)
+    except ValueError:
+        return ()
+    values: list[str] = []
+    for raw_value in re.split(r"[,;]", path):
+        candidate = _bounded_email_value(raw_value)
+        if candidate is not None:
+            values.append(candidate)
+        if len(values) >= MAX_EMAIL_CANDIDATES_PER_PAGE:
+            break
+    return tuple(values)
+
+
+def _email_candidates(
+    *,
+    text: str,
+    mailto_values: list[str],
+    page_url: str,
+    page_content_hash: str,
+) -> tuple[WebsiteEmailCandidate, ...]:
+    candidates: list[WebsiteEmailCandidate] = []
+    seen: set[str] = set()
+
+    def add(value: str, source: str) -> None:
+        candidate = _bounded_email_value(value)
+        if candidate is None:
+            return
+        key = candidate.casefold()
+        if key in seen or len(candidates) >= MAX_EMAIL_CANDIDATES_PER_PAGE:
+            return
+        seen.add(key)
+        candidates.append(
+            WebsiteEmailCandidate(
+                value=candidate,
+                source=source,
+                page_url=page_url,
+                page_content_hash=page_content_hash,
+                order=len(candidates),
+            )
+        )
+
+    for value in mailto_values:
+        add(value, "mailto")
+    for match in VISIBLE_EMAIL_RE.finditer(text):
+        add(match.group(0), "visible_text")
+    return tuple(candidates)
 
 
 class HttpWebsiteFetcher:
@@ -350,22 +429,33 @@ class HttpWebsiteFetcher:
                 raise WebsiteFetchError("El tipo de contenido no es HTML ni texto.")
             decoded = _decode_body(response.body, response.headers.get("content-type", ""))
             links: list[tuple[str, str]] = []
+            mailto_values: list[str] = []
             if media_type == "text/plain":
                 text = re.sub(r"\s+", " ", decoded).strip()
+                contact_text = text
             else:
                 parser = _UsefulHTMLParser()
                 parser.feed(decoded)
                 text = " ".join(parser.text_parts)
+                contact_text = " ".join(parser.contact_text_parts)
                 links = parser.links
+                mailto_values = parser.mailto_values
             text = re.sub(r"\s+", " ", text).strip()[:MAX_PAGE_TEXT]
+            content_hash = hashlib.sha256(response.body).hexdigest()
             page = WebsitePage(
                 requested_url=requested_url,
                 final_url=validated.url,
                 status_code=response.status_code,
                 text=text,
                 content_type=media_type,
-                content_hash=hashlib.sha256(response.body).hexdigest(),
+                content_hash=content_hash,
                 byte_count=len(response.body),
+                email_candidates=_email_candidates(
+                    text=contact_text,
+                    mailto_values=mailto_values,
+                    page_url=validated.url,
+                    page_content_hash=content_hash,
+                ),
             )
             return page, links
         raise WebsiteFetchError("No se pudo resolver la cadena de redirecciones.")
@@ -427,10 +517,13 @@ class HttpWebsiteFetcher:
                 continue
             pages.append(page)
         remaining = MAX_TOTAL_TEXT
+        remaining_email_candidates = MAX_EMAIL_CANDIDATES_TOTAL
         bounded_pages: list[WebsitePage] = []
         for page in pages:
             bounded_text = page.text[:remaining]
             remaining -= len(bounded_text)
+            bounded_candidates = page.email_candidates[:remaining_email_candidates]
+            remaining_email_candidates -= len(bounded_candidates)
             bounded_pages.append(
                 WebsitePage(
                     requested_url=page.requested_url,
@@ -440,6 +533,7 @@ class HttpWebsiteFetcher:
                     content_type=page.content_type,
                     content_hash=page.content_hash,
                     byte_count=page.byte_count,
+                    email_candidates=bounded_candidates,
                 )
             )
             if remaining <= 0:

@@ -107,6 +107,34 @@ def test_gmail_api_oauth_refresh_profile_send_reply_reconcile_and_revoke() -> No
         "grant_type": "authorization_code",
         "code_verifier": "verifier",
     }
+    assert "q=in%3Asent%20rfc822msgid%3A%3Cmissing%40example.com%3E" in str(
+        transport.calls[4]["url"]
+    )
+
+
+def test_gmail_reconciliation_rejects_duplicate_sent_message_ids() -> None:
+    transport = StubTransport(
+        [
+            HTTPResponse(200, {"access_token": "fresh"}),
+            HTTPResponse(
+                200,
+                {
+                    "messages": [
+                        {"id": "gmail-1", "threadId": "thread-1"},
+                        {"id": "gmail-2", "threadId": "thread-2"},
+                    ]
+                },
+            ),
+        ]
+    )
+    provider = _provider(transport, refresh_token="refresh")
+
+    with pytest.raises(ValidationProviderError, match="más de un mensaje enviado"):
+        provider.find_by_message_id("<stable@example.com>")
+
+    assert "q=in%3Asent%20rfc822msgid%3A%3Cstable%40example.com%3E" in str(
+        transport.calls[1]["url"]
+    )
 
 
 def test_gmail_api_refreshes_access_token_and_validates_responses() -> None:

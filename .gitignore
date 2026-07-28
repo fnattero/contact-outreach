@@ -12,6 +12,7 @@ build/
 .ruff_cache/
 *.sqlite3
 private/
+staticfiles/
 backups/
 postgres_data/
 redis_data/

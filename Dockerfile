@@ -15,7 +15,8 @@ RUN mkdir -p src \
     && rm -rf /app/build /app/src
 
 COPY --chown=app:app . .
-RUN mkdir -p /app/private \
+RUN python src/manage.py collectstatic --noinput \
+    && mkdir -p /app/private \
     && chown -R app:app /app \
     && chmod +x /app/scripts/entrypoint.sh
 

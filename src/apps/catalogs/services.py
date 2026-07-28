@@ -15,6 +15,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils.text import get_valid_filename
 
+from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.catalogs.models import Catalog
 from apps.catalogs.storage import private_catalog_storage
@@ -68,7 +69,7 @@ def _read_upload(upload: UploadedFile) -> tuple[str, int, str]:
         raise ValidationError("No se pudo leer el PDF completo.")
     detected_mime = _detect_mime(content)
     if detected_mime != PDF_MIME:
-        raise ValidationError("El tipo MIME detectado del archivo no es PDF.")
+        raise ValidationError("El tipo de archivo detectado no corresponde a un PDF.")
     if not content.startswith(b"%PDF-"):
         raise ValidationError("El archivo no tiene un encabezado PDF válido.")
     if b"%%EOF" not in content[-2048:]:
@@ -78,6 +79,7 @@ def _read_upload(upload: UploadedFile) -> tuple[str, int, str]:
 
 @transaction.atomic
 def create_catalog(*, name: str, upload: UploadedFile, actor: User) -> Catalog:
+    membership = require_user_capability(actor, Capability.MANAGE_CONFIGURATION)
     clean_name = re.sub(r"\s+", " ", name.strip())
     if not clean_name:
         raise ValidationError("Ingresá un nombre para el catálogo.")
@@ -92,12 +94,16 @@ def create_catalog(*, name: str, upload: UploadedFile, actor: User) -> Catalog:
         raise ValidationError(
             "No hay espacio seguro para guardar el catálogo. Liberá disco y volvé a intentar."
         )
-    if Catalog.objects.filter(sha256=digest).exists():
+    if Catalog.objects.filter(workspace=membership.workspace, sha256=digest).exists():
         raise ValidationError("Este mismo PDF ya fue cargado.")
-    existing = Catalog.objects.select_for_update().filter(name=clean_name)
+    existing = Catalog.objects.select_for_update().filter(
+        workspace=membership.workspace,
+        name=clean_name,
+    )
     last_version = existing.order_by("-version").values_list("version", flat=True).first()
     original_filename = get_valid_filename(Path(upload.name or "catalog.pdf").name)[:255]
     catalog = Catalog(
+        workspace=membership.workspace,
         name=clean_name,
         version=(last_version or 0) + 1,
         original_filename=original_filename,

@@ -10,13 +10,28 @@ ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
 # regardless of the environment that invoked pytest.
 SEND_MODE = "dry-run"
 SEND_KILL_SWITCH = True
-EXTRACTOR_PROVIDER = "fake"
-OUTSCRAPER_API_KEY = ""
+AUTO_REPLY_KILL_SWITCH = True
+RELATIONSHIP_KILL_SWITCH = True
 WEBSITE_FETCHER = "fake"
+CONTACT_EMAIL_MX_RESOLVER = "mock"
 LLM_PROVIDER = "fake"
 GMAIL_PROVIDER = "fake"
 GMAIL_FAKE_ACCOUNT_EMAIL = "owner@example.invalid"
 FIELD_ENCRYPTION_KEY = "test-only-field-encryption-key"
+MFA_ENFORCEMENT_ENABLED = False
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
+STORAGES = {
+    **STORAGES,
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+MIDDLEWARE = [
+    middleware
+    for middleware in MIDDLEWARE
+    if middleware != "whitenoise.middleware.WhiteNoiseMiddleware"
+]
 
 DATABASES = {
     "default": {

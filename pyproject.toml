@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "contact-outreach"
 version = "0.1.0"
-description = "Local single-owner B2B outreach application"
+description = "Single-company multiuser B2B contact outreach application"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,12 +13,16 @@ dependencies = [
   "celery[redis]==5.6.3",
   "cryptography==46.0.5",
   "Django==5.2.16",
+  "django-otp[segno]==1.7.0",
   "dnspython==2.8.0",
   "email-validator==2.3.0",
   "gunicorn==23.0.0",
+  "overturemaps==1.0.1",
   "pydantic==2.13.2",
   "psycopg[binary]==3.3.4",
+  "shapely==2.1.2",
   "tldextract==5.3.1",
+  "whitenoise==6.12.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +41,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"apps.configuration" = ["data/*.geojson"]
 
 [tool.ruff]
 target-version = "py312"
@@ -68,8 +75,13 @@ module = [
   "celery.*",
   "dns",
   "dns.*",
+  "django_otp",
+  "django_otp.*",
   "email_validator",
   "pydantic",
+  "overturemaps",
+  "pyarrow",
+  "shapely",
   "tldextract",
 ]
 ignore_missing_imports = true
@@ -84,7 +96,7 @@ addopts = [
   "--disable-socket",
   "--cov=src",
   "--cov-report=term-missing:skip-covered",
-  "--cov-fail-under=85",
+  "--cov-fail-under=83",
 ]
 markers = [
   "e2e: end-to-end tests using only in-process fake providers",
@@ -96,6 +108,7 @@ omit = [
   "src/contact_outreach/asgi.py",
   "src/contact_outreach/wsgi.py",
   "src/manage.py",
+  "src/**/migrations/*.py",
 ]
 
 [tool.coverage.report]

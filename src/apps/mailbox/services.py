@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.integrations.contracts import GmailProvider, GmailSendRequest, ProviderError
@@ -38,6 +39,7 @@ def oauth_redirect_uri(request_uri: str) -> str:
 def authorization_url(
     *, owner: User, state: str, verifier: str, challenge: str, redirect_uri: str
 ) -> str:
+    require_user_capability(owner, Capability.MANAGE_INTEGRATIONS)
     del verifier
     provider = get_gmail_provider(code_challenge=challenge, owner_id=owner.pk)
     return provider.authorization_url(state, redirect_uri)
@@ -51,6 +53,7 @@ def connect_gmail(
     verifier: str,
     redirect_uri: str,
 ) -> GmailConnection:
+    membership = require_user_capability(owner, Capability.MANAGE_INTEGRATIONS)
     provider = get_gmail_provider(code_verifier=verifier, owner_id=owner.pk)
     data = provider.exchange_code(code, redirect_uri)
     domain = data.email.rsplit("@", 1)[-1].casefold()
@@ -66,16 +69,19 @@ def connect_gmail(
         try:
             provider.revoke()
         finally:
-            raise ValidationError("Google no concedió exactamente los scopes Gmail requeridos.")
+            raise ValidationError(
+                "Google no concedió exactamente los permisos de Gmail requeridos."
+            )
     if not data.history_id:
         try:
             provider.revoke()
         finally:
-            raise ValidationError("Gmail no devolvió el historyId inicial requerido.")
+            raise ValidationError("Gmail no devolvió el identificador inicial del historial.")
     encrypted = encrypt_token(data.refresh_token)
     connection, _ = GmailConnection.objects.select_for_update().update_or_create(
-        owner=owner,
+        workspace=membership.workspace,
         defaults={
+            "owner": owner,
             "email": data.email,
             "scopes": sorted(granted),
             "refresh_token_encrypted": encrypted,
@@ -107,9 +113,12 @@ def provider_for_connection(
 
 @transaction.atomic
 def test_gmail_connection(*, owner: User) -> GmailConnection:
+    membership = require_user_capability(owner, Capability.MANAGE_INTEGRATIONS)
     if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
-        raise ValidationError("La prueba Gmail está bloqueada por SEND_MODE o el kill switch.")
-    connection = GmailConnection.objects.select_for_update().get(owner=owner)
+        raise ValidationError(
+            "La configuración global de envío o el bloqueo general impiden la prueba de Gmail."
+        )
+    connection = GmailConnection.objects.select_for_update().get(workspace=membership.workspace)
     if connection.status != GmailConnection.Status.CONNECTED:
         raise ValidationError("Conectá Gmail antes de enviar la prueba.")
     provider = provider_for_connection(connection, persist_fake=True)
@@ -151,7 +160,8 @@ def test_gmail_connection(*, owner: User) -> GmailConnection:
 
 @transaction.atomic
 def disconnect_gmail(*, owner: User) -> GmailConnection:
-    connection = GmailConnection.objects.select_for_update().get(owner=owner)
+    membership = require_user_capability(owner, Capability.MANAGE_INTEGRATIONS)
+    connection = GmailConnection.objects.select_for_update().get(workspace=membership.workspace)
     if connection.refresh_token_encrypted:
         try:
             provider_for_connection(connection).revoke()

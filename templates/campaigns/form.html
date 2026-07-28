@@ -1,14 +1,171 @@
 {% extends "base.html" %}
-
 {% block title %}Nueva campaña · Contact Outreach{% endblock %}
-
+{% block breadcrumb %}Campañas / Nueva{% endblock %}
+{% block page_title %}Crear campaña{% endblock %}
 {% block content %}
-<h1>Nueva campaña</h1>
-<p class="muted">El objetivo inicial es 300. Podés ajustar todos los límites antes de crear el borrador.</p>
-<p class="muted">Extractor, proveedor IA, URL y modelo se administran con reingreso de contraseña en <a href="{% url 'integrations' %}">Integraciones</a>; acá se guardan como snapshot de sólo lectura.</p>
-<form method="post" class="card form-card checkbox-list">
-    {% csrf_token %}{{ form.as_p }}
-    <p class="muted">SEND_MODE y kill switch son controles de despliegue de sólo lectura: {{ runtime_send_mode }} / {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}.</p>
-    <button type="submit">Crear borrador</button>
+<header class="page-header">
+    <div class="page-header__copy">
+        <h1>Nueva campaña</h1>
+        <p>Definí la audiencia y los límites del proceso. Se crea como borrador y no ejecuta trabajo hasta que la inicies.</p>
+    </div>
+    <div class="page-header__actions"><a class="button button--secondary" href="{% url 'campaigns' %}">Cancelar</a></div>
+</header>
+
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert"><div><strong>No pudimos crear la campaña.</strong>{{ form.non_field_errors }}</div></div>{% endif %}
+
+<form method="post" class="campaign-form" novalidate>
+    {% csrf_token %}
+    {{ form.relevance_threshold }}{{ form.catalog }}
+    <div class="section-stack">
+        <section class="panel form-section" id="basic">
+            <div class="panel__header"><div><h2><span class="form-section__number">1</span>Información básica</h2><p class="muted">Un nombre reconocible y la ubicación general del descubrimiento.</p></div></div>
+            <div class="panel__body form-grid">{% include "includes/field.html" with field=form.name %}{% include "includes/field.html" with field=form.location_text %}</div>
+        </section>
+
+        <section class="panel form-section" id="audience">
+            <div class="panel__header"><div><h2><span class="form-section__number">2</span>Audiencia</h2><p class="muted">Cada combinación de rubro y distrito genera una búsqueda en la copia local de datos.</p></div></div>
+            <div class="panel__body">
+                <fieldset class="field{% if form.categories.errors %} field--error{% endif %}">
+                    <legend class="field__label">Rubros <span class="required-mark" aria-hidden="true">*</span></legend>
+                    <div class="selection-toolbar">
+                        <input type="search" placeholder="Filtrar rubros…" aria-label="Filtrar rubros" data-choice-filter="category-choices">
+                        <div class="selection-toolbar__actions">
+                            <button class="button button--quiet button--small" type="button" data-choice-select-all="category-choices">Seleccionar todos</button>
+                            <button class="button button--quiet button--small" type="button" data-choice-clear="category-choices">Limpiar</button>
+                            <span class="badge"><span data-category-count>{{ selected_category_count }}</span> seleccionados</span>
+                        </div>
+                    </div>
+                    <div class="choice-grid" id="category-choices">{% for checkbox in form.categories %}<div class="choice-item" data-choice-item><label for="{{ checkbox.id_for_label }}">{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label></div>{% endfor %}</div>
+                    {% if form.categories.errors %}<div class="field__error" role="alert">{{ form.categories.errors }}</div>{% endif %}
+                    <p class="field__help">{{ form.categories.help_text }}</p>
+                </fieldset>
+                <fieldset class="field{% if form.zones.errors %} field--error{% endif %}" data-geography-selector>
+                    <legend class="field__label">Provincias y distritos <span class="required-mark" aria-hidden="true">*</span></legend>
+                    <p class="field__help">Primero elegí una o más provincias. Después marcá los partidos, departamentos o barrios que querés recorrer.</p>
+                    <div class="choice-grid" aria-label="Provincias disponibles">
+                        {% for group in province_groups %}
+                        <div class="choice-item">
+                            <label for="province-{{ group.province.pk }}">
+                                <input id="province-{{ group.province.pk }}" type="checkbox" name="provinces" value="{{ group.province.pk }}" data-province-toggle="{{ group.province.pk }}"{% if group.selected %} checked{% endif %}>
+                                <span>{{ group.province.name }}</span>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="section-stack geography-groups" id="zone-choices">
+                        {% for group in province_groups %}
+                        <fieldset class="province-group" data-province-panel="{{ group.province.pk }}"{% if not group.selected %} hidden{% endif %}>
+                            <legend>{{ group.province.name }} · {{ group.province.label_plural }}</legend>
+                            <div class="selection-toolbar">
+                                <input type="search" placeholder="Buscar en {{ group.province.label_plural|lower }}…" aria-label="Buscar {{ group.province.label_plural|lower }} de {{ group.province.name }}" data-district-filter="province-districts-{{ group.province.pk }}">
+                                <div class="selection-toolbar__actions">
+                                    <button class="button button--quiet button--small" type="button" data-district-select-all="province-districts-{{ group.province.pk }}">Seleccionar todos</button>
+                                    <button class="button button--quiet button--small" type="button" data-district-clear="province-districts-{{ group.province.pk }}">Limpiar</button>
+                                </div>
+                            </div>
+                            <div class="choice-grid" id="province-districts-{{ group.province.pk }}">
+                                {% for item in group.districts %}
+                                <div class="choice-item" data-choice-item>
+                                    <label for="zone-{{ item.zone.pk }}"><input id="zone-{{ item.zone.pk }}" type="checkbox" name="zones" value="{{ item.zone.pk }}"{% if item.selected %} checked{% endif %}><span>{{ item.zone.name }}</span></label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </fieldset>
+                        {% endfor %}
+                        {% if custom_zones %}
+                        <fieldset class="province-group">
+                            <legend>Zonas personalizadas</legend>
+                            <div class="choice-grid">
+                            {% for item in custom_zones %}<div class="choice-item" data-choice-item><label for="zone-{{ item.zone.pk }}"><input id="zone-{{ item.zone.pk }}" type="checkbox" name="zones" value="{{ item.zone.pk }}"{% if item.selected %} checked{% endif %}><span>{{ item.zone.name }}</span></label></div>{% endfor %}
+                            </div>
+                        </fieldset>
+                        {% endif %}
+                    </div>
+                    {% if form.provinces.errors %}<div class="field__error" role="alert">{{ form.provinces.errors }}</div>{% endif %}
+                    {% if form.zones.errors %}<div class="field__error" role="alert">{{ form.zones.errors }}</div>{% endif %}
+                    <p class="field__help" aria-live="polite"><span data-zone-count>{{ selected_zone_count }}</span> distritos seleccionados.</p>
+                </fieldset>
+                <div class="query-calculation" aria-live="polite"><strong><span data-category-count>{{ selected_category_count }}</span> rubros</strong><span aria-hidden="true">×</span><strong><span data-zone-count>{{ selected_zone_count }}</span> distritos</strong><span aria-hidden="true">=</span><strong><span data-query-count>{{ query_count }}</span> consultas</strong></div>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="limits">
+            <div class="panel__header"><div><h2><span class="form-section__number">3</span>Objetivo y límites</h2><p class="muted">El objetivo cuenta empresas únicas, sin contacto previo y con un correo válido.</p></div></div>
+            <div class="panel__body form-grid form-grid--3">{% include "includes/field.html" with field=form.objective %}{% include "includes/field.html" with field=form.max_raw_records %}{% include "includes/field.html" with field=form.overture_min_confidence %}</div>
+        </section>
+
+        <section class="panel form-section" id="extraction">
+            <div class="panel__header">
+                <div><h2><span class="form-section__number">4</span>Extracción Overture</h2><p class="muted">La selección se administra volviendo a confirmar la identidad y queda fija al iniciar.</p></div>
+                <a href="{% url 'overture-datasets' %}">Revisar datos locales</a>
+            </div>
+            <div class="panel__body">
+                <div class="readonly-settings" aria-label="Configuración activa de extracción">
+                    <div class="readonly-setting"><span>Proveedor de extracción</span><strong>{{ form.extractor_provider.value|etiqueta_es }}</strong></div>
+                </div>
+                <p class="field__help">Estos valores se cambian desde <a href="{% url 'integrations' %}">Integraciones</a> y se congelan al crear la campaña.</p>
+                <div class="alert"><div><strong>Sin credenciales para los datos</strong><br>Overture consulta una copia local guardada en la aplicación. La actualización se inicia explícitamente desde Datos de búsqueda.</div></div>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="message">
+            <div class="panel__header">
+                <div><h2><span class="form-section__number">5</span>Mensaje inicial</h2><p class="muted">Todas las empresas reciben el mismo mensaje aprobado. No se usa inteligencia artificial ni se insertan datos del destinatario.</p></div>
+            </div>
+            <div class="panel__body">
+                <div class="readonly-settings" aria-label="Mensaje inicial predeterminado">
+                    <div class="readonly-setting readonly-setting--wide"><span>Asunto</span><strong>Propuesta comercial</strong></div>
+                    <div class="readonly-setting readonly-setting--wide"><span>Contenido</span><span>Presenta la propuesta de carbones para motores, adjunta los catálogos elegidos e invita a responder para ampliar información.</span></div>
+                    <div class="readonly-setting readonly-setting--wide"><span>Firma</span><span>Se agrega la firma aprobada del perfil comercial y queda congelada al iniciar la búsqueda.</span></div>
+                </div>
+                <p class="field__help">Podés revisar el texto exacto, la audiencia final y todos los PDFs antes de aprobar el envío.</p>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="catalog">
+            <div class="panel__header"><div><h2><span class="form-section__number">6</span>Catálogos adjuntos</h2><p class="muted">Elegí todos los PDF que recibirá cada destinatario. Nunca se enviará sólo una parte del conjunto.</p></div><a href="{% url 'catalogs' %}">Administrar catálogos</a></div>
+            <div class="panel__body">
+                <fieldset class="field{% if form.catalogs.errors %} field--error{% endif %}">
+                    <legend class="field__label">PDFs <span class="required-mark" aria-hidden="true">*</span></legend>
+                    <div class="choice-grid" id="catalog-choices">{% for checkbox in form.catalogs %}<div class="choice-item" data-choice-item><label for="{{ checkbox.id_for_label }}">{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label></div>{% empty %}<p>No hay catálogos disponibles. Cargá al menos uno antes de crear una campaña.</p>{% endfor %}</div>
+                    {% if form.catalogs.errors %}<div class="field__error" role="alert">{{ form.catalogs.errors }}</div>{% endif %}
+                    <p class="field__help">{{ form.catalogs.help_text }} Límite: 15 MiB por archivo y 17 MiB combinados.</p>
+                </fieldset>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="schedule">
+            <div class="panel__header"><div><h2><span class="form-section__number">7</span>Calendario, ritmo y recordatorio</h2><p class="muted">Los envíos respetan estos días y horarios. Si otra campaña ya reservó ese correo para el día, se pasa automáticamente al próximo permitido.</p></div></div>
+            <div class="panel__body form-grid form-grid--3">{% include "includes/field.html" with field=form.daily_limit %}{% include "includes/field.html" with field=form.message_interval_minutes %}{% include "includes/field.html" with field=form.timezone_name %}{% include "includes/field.html" with field=form.window_start %}{% include "includes/field.html" with field=form.window_end %}<fieldset class="field field--full{% if form.weekdays.errors %} field--error{% endif %}"><legend class="field__label">Días de envío <span class="required-mark" aria-hidden="true">*</span></legend><div class="choice-grid choice-grid--weekdays">{% for checkbox in form.weekdays %}<div class="choice-item" data-choice-item><label for="{{ checkbox.id_for_label }}">{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label></div>{% endfor %}</div>{% if form.weekdays.errors %}<div class="field__error" role="alert">{{ form.weekdays.errors }}</div>{% endif %}</fieldset><div class="field field--full"><label class="checkbox-line" for="{{ form.reminder_enabled.id_for_label }}">{{ form.reminder_enabled }}<span>{{ form.reminder_enabled.label }}</span></label><p class="field__help">{{ form.reminder_enabled.help_text }}</p></div>{% include "includes/field.html" with field=form.reminder_delay_days %}</div>
+        </section>
+
+        <section class="panel form-section" id="mode">
+            <div class="panel__header"><div><h2><span class="form-section__number">8</span>Modo de campaña</h2><p class="muted">El modo queda inmutable al iniciar y no puede promoverse silenciosamente.</p></div></div>
+            <div class="panel__body">
+                <fieldset class="field{% if form.delivery_mode.errors %} field--error{% endif %}">
+                    <legend class="field__label">Modo de entrega <span class="required-mark" aria-hidden="true">*</span></legend>
+                    <div class="radio-cards">{% for radio in form.delivery_mode %}<label class="radio-card" for="{{ radio.id_for_label }}">{{ radio.tag }}<span class="radio-card__content"><strong>{{ radio.choice_label }}</strong><small>{% if radio.data.value == 'REVIEW_ONLY' %}Deja todos los mensajes disponibles para leer y nunca llama a Gmail.{% elif radio.data.value == 'DRY_RUN' %}Construye y valida localmente el correo completo sin llamar a Gmail.{% else %}Puede enviar correo real sólo si supera la aprobación y todos los controles de seguridad.{% endif %}</small></span></label>{% endfor %}</div>
+                    {% if form.delivery_mode.errors %}<div class="field__error" role="alert">{{ form.delivery_mode.errors }}</div>{% endif %}
+                    <p class="field__help">{{ form.delivery_mode.help_text }}</p>
+                </fieldset>
+                <fieldset class="field{% if form.approval_mode.errors %} field--error{% endif %}">
+                    <legend class="field__label">Aprobación <span class="required-mark" aria-hidden="true">*</span></legend>
+                    <div class="radio-cards">{% for radio in form.approval_mode %}<label class="radio-card" for="{{ radio.id_for_label }}">{{ radio.tag }}<span class="radio-card__content"><strong>{{ radio.choice_label }}</strong><small>{% if radio.data.value == 'CAMPAIGN' %}Recomendado: revisás el resumen final y confirmás todo una sola vez.{% else %}Podés editar y aprobar cada mensaje; los que no apruebes quedarán fuera.{% endif %}</small></span></label>{% endfor %}</div>
+                    {% if form.approval_mode.errors %}<div class="field__error" role="alert">{{ form.approval_mode.errors }}</div>{% endif %}
+                    <p class="field__help">{{ form.approval_mode.help_text }}</p>
+                </fieldset>
+                <div class="alert alert--warning"><div><strong>Controles efectivos del sistema</strong><br><span class="help-term" data-tooltip="Configuración externa que permite simulación o envío real; no se puede modificar desde esta pantalla.">Modo de envío</span>: <strong>{% if runtime_send_mode == 'live' %}en vivo{% else %}simulación{% endif %}</strong> · <span class="help-term" data-tooltip="Bloqueo general externo que tiene prioridad sobre cualquier campaña y puede impedir todos los envíos reales.">bloqueo general</span>: <strong>{% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}</strong>. Estos valores controlan exclusivamente la entrega real por Gmail.</div></div>
+                <div class="field{% if form.confirm_live.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.confirm_live }}<span>{{ form.confirm_live.label }}</span></label>{% if form.confirm_live.help_text %}<p class="field__help">{{ form.confirm_live.help_text }}</p>{% endif %}{% if form.confirm_live.errors %}<div class="field__error" role="alert">{{ form.confirm_live.errors }}</div>{% endif %}</div>
+            </div>
+        </section>
+
+        <section class="panel form-section" id="summary">
+            <div class="panel__header"><div><h2><span class="form-section__number">9</span>Resumen final</h2><p class="muted">Verificá alcance, volumen y entrega antes de crear el borrador.</p></div></div>
+            <div class="panel__body"><div class="form-summary"><div class="summary-item"><span class="summary-item__label">Consultas derivadas</span><span class="summary-item__value"><span data-query-count>{{ query_count }}</span> combinaciones</span></div><div class="summary-item"><span class="summary-item__label">Objetivo</span><span class="summary-item__value">{{ form.objective.value|default:"300" }} destinatarios válidos</span></div><div class="summary-item"><span class="summary-item__label">PDFs</span><span class="summary-item__value">{{ selected_catalog_count }} seleccionados</span></div><div class="summary-item"><span class="summary-item__label">Ritmo</span><span class="summary-item__value">{{ form.daily_limit.value|default:"30" }} por día</span></div><div class="summary-item"><span class="summary-item__label">Mensaje</span><span class="summary-item__value">Texto fijo, sin personalización ni IA</span></div><div class="summary-item"><span class="summary-item__label">Resultado inmediato</span><span class="summary-item__value">Borrador, sin ejecución automática</span></div></div></div>
+            <div class="panel__footer actions"><button class="button" type="submit">Crear borrador</button><a class="button button--secondary" href="{% url 'campaigns' %}">Cancelar</a><span class="muted">Los campos con <span class="required-mark">*</span> son obligatorios.</span></div>
+        </section>
+    </div>
+
+    <aside class="card campaign-form__nav" aria-label="Secciones del formulario"><h2>Configuración</h2><ol class="form-steps"><li><a href="#basic">Información básica</a></li><li><a href="#audience">Audiencia</a></li><li><a href="#limits">Objetivo y límites</a></li><li><a href="#extraction">Extracción</a></li><li><a href="#message">Mensaje inicial</a></li><li><a href="#catalog">Catálogos</a></li><li><a href="#schedule">Calendario y recordatorio</a></li><li><a href="#mode">Modo y aprobación</a></li><li><a href="#summary">Resumen final</a></li></ol></aside>
 </form>
 {% endblock %}

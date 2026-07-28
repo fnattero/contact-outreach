@@ -7,13 +7,15 @@ from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
+from django.db.models import OuterRef, QuerySet, Subquery
 from django.utils import timezone
 
-from apps.audit.services import record_event
-from apps.campaigns.models import Campaign, OutboundMessage, SearchRun
+from apps.accounts.permissions import Capability, require_user_capability
+from apps.campaigns.models import Campaign, SearchRun
+from apps.campaigns.services import PROMPT_VERSION, SCHEMA_VERSION
 from apps.prospects.exceptions import ProspectPipelineInactive, StaleProspectAnalysis
-from apps.prospects.models import Prospect
+from apps.prospects.models import AIAnalysis, Prospect
 
 RESERVATION_TTL = timedelta(minutes=5)
 
@@ -26,22 +28,56 @@ class PipelineReservation:
     regeneration_nonce: str = ""
 
 
-def _campaign_allows_work(campaign_state: str, *, manual: bool) -> bool:
+def _campaign_allows_work(campaign: Campaign, *, manual: bool) -> bool:
     if manual:
-        return campaign_state in {Campaign.State.RUNNING, Campaign.State.PAUSED}
-    return campaign_state == Campaign.State.RUNNING
+        return campaign.state in {Campaign.State.RUNNING, Campaign.State.PAUSED} or (
+            campaign.state == Campaign.State.COMPLETED
+            and campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY
+        )
+    return campaign.state in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}
+
+
+def outdated_analysis_candidates(campaign: Campaign) -> QuerySet[Prospect]:
+    latest = AIAnalysis.objects.filter(prospect=OuterRef("pk")).order_by("-analyzed_at")
+    return (
+        Prospect.objects.filter(
+            campaign=campaign,
+            pipeline_state__in=(
+                Prospect.PipelineState.ERROR,
+                Prospect.PipelineState.SKIPPED_IRRELEVANT,
+            ),
+        )
+        .annotate(
+            latest_analysis_status=Subquery(latest.values("status")[:1]),
+            latest_analysis_score=Subquery(latest.values("relevance_score")[:1]),
+            latest_prompt_version=Subquery(latest.values("prompt_version")[:1]),
+            latest_schema_version=Subquery(latest.values("schema_version")[:1]),
+        )
+        .filter(
+            models.Q(latest_analysis_status=AIAnalysis.Status.ERROR)
+            | models.Q(latest_analysis_score__gt=0, latest_analysis_score__lt=10)
+        )
+        .filter(
+            ~models.Q(latest_prompt_version__startswith=PROMPT_VERSION)
+            | ~models.Q(latest_schema_version=SCHEMA_VERSION)
+        )
+        .order_by("created_at")
+    )
 
 
 @transaction.atomic
 def reserve_prospect_pipeline(
     prospect_id: uuid.UUID | str,
     *,
-    allowed_states: Collection[str] = (Prospect.PipelineState.EMAIL_FOUND,),
+    allowed_states: Collection[str] = (
+        Prospect.PipelineState.DISCOVERED,
+        Prospect.PipelineState.EMAIL_FOUND,
+    ),
     manual: bool = False,
 ) -> PipelineReservation | None:
     prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
     if prospect.pipeline_state not in allowed_states or not _campaign_allows_work(
-        prospect.campaign.state, manual=manual
+        prospect.campaign, manual=manual
     ):
         return None
     stale_before = timezone.now() - RESERVATION_TTL
@@ -70,7 +106,10 @@ def reserve_run_prospects(run: SearchRun) -> tuple[PipelineReservation, ...]:
     reservations: list[PipelineReservation] = []
     prospect_ids = Prospect.objects.filter(
         source_run=run,
-        pipeline_state=Prospect.PipelineState.EMAIL_FOUND,
+        pipeline_state__in=(
+            Prospect.PipelineState.DISCOVERED,
+            Prospect.PipelineState.EMAIL_FOUND,
+        ),
     ).values_list("pk", flat=True)
     for prospect_id in prospect_ids:
         reservation = reserve_prospect_pipeline(prospect_id)
@@ -90,7 +129,7 @@ def claim_prospect_pipeline(
     if (
         prospect.pipeline_reservation_key != token
         or prospect.pipeline_claimed_at is not None
-        or not _campaign_allows_work(prospect.campaign.state, manual=manual)
+        or not _campaign_allows_work(prospect.campaign, manual=manual)
     ):
         return False
     prospect.pipeline_claimed_at = timezone.now()
@@ -124,7 +163,7 @@ def begin_analysis_generation(
     manual: bool,
 ) -> int:
     prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
-    if not _campaign_allows_work(prospect.campaign.state, manual=manual):
+    if not _campaign_allows_work(prospect.campaign, manual=manual):
         raise ProspectPipelineInactive("La campaña ya no admite análisis.")
     if expected_generation is not None:
         if prospect.analysis_generation != expected_generation:
@@ -168,49 +207,35 @@ def request_manual_regeneration(
     prospect_id: uuid.UUID | str,
     actor: User,
 ) -> PipelineReservation:
-    prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
-    if prospect.campaign.created_by_id != actor.pk:
-        raise ValidationError("El prospecto pertenece a otro propietario.")
-    if not _campaign_allows_work(prospect.campaign.state, manual=True):
-        raise ValidationError("La campaña ya está cerrada y no admite regeneraciones.")
-    if not prospect.web_snapshots.exists():
-        raise ValidationError("El prospecto todavía no tiene enriquecimiento auditable.")
-    if prospect.outbound_messages.filter(
-        state__in=(
-            OutboundMessage.State.QUEUED,
-            OutboundMessage.State.SENDING,
-            OutboundMessage.State.RECONCILING,
-            OutboundMessage.State.SENT,
-            OutboundMessage.State.DRY_RUN_COMPLETED,
-        )
-    ).exists():
-        raise ValidationError("No se puede regenerar un mensaje que ya entró en entrega.")
-    before = {"analysis_generation": prospect.analysis_generation}
-    prospect.analysis_generation += 1
-    token = uuid.uuid4().hex
-    nonce = uuid.uuid4().hex
-    prospect.pipeline_reservation_key = token
-    prospect.pipeline_reserved_at = timezone.now()
-    prospect.pipeline_claimed_at = None
-    prospect.save(
-        update_fields=(
-            "analysis_generation",
-            "pipeline_reservation_key",
-            "pipeline_reserved_at",
-            "pipeline_claimed_at",
-            "updated_at",
-        )
+    prospect = (
+        Prospect.objects.select_for_update()
+        .select_related("campaign", "campaign__workspace")
+        .get(pk=prospect_id)
     )
-    record_event(
-        action="prospect.regeneration_requested",
-        entity=prospect,
-        actor=actor,
-        before=before,
-        after={"analysis_generation": prospect.analysis_generation},
+    require_user_capability(
+        actor,
+        Capability.MANAGE_CAMPAIGNS,
+        workspace_id=prospect.campaign.workspace_id,
     )
-    return PipelineReservation(
-        prospect_id=prospect.pk,
-        token=token,
-        generation=prospect.analysis_generation,
-        regeneration_nonce=nonce,
+    raise ValidationError(
+        "Los análisis anteriores se conservan como historial de solo lectura. "
+        "Las campañas nuevas usan el mensaje fijo y no regeneran contenido con IA."
+    )
+
+
+@transaction.atomic
+def request_outdated_analysis_regenerations(
+    *,
+    campaign_id: uuid.UUID | str,
+    actor: User,
+) -> tuple[PipelineReservation, ...]:
+    campaign = Campaign.objects.select_for_update().select_related("workspace").get(pk=campaign_id)
+    require_user_capability(
+        actor,
+        Capability.MANAGE_CAMPAIGNS,
+        workspace_id=campaign.workspace_id,
+    )
+    raise ValidationError(
+        "Los análisis anteriores se conservan como historial de solo lectura. "
+        "No se vuelven a analizar ni a enviar."
     )

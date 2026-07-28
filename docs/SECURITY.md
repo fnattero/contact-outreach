@@ -2,102 +2,178 @@
 
 ## 1. Modelo de amenazas
 
-Activos principales: credenciales OAuth/API, base de prospectos, emails, mensajes, catálogo, perfil comercial y capacidad de enviar desde Gmail. Entradas hostiles: webs de terceros, respuestas email/HTML, JSON de proveedores, output LLM, archivos PDF, parámetros HTTP y CSV exportado.
+Activos: cuentas/sesiones y roles, secretos OAuth/API, capacidad de envío Gmail, contactos y
+conversaciones, PDFs privados, datos Overture, geometrías, conocimiento aprobado y auditoría.
+Entradas hostiles: Internet público, login, proxy headers, sitios/DNS, emails/HTML/headers,
+GeoParquet/GeoJSON, PDFs, outputs LLM, CSV y parámetros HTTP.
 
-Adversarios considerados: sitio que intenta SSRF o prompt injection, archivo malicioso, remitente con HTML/script, acceso local no autorizado, filtración por logs/backups, worker duplicado y abuso accidental de live. La v1 no se declara segura para Internet público sin proxy TLS y hardening adicional.
+Adversarios: credential stuffing y spray de usernames, usuario autenticado fuera de su rol,
+remitente que intenta prompt injection o redirección maliciosa, sitio SSRF, archivo hostil, worker
+duplicado, timeout Gmail ambiguo y habilitación accidental de automatización/live.
 
-## 2. Autenticación y sesión
+La app implementa readiness para Internet, pero el despliegue actual no se declara público hasta
+aprobar proxy inverso, TLS, certificados, monitoreo y runbook de incidente.
 
-- Un único `User` propietario; sin registro, recuperación pública ni usuarios invitados.
-- `OWNER_USERNAME` y `OWNER_PASSWORD` inicializan/rotan mediante comando explícito que no imprime valores. Django guarda únicamente hash Argon2.
-- Login con throttling por IP/sesión, mensajes neutros y regeneración de sesión.
-- CSRF obligatorio en todo POST/HTMX; ninguna acción mutante usa GET.
-- Cookies `HttpOnly`, `SameSite=Lax`; `Secure` es obligatorio al exponer fuera de localhost. Timeout de sesión configurable y logout invalida sesión.
-- El bind por defecto es `127.0.0.1`. Exposición externa exige allowlist de hosts/orígenes, proxy TLS, `SECURE_PROXY_SSL_HEADER`, HSTS y revisión de despliegue.
+## 2. Autenticación, lockout y MFA
 
-**SEGURIDAD:** HTTP local implica que `Secure` no puede activarse; sólo se acepta porque el servicio no sale de loopback. Docker no debe publicar PostgreSQL ni Redis.
+- Sin registro ni recuperación pública. El admin crea usuarios y recibe una sola vez un token
+  aleatorio de activación/reset válido 24 h; DB guarda sólo digest y consumo.
+- Passwords usan Argon2. Login y MFA regeneran sesión; logout la invalida.
+- Attempts 1–4 dan mensaje neutro. El quinto fallo bloquea username normalizado + IP confiable por
+  30 minutos. Veinte fallos agregados por IP en 30 minutos bloquean esa IP.
+- Identificadores se guardan como HMAC con una clave de propósito, nunca username/IP crudos. Las
+  actualizaciones toman locks transaccionales.
+- Durante bloqueo se responde 429 y `Retry-After`; el intento no incrementa ni extiende
+  `locked_until`. Un éxito limpia sólo el par correspondiente. Admin unlock y comando de emergencia
+  auditan sin revelar digest.
+- La IP sólo proviene de `REMOTE_ADDR` o del header del proxy cuando su origen pertenece a una
+  allowlist exacta de proxies. Un cliente directo no puede falsear `X-Forwarded-For`.
+- ADMIN requiere TOTP confirmado con `django-otp`; VENDEDOR puede habilitarlo. Diez recovery codes
+  se muestran una vez y quedan hasheados/consumibles individualmente. Regenerar invalida el set.
+- Cambio de rol, desactivación, reset sensible o pérdida de Membership incrementan una versión de
+  seguridad y eliminan sesiones activas.
+- No se borra un User con historia ni se desactiva/degrada el último admin activo.
 
-## 3. Secretos y OAuth
+## 3. Autorización
 
-- La raíz de confianza (`FIELD_ENCRYPTION_KEY`), secretos Django/DB/Redis, contraseña de bootstrap y
-  barreras live sólo viven en variables/archivos fuera del repositorio; `.env.example` contiene
-  placeholders. Nunca son editables desde el dashboard.
-- API keys LLM/Outscraper y Google OAuth client secret se pueden ingresar desde el dashboard por
-  POST autenticado, CSRF y reingreso de contraseña con throttling por propietario/IP. Se persisten
-  sólo como ciphertext Fernet autenticado; después son write-only y la UI muestra únicamente
-  estado/origen. Los parámetros y variables sensibles se marcan para los reportes de error; además,
-  un fallo inesperado al guardar devuelve un error genérico sin volver a renderizar sus valores.
-- La creación de campañas no acepta overrides de proveedor, endpoint ni modelo enviados por el
-  navegador: esos campos están deshabilitados y el servidor congela los valores reautenticados de
-  Integraciones. Así una sesión autenticada sin la contraseña no puede redirigir una API key.
-- Las subclaves se derivan con HMAC-SHA256 desde `FIELD_ENCRYPTION_KEY` y un propósito versionado
-  distinto para Outscraper, LLM y Google. Intercambiar ciphertext entre campos falla al descifrar.
-- El fallback de entorno es explícito por credencial (`ENVIRONMENT|ENCRYPTED|NONE`); eliminar desde
-  UI fija `NONE` y no reactiva silenciosamente un valor viejo de `.env`.
-- Refresh token Gmail se cifra con la clave externa; access tokens viven en memoria cuando sea
-  posible. Cambiar client ID/secret exige desconectar primero y elimina el token local al revocar.
-- Nunca se loguean tokens, authorization codes, client secrets, API keys ni URLs con credenciales.
-- Desconectar revoca cuando sea posible y elimina ciphertext/cursor local, conservando auditoría sin secreto.
-- Scopes: `gmail.send` y `gmail.readonly`, nunca `mail.google.com`. `gmail.readonly` es restringido y su uso/almacenamiento puede requerir verificación y evaluación de Google: [documentación de scopes](https://developers.google.com/workspace/gmail/api/auth/scopes).
+`created_by == request.user` nunca es una regla de acceso. Middleware resuelve Workspace y
+Membership; servicios centrales verifican capacidades además de decorators/views. Un task sólo
+opera IDs del único Workspace y revalida que la acción durable fue creada por actor autorizado.
 
-## 4. SSRF y fetch web
+VENDEDOR puede hacer GET de Resumen, campañas visibles/list/detail, mensajes `SENT` y
+Contactos/conversaciones. Recibe 403/404 seguro para borradores, audiencia/prospectos, exports,
+descargas PDF, reply, approvals, configuración, integraciones, usuarios, jobs, auditoría y detalles
+técnicos. No puede POST salvo logout. Ocultar navegación no sustituye enforcement.
 
-`WebsiteFetcher` aplica defensa por cada URL inicial y redirección:
+CSRF es obligatorio en mutaciones y HTMX. Acciones críticas (habilitar LIVE IA, cambiar
+credenciales/rol, recovery reset) exigen reautenticación admin. GET nunca muta.
 
-1. Parseo estricto; sólo `http`/`https`, sin userinfo, fragmentos, hostname vacío ni puertos fuera de 80/443.
-2. Canonicalización IDNA y rechazo de `localhost`, sufijos locales, metadata cloud y hostnames/IPs especiales.
-3. Resolución A/AAAA mediante resolver inyectable. Se rechaza si **cualquier** respuesta es loopback, privada, link-local, multicast, reservada, no especificada o CGNAT.
-4. Conexión al IP público validado y fijado para ese hop, preservando Host/SNI; no se permite una segunda resolución implícita. Se revalida cada redirect.
-5. Máximo tres redirects, cuatro páginas, 2 MiB por respuesta, sólo HTML/texto, connect 5 s, read 10 s y presupuesto total 30 s.
+## 4. Sesiones, headers e Internet readiness
 
-No se ejecuta JavaScript, se descargan imágenes ni se aceptan `file:`, `ftp:`, `data:`. La validación de aplicación se complementa con egress restringido del contenedor cuando el entorno lo permita.
+Producción define listas exactas de `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS`; no wildcards. Cookies
+de sesión/CSRF `Secure`, `HttpOnly` cuando aplica y `SameSite=Lax`; SSL redirect; proxy HTTPS
+awareness sólo para proxy confiable. HSTS se escala primero con duración corta y sin
+includeSubDomains/preload hasta verificar despliegue.
 
-## 5. Contenido no confiable e IA
+Headers: CSP restrictiva con scripts/styles propios static y nonce sólo si fuera imprescindible,
+`Referrer-Policy`, `X-Content-Type-Options`, frame-ancestors/DENY, permissions policy y no sniff.
+Inline scripts se retiran. Mensajes, contactos, auth, health detallado y configuraciones sensibles
+usan `Cache-Control: private, no-store`.
 
-- Scripts, estilos, formularios, SVG, iframes y navegación repetida se eliminan; el dashboard prefiere texto.
-- HTML email se sanitiza con allowlist mínima, sin scripts, estilos, eventos, formularios, objetos ni URLs activas peligrosas.
-- El prompt separa instrucciones de hechos y rotula toda web/email como `UNTRUSTED_DATA`; instrucciones encontradas dentro se ignoran.
-- Herramientas y acciones externas no están disponibles para el modelo. Output pasa por Pydantic y validadores de evidencia, longitud y reglas de copy.
-- Instrucciones adicionales del usuario no pueden desactivar supresión, hechos permitidos, CTA, texto plano ni controles de seguridad.
-- CSV antepone `'` a celdas que comienzan con `=`, `+`, `-`, `@`, tab o retorno para evitar formula injection.
+Liveness puede ser público y mínimo. Readiness externo sólo expone disponible/no disponible sin
+topología. Estado detallado de DB/Redis/Gmail/providers/configuración es admin-only. La web sigue
+ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure para “hacerlo andar”.
 
-## 6. Upload y almacenamiento
+## 5. Secretos y OAuth
 
-- Catálogo: nombre sanitizado, extensión `.pdf`, MIME detectado, magic bytes `%PDF-`, parseo estructural básico, máximo 15 MiB y SHA-256.
-- El path lo genera el servidor; nunca usa rutas del cliente. Almacenamiento fuera de static/media público, permisos mínimos y descarga sólo autenticada.
-- La versión es inmutable. Antes de cada envío se recalculan existencia, tamaño y hash.
-- Un PDF válido puede seguir conteniendo contenido activo; nunca se renderiza en el servidor ni se abre automáticamente. Se documenta escaneo antivirus como hardening futuro.
+- `FIELD_ENCRYPTION_KEY`, `DJANGO_SECRET_KEY`, DB/Redis, barreras live, claves HMAC, bootstrap y
+  proxy config viven fuera del repositorio/dashboard.
+- LLM API key, Google client secret y refresh token Gmail se cifran con Fernet autenticado y
+  subclaves separadas por propósito. Son write-only; formularios, errores, audit y logs sólo muestran
+  configured/origin.
+- Rotar client credentials exige desconectar Gmail. OAuth usa state/PKCE, redirect exacto y scopes
+  `gmail.send` + `gmail.readonly`, nunca SMTP password ni `mail.google.com`.
+- No se loguean tokens, codes, secrets, ciphertext, Authorization headers ni URLs con credenciales.
+- `PUBLIC_BASE_URL` se valida como HTTPS público en despliegue público y sólo genera links a rutas
+  internas conocidas; nunca acepta path/body desde el inbound.
+- Overture sólo usa hosts/catálogos oficiales definidos en código; no admite bucket/URL/credencial
+  del dashboard.
 
-## 7. Envío, abuso y cumplimiento
+## 6. Contenido hostil, LLM y prompt injection
 
-- Tres barreras independientes: `SEND_MODE=live`, kill switch desactivado y campaña live.
-- Preflight exige Gmail conectado/probado, perfil con identidad/domicilio, BAJA, catálogo íntegro, supresión limpia, horario y cuotas.
-- Un destinatario; sin CC/BCC, seguimiento, HTML, rotación ni evasión.
-- Pausa automática por rebotes/errores, 403/429 persistentes o autenticación revocada.
-- La lista de supresión se consulta en preparación, enqueue y send; `UNSUBSCRIBE` es irreversible desde UI.
+- HTML web/email se limpia con allowlist; scripts, styles, events, forms, SVG, iframes, objects y
+  URLs activas peligrosas se eliminan. Raw HTML no entra al modelo.
+- Texto de web, email, firmas y citas se rotula como datos no confiables. No puede cambiar sistema,
+  policy ni listas permitidas.
+- El LLM no recibe Gmail, HTTP, calendario, filesystem ni tool calling. Sólo devuelve JSON.
+- El schema enumera en cada request candidate IDs, fact revision IDs, intents y actions exactos.
+  Campos/IDs extra, conflicto, multi-intent o output inválido fallan hacia HumanTask.
+- Los hechos sólo provienen de revisiones aprobadas; no se extraen PDFs ni se inventan claims.
+- Contexto máximo 24.000 caracteres: mandatory completo o HumanTask. Se limita historia y no se
+  persiste prompt gigante/cuerpos duplicados en logs.
+- Emails candidatos se extraen literalmente, máximo diez, con región. No se reconstruyen
+  ofuscaciones. Firma/cita nunca es target automático y múltiples NEW_CONTENT ambiguos exigen
+  persona.
+- Confianza >=0,90 no permite eludir policy. SHADOW jamás produce autorización Gmail.
 
-**LEGAL/ENTREGABILIDAD:** el prefijo `PUBLICIDAD -`, identidad y BAJA implementan controles técnicos, pero no prueban licitud de cada base ni garantizan cumplimiento. La normativa argentina exige identificar publicidad y ofrecer retiro/bloqueo; se requiere revisión legal antes de live: [Disposición 4/2009](https://servicios.infoleg.gob.ar/infolegInternet/anexos/150000-154999/151221/norma.htm).
+## 7. Barreras de automatización y envío
 
-## 8. Logs, auditoría y privacidad
+Envío inicial/live requiere simultáneamente `SEND_MODE=live`, `SEND_KILL_SWITCH=false`, campaign
+mode/approval, Gmail, ventana/cupo, recipient elegible y adjuntos íntegros. Respuesta automática
+además exige `AUTO_REPLY_KILL_SWITCH=false`, mode LIVE calificado, Conversation activa, intent
+allowlisted, contexto/facts válidos y reservas de rate limit. Comunicación programada usa además
+`RELATIONSHIP_KILL_SWITCH=false`.
 
-Logs normales guardan IDs, estados, latencias, contadores y errores redactados. No guardan cuerpos completos, HTML, raw JSON, prompts, recipients ni secretos. Debug explícito tiene duración acotada, redacción y aviso visible; los payloads completos permanecen en almacenamiento de dominio con acceso autenticado.
+Estas barreras se comprueban al preparar/autorizar/encolar y **otra vez inmediatamente antes de
+Gmail**. DB authorization nunca reemplaza la barrera externa. Headers de auto submitted/bulk/list,
+unsubscribe, bounce, restricción, HumanTask abierto o cambio de contexto cancelan el efecto.
 
-`AuditEvent` es append-only. Se auditan login, configuración live/integraciones, conexión Gmail,
-campaña, overrides, supresiones, uploads, transiciones, envíos y respuestas manuales. No se
-registran ciphertext, valores enviados en formularios, tokens ni claves. Errores persistidos se
-redactan también contra el valor descifrado vigente por si un proveedor lo refleja accidentalmente.
+Límites automáticos: tres replies por Conversation en 24 h móviles y veinte por Workspace/día,
+reservados transaccionalmente. Meeting/dates, price/quote, negotiation, complaints, legal/privacy,
+unsupported technical, multiple intent, ambiguity y conflicts son siempre humanos.
 
-Raw extractor y snapshots web tienen retención inicial de 180 días. Supresiones se conservan permanentemente con datos mínimos. Backups se cifran, tienen permisos restrictivos, rotación documentada y restore probado.
+La saga redirect verifica candidato/ownership/MX/restricciones bajo lock. Nunca dice “enviada” hasta
+confirmación/reconciliación de la propuesta. Proposal y ACK tienen Message-ID/idempotency separados.
+No hay override de unsubscribe ni Contact exclusion.
 
-## 9. Checklist para live
+## 8. Gmail, abuso y privacidad de alertas
 
-- Bind/proxy/orígenes/cookies revisados y TLS si no es loopback.
-- Raíz de confianza fuera del repo, credenciales de integración sólo como ciphertext, clave de
-  cifrado respaldada por separado y logs/auditoría verificados sin secretos.
-- OAuth publicado/configurado; refresh token estable y scopes exactos confirmados.
-- Identidad legal, domicilio, reply-to y BAJA completos; revisión legal registrada externamente.
-- Catálogo hash válido, Gmail test exitoso, límites conservadores y supresión cargada.
-- Backup y restore probados; kill switch comprobado antes de desactivarlo.
-- `verify_restore` confirma migraciones, hashes, margen de disco y descifrado de refresh tokens y
-  credenciales de integración con el kill switch activo; la clave de cifrado tiene backup separado.
-- Confirmaciones UI revisadas para iniciar, pausar, reanudar, cancelar y seleccionar campaña LIVE.
+- Un destinatario por efecto; sin CC/BCC en campañas, tracking, HTML, account rotation o evasión.
+- INITIAL/REMINDER reservan email/fecha local para evitar dos campañas el mismo día.
+- Timeout ambiguo pasa a RECONCILING y busca Message-ID antes de retry.
+- Sync sólo persiste mensajes ligados a threads/headers propios. `gmail.readonly` conserva riesgo
+  potencial de acceso amplio y puede exigir verificación Google.
+- Un email de alerta humana usa asunto genérico y link seguro; nunca inbound body, subject, contact
+  name o dirección. Dashboard task persiste aunque notification falle.
+- Unsubscribe se aplica antes de IA, es irreversible y bloquea todo efecto al scope aplicable.
+
+Por decisión de producto, el copy seed no añade `PUBLICIDAD` ni pie `BAJA`. Eso puede ser
+insuficiente legalmente para outreach no consentido; la revisión legal y de deliverability sigue
+siendo requisito externo antes de live.
+
+## 9. SSRF, DNS y red
+
+`WebsiteFetcher` acepta sólo HTTP/HTTPS, hostname IDNA sin userinfo, puertos 80/443 y revalida cada
+redirect. Rechaza localhost, metadata, privadas, loopback, link-local, multicast, reservadas,
+unspecified y CGNAT si **cualquier** A/AAAA cae allí. Fija IP validada por hop manteniendo Host/SNI,
+evita segunda resolución implícita y limita redirects/páginas/bytes/timeouts.
+
+MX usa resolver inyectable con timeout; no hace SMTP handshake. Tests bloquean sockets. Contenedores
+aplican egress/segmentación cuando infraestructura lo permita; PostgreSQL y Redis no se publican.
+
+## 10. Uploads y almacenamiento privado
+
+- PDF: `.pdf`, MIME detectado, magic `%PDF-`, parseo básico, <=15 MiB/archivo, SHA-256, storage key
+  del servidor. Conjunto de campaña <=17 MiB y MIME final <=24 MiB.
+- El conjunto exacto se verifica justo antes del MIME; un faltante/tamper pausa, nunca se adjunta
+  parcial.
+- GeoJSON: límites existentes (<=1 MiB, WGS84 Polygon/MultiPolygon, partes/anillos/coordenadas
+  acotados, números finitos, sin CRS custom ni geometría inválida).
+- Archivos están fuera de static/media público. Web escribe; worker monta read-only; Beat no monta.
+  Descarga admin autenticada; VENDEDOR no descarga.
+- Filenames nunca forman paths. PDFs no se renderizan/abren en servidor; antivirus queda como
+  hardening futuro documentado.
+
+## 11. Logs, auditoría y retención
+
+Logs guardan IDs opacos, estados, duración, counts y error redactado; no cuerpos, HTML, prompts,
+recipients, headers sensibles, candidatos, facts completos, secrets o ciphertext. Context manifest
+persiste IDs/versiones/hash. `AuditEvent` es append-only y tampoco guarda cuerpos.
+
+Mensajes/contactos se muestran sólo según capacidad y con no-store; no entran a exports de
+VENDEDOR. CSV admin neutraliza celdas que empiezan con `=`, `+`, `-`, `@`, tab o CR. Supresiones y
+evidencia mínima se conservan para no recontactar. Backups cifrados incluyen DB/PDF y clave por
+separado; restore prueba descifrado e integridad sin imprimir valores.
+
+## 12. Checklist antes de exposición/live
+
+- Matriz anonymous/ADMIN/VENDEDOR y service-level authorization aprobada.
+- Lockout quinto intento/IP spray, TOTP/recovery, last-admin y session invalidation aprobados.
+- Hosts/orígenes/proxy confiable/cookies/redirect/HSTS/CSP/headers y `check --deploy` aprobados.
+- Proxy TLS/certificados/monitoreo/runbook externos implementados; hasta entonces loopback.
+- Secrets scan, backup/restore y health privado aprobados.
+- Gmail scopes/app/refresh token, reconciliación y límites aprobados.
+- PDFs/contenido/firma/cobertura Overture y same-day guard aprobados.
+- SEND/AUTO_REPLY/RELATIONSHIP kill switches probados.
+- SHADOW gate: >=30 reviews, >=10 auto-eligible, accuracy >=90%, cero unsafe auto; reauth para LIVE.
+- Revisión legal/deliverability registrada externamente.

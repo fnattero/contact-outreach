@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Respuesta automática · Contact Outreach{% endblock %}
+{% block breadcrumb %}Configuración / Respuesta automática{% endblock %}
+{% block page_title %}Respuesta automática{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div class="page-header__copy">
+        <h1>Respuesta automática</h1>
+        <p>Definí qué información está autorizada y revisá qué habría hecho el sistema antes de permitir respuestas reales.</p>
+    </div>
+</header>
+
+<section class="panel">
+    <div class="panel__header"><div><h2>Modo actual</h2><p class="muted">Cada opción explica exactamente qué puede ocurrir.</p></div><span class="badge badge--{{ configuration.mode|lower }}">{{ configuration.get_mode_display }}</span></div>
+    <div class="panel__body">
+        <form method="post" action="{% url 'automation-mode' %}" class="section-stack">
+            {% csrf_token %}
+            <fieldset class="field"><legend class="field__label">Modo de respuesta</legend><div class="radio-cards">{% for radio in mode_form.mode %}<label class="radio-card" for="{{ radio.id_for_label }}">{{ radio.tag }}<span class="radio-card__content"><strong>{{ radio.choice_label }}</strong><small>{% if radio.data.value == 'OFF' %}Sólo se aplican bajas, rebotes y respuestas automáticas detectadas por reglas; no se consulta a la IA.{% elif radio.data.value == 'SHADOW' %}La IA propone qué haría para que puedas evaluarla, pero no autoriza ningún correo.{% else %}Las respuestas que superen todas las reglas pueden enviarse sin intervención humana. Las demás crean una tarea.{% endif %}</small></span></label>{% endfor %}</div></fieldset>
+            <div class="field"><label class="field__label" for="{{ mode_form.current_password.id_for_label }}">{{ mode_form.current_password.label }}</label>{{ mode_form.current_password }}<p class="field__help">{{ mode_form.current_password.help_text }}</p></div>
+            <div class="actions"><button class="button" type="submit">Guardar modo</button></div>
+        </form>
+        <div class="alert section-gap"><div><strong>Validación antes del modo automático</strong><br>{{ qualification.reviewed }} de 30 decisiones revisadas · {{ qualification.auto_eligible_reviewed }} de 10 decisiones aptas revisadas · precisión {{ qualification.accuracy_percent|floatformat:0 }}% · {{ qualification.unsafe_auto }} respuestas inseguras. {% if qualification.qualified %}Ya se alcanzaron los mínimos; para activar el modo automático se vuelve a pedir tu contraseña.{% else %}El modo automático seguirá bloqueado hasta cumplir todos los mínimos sin ninguna respuesta insegura.{% endif %}</div></div>
+    </div>
+</section>
+
+<section class="panel automation-knowledge">
+    <div class="panel__header">
+        <div>
+            <h2>Información para responder consultas</h2>
+            <p class="muted">Cargá acá las respuestas simples que el agente puede usar cuando un cliente pregunta algo por email.</p>
+        </div>
+    </div>
+    <div class="panel__body section-stack">
+        <div class="automation-guide" aria-label="Cómo funciona esta información">
+            <article class="automation-guide__item">
+                <span class="automation-guide__number" aria-hidden="true">1</span>
+                <div><h3>Escribís un dato claro</h3><p>Por ejemplo: años de experiencia, productos disponibles, cómo pedir una medida o qué información necesitás del cliente.</p></div>
+            </article>
+            <article class="automation-guide__item">
+                <span class="automation-guide__number" aria-hidden="true">2</span>
+                <div><h3>Lo aprobás</h3><p>Mientras esté como borrador, el agente no lo usa. Esto evita que una idea incompleta termine en un correo real.</p></div>
+            </article>
+            <article class="automation-guide__item">
+                <span class="automation-guide__number" aria-hidden="true">3</span>
+                <div><h3>El agente responde sólo con eso</h3><p>No lee catálogos PDF automáticamente y no debería inventar datos. Si la consulta pide precio, reunión o algo dudoso, crea una tarea para una persona.</p></div>
+            </article>
+        </div>
+
+        <div class="knowledge-layout">
+            <form method="post" action="{% url 'knowledge-create' %}" class="card knowledge-editor" novalidate>
+                {% csrf_token %}
+                <div class="knowledge-editor__header">
+                    <h3>Agregar información nueva</h3>
+                    <p class="muted">Pensalo como una mini respuesta aprobable. Mejor varias respuestas cortas que una explicación enorme.</p>
+                </div>
+                {% include "includes/field.html" with field=knowledge_form.title %}
+                {% include "includes/field.html" with field=knowledge_form.category %}
+                {% include "includes/field.html" with field=knowledge_form.text %}
+                {% include "includes/field.html" with field=knowledge_form.source_notes %}
+                <div class="alert alert--warning">
+                    <div><strong>Antes de guardar:</strong><br>No cargues precios, promesas especiales, datos dudosos ni instrucciones privadas para el cliente. Si algo requiere criterio comercial, conviene que lo responda una persona.</div>
+                </div>
+                <div class="actions">
+                    <button class="button" type="submit">Guardar como borrador</button>
+                    <span class="muted">Después vas a poder aprobarlo para que el agente lo use.</span>
+                </div>
+            </form>
+
+            <aside class="knowledge-help card" aria-labelledby="knowledge-help-title">
+                <h3 id="knowledge-help-title">Qué conviene escribir</h3>
+                <ul class="check-list">
+                    <li>Respuestas cortas a preguntas frecuentes.</li>
+                    <li>Datos permanentes de la empresa.</li>
+                    <li>Productos o aplicaciones que sí ofrecés.</li>
+                    <li>Qué dato pedirle al cliente cuando falta información.</li>
+                </ul>
+                <h3>Qué conviene evitar</h3>
+                <ul class="cross-list">
+                    <li>Precios o cotizaciones.</li>
+                    <li>Promesas que cambian según el caso.</li>
+                    <li>Información que “creés” que es cierta pero no confirmaste.</li>
+                    <li>Textos larguísimos copiados de un catálogo.</li>
+                </ul>
+            </aside>
+        </div>
+
+        <div>
+            <div class="section-heading section-heading--inline">
+                <div><h3>Información guardada</h3><p class="muted">Sólo las tarjetas marcadas como “Aprobada” pueden usarse para responder.</p></div>
+            </div>
+            <div class="knowledge-card-grid">
+            {% for revision in revisions %}
+                <article class="card knowledge-card">
+                    <div class="knowledge-card__header">
+                        <div>
+                            <h4>{{ revision.fact.title }}</h4>
+                            <p class="muted">{{ revision.fact.category|default:"Sin tema" }} · versión {{ revision.version }}</p>
+                        </div>
+                        {% if revision.superseded_at %}<span class="badge">Reemplazada</span>{% elif revision.approved_at %}<span class="badge badge--active">Aprobada</span>{% else %}<span class="badge badge--draft">Borrador</span>{% endif %}
+                    </div>
+                    <div class="knowledge-card__body">{{ revision.text|linebreaksbr }}</div>
+                    {% if revision.source_notes %}<p class="table-meta"><strong>Origen interno:</strong> {{ revision.source_notes }}</p>{% endif %}
+                    <div class="knowledge-card__footer">
+                        {% if revision.superseded_at %}
+                            <span class="muted">Ya no se usa porque existe una versión aprobada más nueva.</span>
+                        {% elif revision.approved_at %}
+                            <span class="muted">Disponible para futuras respuestas desde {{ revision.approved_at|date:"d/m/Y H:i" }}.</span>
+                        {% else %}
+                            <form method="post" action="{% url 'knowledge-approve' revision.pk %}">
+                                {% csrf_token %}
+                                <button class="button button--secondary button--small" type="submit">Aprobar para que el agente pueda usarlo</button>
+                            </form>
+                        {% endif %}
+                    </div>
+                </article>
+            {% empty %}<div class="empty-state"><h3>Todavía no cargaste información</h3><p>Empezá por una pregunta frecuente, por ejemplo: “¿Qué productos ofrecen?” o “¿Qué datos necesitan para recomendar una medida?”.</p></div>{% endfor %}
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel__header"><div><h2>Decisiones para revisar</h2><p class="muted">En modo observación, “Qué habría hecho” nunca significa que se envió un correo.</p></div></div>
+    <div class="panel__body section-stack">
+        {% for decision in decisions %}
+        <article class="card">
+            <div class="page-header"><div><h3>{{ decision.contact.name|default:decision.contact.organization.name|default:"Contacto sin nombre" }}</h3><p class="muted">{{ decision.inbound.external_at|date:"d/m/Y H:i" }}</p></div><span class="badge badge--{{ decision.state|lower }}">{{ decision.get_state_display }}</span></div>
+            <p><strong>Qué habría hecho:</strong> {% if decision.action == 'REPLY' %}Responder con información aprobada{% elif decision.action == 'REDIRECT_PROPOSAL' %}Enviar la propuesta a la dirección indicada{% elif decision.action == 'NO_ACTION' %}No responder automáticamente{% else %}Pedir que lo revise una persona{% endif %}.</p>
+            {% if decision.proposed_body %}<details><summary>Ver borrador propuesto</summary><div class="message-body section-gap">{{ decision.proposed_body|linebreaksbr }}</div></details>{% endif %}
+            {% if decision.selected_facts.all %}<details><summary>Ver información usada</summary><ul>{% for fact in decision.selected_facts.all %}<li>{{ fact.fact.title }} · versión {{ fact.version }}</li>{% endfor %}</ul></details>{% endif %}
+            {% if decision.reviewed_at %}<p><strong>Revisión guardada:</strong> {{ decision.get_reviewed_outcome_display }}{% if decision.feedback %} · {{ decision.feedback }}{% endif %}</p>{% else %}
+            <form method="post" action="{% url 'decision-review' decision.pk %}" class="section-stack section-gap">
+                {% csrf_token %}
+                <fieldset class="field"><legend class="field__label">¿La decisión fue correcta?</legend><div class="choice-grid">{% for value,label in review_outcomes %}<label class="checkbox-line"><input type="radio" name="outcome" value="{{ value }}" required><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
+                <div class="field"><label class="field__label" for="feedback-{{ decision.pk }}">Qué debería haber hecho</label><textarea id="feedback-{{ decision.pk }}" name="feedback" rows="2"></textarea><p class="field__help">Es obligatorio si marcás que fue incorrecta o necesitaba una persona.</p></div>
+                <button class="button button--secondary button--small" type="submit">Guardar revisión</button>
+            </form>{% endif %}
+            <details><summary>Detalles técnicos</summary><dl><dt>Proveedor y modelo</dt><dd>{{ decision.provider }} · {{ decision.model }}</dd><dt>Confianza</dt><dd>{{ decision.confidence }}</dd><dt>Política</dt><dd>{{ decision.policy_version }}</dd><dt>Contexto</dt><dd>{{ decision.context_manifest.blocks|length }} mensajes y {{ decision.context_manifest.facts|length }} datos aprobados</dd></dl></details>
+        </article>
+        {% empty %}<div class="empty-state"><h3>Todavía no hay decisiones</h3><p>Aparecerán después de recibir respuestas humanas con el modo “Sólo observar” o “Respuestas automáticas activas”.</p></div>{% endfor %}
+    </div>
+    {% include "includes/pagination.html" with page_obj=page_obj %}
+</section>
+{% endblock %}

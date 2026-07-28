@@ -26,6 +26,14 @@ class PageRow(TypedDict):
     excerpt: str
 
 
+class EmailCandidateRow(TypedDict):
+    value: str
+    source: str
+    page_url: str
+    page_content_hash: str
+    order: int
+
+
 def _snapshot_hash(pages: list[PageRow]) -> str:
     encoded = json.dumps(pages, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -37,15 +45,18 @@ def _persist_enrichment(
     prospect_id: uuid.UUID,
     requested_url: str,
     page_rows: list[PageRow],
+    email_candidate_rows: list[EmailCandidateRow],
     excerpt: str,
     error: str,
     error_kind: str | None,
 ) -> WebsiteSnapshot:
     prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
-    if prospect.campaign.state != Campaign.State.RUNNING:
+    if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
     existing = prospect.web_snapshots.first()
-    if prospect.pipeline_state != Prospect.PipelineState.EMAIL_FOUND and existing is not None:
+    if existing is not None:
+        if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
+            return _mark_enriched_locked(prospect=prospect, snapshot=existing)
         return existing
     if page_rows:
         status = WebsiteSnapshot.Status.PARTIAL if error else WebsiteSnapshot.Status.SUCCESS
@@ -72,10 +83,31 @@ def _persist_enrichment(
         content_hash=_snapshot_hash(page_rows),
         excerpt=excerpt,
         pages=page_rows,
+        email_candidates=email_candidate_rows,
         byte_count=sum(int(page["byte_count"]) for page in page_rows),
         status=status,
         error=error,
     )
+    record_event(
+        action="prospect.website_snapshotted",
+        entity=prospect,
+        actor=None,
+        after={
+            "pipeline_state": prospect.pipeline_state,
+            "snapshot_id": str(snapshot.pk),
+            "snapshot_status": snapshot.status,
+            "page_count": len(page_rows),
+            "email_candidate_count": len(email_candidate_rows),
+        },
+    )
+    if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
+        return _mark_enriched_locked(prospect=prospect, snapshot=snapshot)
+    return snapshot
+
+
+def _mark_enriched_locked(*, prospect: Prospect, snapshot: WebsiteSnapshot) -> WebsiteSnapshot:
+    if prospect.pipeline_state != Prospect.PipelineState.EMAIL_FOUND:
+        return snapshot
     before = {"pipeline_state": prospect.pipeline_state}
     prospect.pipeline_state = Prospect.PipelineState.ENRICHED
     prospect.error_stage = ""
@@ -90,7 +122,7 @@ def _persist_enrichment(
             "pipeline_state": prospect.pipeline_state,
             "snapshot_id": str(snapshot.pk),
             "snapshot_status": snapshot.status,
-            "page_count": len(page_rows),
+            "page_count": len(snapshot.pages),
         },
     )
     return snapshot
@@ -102,10 +134,14 @@ def enrich_prospect(
     fetcher: WebsiteFetcher | None = None,
 ) -> WebsiteSnapshot:
     prospect = Prospect.objects.select_related("campaign").get(pk=prospect_id)
-    if prospect.campaign.state != Campaign.State.RUNNING:
+    if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
     existing = prospect.web_snapshots.first()
-    if prospect.pipeline_state != Prospect.PipelineState.EMAIL_FOUND and existing is not None:
+    if existing is not None:
+        if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
+            with transaction.atomic():
+                locked = Prospect.objects.select_for_update().get(pk=prospect.pk)
+                return _mark_enriched_locked(prospect=locked, snapshot=existing)
         return existing
     requested_url = prospect.website.strip()
     if not requested_url:
@@ -113,11 +149,12 @@ def enrich_prospect(
             prospect_id=prospect.pk,
             requested_url="",
             page_rows=[],
+            email_candidate_rows=[],
             excerpt="",
             error="El prospecto no informó un sitio web.",
             error_kind=None,
         )
-    active_fetcher = fetcher or get_website_fetcher()
+    active_fetcher = fetcher or get_website_fetcher(prospect.campaign.website_fetcher)
     result = active_fetcher.fetch(
         WebsiteRequest(
             url=requested_url,
@@ -137,6 +174,28 @@ def enrich_prospect(
         }
         for page in result.pages[:4]
     ]
+    email_candidate_rows: list[EmailCandidateRow] = []
+    for page in result.pages[:4]:
+        for candidate in page.email_candidates:
+            if len(email_candidate_rows) >= 40:
+                break
+            if (
+                candidate.source not in {"mailto", "visible_text"}
+                or candidate.page_url != page.final_url
+                or candidate.page_content_hash != page.content_hash
+                or not candidate.value.strip()
+                or len(candidate.value) > 320
+            ):
+                continue
+            email_candidate_rows.append(
+                {
+                    "value": candidate.value.strip(),
+                    "source": candidate.source,
+                    "page_url": candidate.page_url,
+                    "page_content_hash": candidate.page_content_hash,
+                    "order": len(email_candidate_rows),
+                }
+            )
     excerpt = "\n\n".join(
         f"PÁGINA {index} [{page['final_url']}]\n{page['excerpt']}"
         for index, page in enumerate(page_rows, start=1)
@@ -145,6 +204,7 @@ def enrich_prospect(
         prospect_id=prospect.pk,
         requested_url=requested_url,
         page_rows=page_rows,
+        email_candidate_rows=email_candidate_rows,
         excerpt=excerpt,
         error=result.error or "",
         error_kind=result.error_kind,

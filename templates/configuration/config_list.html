@@ -1,41 +1,24 @@
 {% extends "base.html" %}
-
 {% block title %}{{ title }} · Contact Outreach{% endblock %}
-
+{% block breadcrumb %}Configuración / {{ title }}{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
 {% block content %}
-<h1>{{ title }}</h1>
-<div class="grid">
-    <section class="card">
-        <h2>{% if selected %}Editar{% else %}Crear{% endif %}</h2>
-        <form method="post">
-            {% csrf_token %}
-            {% if selected %}<input type="hidden" name="item_id" value="{{ selected.pk }}">{% endif %}
-            {{ form.as_p }}
-            <button type="submit">Guardar</button>
-            {% if selected %}<a class="button secondary" href="{% url request.resolver_match.url_name %}">Cancelar</a>{% endif %}
-        </form>
+<header class="page-header"><div class="page-header__copy"><h1>{{ title }}</h1><p>{% if kind == 'searchcategory' %}Asigná un título y cargá las variantes del rubro. El sistema busca cualquiera de ellas automáticamente.{% else %}Usá esta sección sólo para áreas propias que no aparecen en la lista oficial. Las provincias y sus distritos ya están disponibles al crear una campaña y se actualizan desde Datos de búsqueda.{% endif %}</p></div><div class="page-header__actions"><span class="badge">{{ items|length }} configurados</span></div></header>
+<div class="config-layout">
+    <section class="panel">
+        <div class="panel__header"><div><h2>{% if selected %}Editar elemento{% else %}Crear elemento{% endif %}</h2><p class="muted">Los cambios no alteran la configuración fija de campañas ya iniciadas.</p></div></div>
+        <div class="panel__body"><form method="post" enctype="multipart/form-data" novalidate>{% csrf_token %}{% if selected %}<input type="hidden" name="item_id" value="{{ selected.pk }}">{% endif %}{% for field in form %}{% include "includes/field.html" with field=field %}{% endfor %}<div class="actions"><button class="button" type="submit">Guardar</button>{% if selected %}<a class="button button--secondary" href="{% url request.resolver_match.url_name %}">Cancelar</a>{% endif %}</div></form></div>
     </section>
     <section>
-        <table>
-            <thead><tr><th>Nombre</th><th>Estado</th><th>Acciones</th></tr></thead>
-            <tbody>
-            {% for item in items %}
-                <tr>
-                    <td>{{ item.name }}</td>
-                    <td>{% if item.active %}Activo{% else %}Inactivo{% endif %}</td>
-                    <td class="actions">
-                        <a class="button secondary" href="?edit={{ item.pk }}">Editar</a>
-                        <form method="post" action="{% url 'config-toggle' kind item.pk %}">
-                            {% csrf_token %}<button type="submit">{% if item.active %}Desactivar{% else %}Activar{% endif %}</button>
-                        </form>
-                        <form method="post" action="{% url 'config-delete' kind item.pk %}">
-                            {% csrf_token %}<button class="danger" type="submit">Eliminar</button>
-                        </form>
-                    </td>
-                </tr>
-            {% empty %}<tr><td colspan="3">No hay elementos.</td></tr>{% endfor %}
-            </tbody>
-        </table>
+        {% if items %}<div class="table-scroll"><table><thead><tr><th>{% if kind == 'searchcategory' %}Título{% else %}Nombre{% endif %}</th><th>Configuración</th><th>Estado</th>{% if kind == 'searchzone' %}<th>Tipo / ubicación</th>{% endif %}<th>Acciones</th></tr></thead><tbody>
+        {% for item in items %}<tr>
+            <td><span class="table-primary">{{ item.name }}</span><span class="table-meta">Orden {{ item.sort_order }}</span></td>
+            <td>{% if kind == "searchcategory" %}<span class="table-primary">{{ item.search_variants|length }} variante{{ item.search_variants|length|pluralize }}</span><span class="table-meta">Se combinan como alternativas</span>{% elif item.boundary_hash %}<span class="table-primary">Límite · revisión {{ item.boundary_revision }}</span><span class="table-meta"><code data-tooltip="Inicio de la huella digital que identifica la geometría exacta de este límite.">{{ item.boundary_hash|slice:":12" }}…</code></span>{% else %}<span class="error-text">Falta el archivo geográfico GeoJSON</span>{% endif %}</td>
+            <td><span class="badge badge--{% if item.active %}succeeded{% else %}pending{% endif %}">{% if item.active %}Activo{% else %}Inactivo{% endif %}</span></td>
+            {% if kind == 'searchzone' %}<td>{{ item.get_kind_display }}<span class="table-meta">{{ item.location_text }}</span></td>{% endif %}
+            <td><div class="actions"><a class="button button--secondary button--small" href="?edit={{ item.pk }}">Editar</a><form method="post" action="{% url 'config-toggle' kind item.pk %}">{% csrf_token %}<button class="button button--quiet button--small" type="submit">{% if item.active %}Desactivar{% else %}Activar{% endif %}</button></form><details class="confirm"><summary class="error-text">Eliminar</summary><div class="confirm__body"><p>Si está referenciado, se archivará para conservar integridad.</p><form method="post" action="{% url 'config-delete' kind item.pk %}">{% csrf_token %}<button class="button button--danger button--small" type="submit">Confirmar</button></form></div></details></div></td>
+        </tr>{% endfor %}
+        </tbody></table></div>{% else %}<div class="panel empty-state"><h2>No hay elementos configurados</h2><p>Creá el primero con el formulario.</p></div>{% endif %}
     </section>
 </div>
 {% endblock %}

@@ -3,12 +3,25 @@ from __future__ import annotations
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
 from apps.audit.models import AuditEvent
-from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone
-from apps.configuration.services import save_business_profile, save_config_item
+from apps.configuration.forms import SearchCategoryForm
+from apps.configuration.models import (
+    BusinessProfile,
+    PromptConfiguration,
+    SearchCategory,
+    SearchCategoryRule,
+    SearchZone,
+    WorkspaceMessageTemplateRevision,
+)
+from apps.configuration.services import (
+    save_business_profile,
+    save_config_item,
+    save_prompt_configuration,
+)
 
 
 def profile_values(**overrides: object) -> dict[str, object]:
@@ -33,11 +46,38 @@ def profile_values(**overrides: object) -> dict[str, object]:
 @pytest.mark.django_db
 def test_seed_contains_documented_categories_and_caba_zones() -> None:
     assert SearchCategory.objects.filter(archived_at__isnull=True).count() == 23
-    assert SearchZone.objects.filter(archived_at__isnull=True).count() == 48
+    assert (
+        SearchZone.objects.filter(
+            level=SearchZone.Level.PROVINCE,
+            archived_at__isnull=True,
+        ).count()
+        == 24
+    )
+    assert (
+        SearchZone.objects.filter(
+            level=SearchZone.Level.DISTRICT,
+            archived_at__isnull=True,
+        ).count()
+        == 529
+    )
+    assert (
+        SearchZone.objects.filter(
+            level=SearchZone.Level.NEIGHBORHOOD,
+            province_code="02",
+            selectable=True,
+            archived_at__isnull=True,
+        ).count()
+        == 48
+    )
     assert SearchCategory.objects.get(name="Bobinados de motores").active
     palermo = SearchZone.objects.get(name="Palermo")
     assert palermo.kind == SearchZone.Kind.NEIGHBORHOOD
+    assert palermo.parent is not None
+    assert palermo.parent.official_code == "02"
     assert palermo.location_text == "Ciudad Autónoma de Buenos Aires, Argentina"
+    assert palermo.boundary_hash
+    assert len(palermo.boundary_bbox) == 4
+    assert SearchCategory.objects.exclude(rules__active=True).count() == 0
 
 
 @pytest.mark.django_db
@@ -57,9 +97,133 @@ def test_profile_rejects_invalid_threshold(owner: User) -> None:
 
 
 @pytest.mark.django_db
+def test_prompt_configuration_is_versioned_and_audited_without_plaintext(owner: User) -> None:
+    first = save_prompt_configuration(
+        owner=owner,
+        email_drafting_prompt="Destacá la atención técnica comprobable.",
+    )
+    second = save_prompt_configuration(
+        owner=owner,
+        email_drafting_prompt="Usá un tono sobrio.",
+    )
+
+    assert first.pk == second.pk
+    assert second.revision == 2
+    assert (
+        PromptConfiguration.objects.get(owner=owner).email_drafting_prompt == "Usá un tono sobrio."
+    )
+    event = AuditEvent.objects.get(action="prompt_configuration.updated")
+    assert "email_drafting_prompt_sha256" in event.after
+    assert "Usá un tono sobrio" not in str(event.after)
+
+
+def test_category_form_accepts_variants_without_operator_syntax() -> None:
+    rejected = SearchCategoryForm(
+        {
+            "name": "Motores",
+            "active": "on",
+            "sort_order": 1,
+            "variants_text": "(motor.*)",
+        }
+    )
+    accepted = SearchCategoryForm(
+        {
+            "name": "Motores",
+            "active": "on",
+            "sort_order": 1,
+            "variants_text": "motor*\ntaller electromecánico, bobinado de motores",
+        }
+    )
+    obsolete_pipe_syntax = SearchCategoryForm(
+        {
+            "name": "Motores",
+            "active": "on",
+            "sort_order": 1,
+            "variants_text": "industrial_equipment | motor",
+        }
+    )
+
+    assert not rejected.is_valid()
+    assert "variants_text" in rejected.errors
+    assert not obsolete_pipe_syntax.is_valid()
+    assert "No hace falta usar |" in obsolete_pipe_syntax.errors["variants_text"][0]
+    assert accepted.is_valid(), accepted.errors
+    assert list(accepted.fields) == ["name", "variants_text", "active", "sort_order"]
+    assert accepted.parsed_rules == [
+        {"taxonomy_code": "", "name_terms": ["motor*"]},
+        {"taxonomy_code": "", "name_terms": ["taller electromecanico"]},
+        {"taxonomy_code": "", "name_terms": ["bobinado de motores"]},
+    ]
+
+
+@pytest.mark.django_db
+def test_category_form_preserves_hidden_taxonomy_for_existing_variants() -> None:
+    category = SearchCategory.objects.get(name="Bobinados de motores")
+    display_form = SearchCategoryForm(instance=category)
+    form = SearchCategoryForm(
+        {
+            "name": category.name,
+            "active": "on",
+            "sort_order": category.sort_order,
+            "variants_text": "bobinad*\nrebobinad*\nservicio de inducidos",
+        },
+        instance=category,
+    )
+
+    assert "|" not in display_form.initial["variants_text"]
+    assert display_form.initial["variants_text"].splitlines() == ["bobinad*", "rebobinad*"]
+    assert form.is_valid(), form.errors
+    assert form.parsed_rules == [
+        {"taxonomy_code": "services_and_business", "name_terms": ["bobinad*"]},
+        {"taxonomy_code": "", "name_terms": ["bobinad*"]},
+        {"taxonomy_code": "", "name_terms": ["rebobinad*"]},
+        {"taxonomy_code": "", "name_terms": ["servicio de inducidos"]},
+    ]
+
+
+@pytest.mark.django_db
+def test_category_rule_model_uses_the_provider_taxonomy_code_grammar() -> None:
+    category = SearchCategory.objects.get(name="Bobinados de motores")
+    invalid = SearchCategoryRule(
+        category=category,
+        taxonomy_code="industrial-equipment",
+        name_terms=["motor"],
+    )
+    normalized = SearchCategoryRule(
+        category=category,
+        taxonomy_code="  INDUSTRIAL_EQUIPMENT  ",
+        name_terms=["motor"],
+    )
+
+    with pytest.raises(ValidationError, match="código taxonómico"):
+        invalid.full_clean()
+    normalized.full_clean()
+    assert normalized.taxonomy_code == "industrial_equipment"
+
+
+@pytest.mark.django_db
+def test_prompt_dashboard_saves_configuration(client: Client, owner: User) -> None:
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("prompts"),
+        {"email_drafting_prompt": "Empezá con el posible contexto técnico."},
+    )
+
+    assert response.status_code == 302
+    configured = PromptConfiguration.objects.get(owner=owner)
+    assert configured.revision == 1
+    page = client.get(reverse("prompts"))
+    assert page.status_code == 200
+    assert "Empezá con el posible contexto técnico." in page.content.decode()
+
+
+@pytest.mark.django_db
 def test_category_normalization_and_unique_active_name(owner: User) -> None:
     category = save_config_item(
-        item=SearchCategory(name="  Reparación   Especial  ", sort_order=99), actor=owner
+        item=SearchCategory(name="  Reparación   Especial  ", sort_order=99),
+        actor=owner,
+        category_rules=[{"taxonomy_code": "repair_service", "name_terms": ["reparación*"]}],
     )
     assert category.name == "Reparación Especial"
     assert category.normalized_name == "reparación especial"
@@ -71,10 +235,23 @@ def test_category_normalization_and_unique_active_name(owner: User) -> None:
 def test_category_crud_views_create_toggle_and_delete(client: Client, owner: User) -> None:
     client.force_login(owner)
     created = client.post(
-        reverse("categories"), {"name": "Motores navales", "active": "on", "sort_order": 80}
+        reverse("categories"),
+        {
+            "name": "Motores navales",
+            "active": "on",
+            "sort_order": 80,
+            "variants_text": "motor naval\nbobinad*",
+        },
     )
     assert created.status_code == 302
     category = SearchCategory.objects.get(name="Motores navales")
+    assert list(category.rules.values_list("taxonomy_code", "name_terms")) == [
+        ("", ["motor naval"]),
+        ("", ["bobinad*"]),
+    ]
+    page = client.get(reverse("categories"))
+    assert "Título del rubro" in page.content.decode()
+    assert "2 variantes" in page.content.decode()
     assert (
         client.get(reverse("config-toggle", args=("searchcategory", category.pk))).status_code
         == 405
@@ -93,27 +270,177 @@ def test_category_crud_views_create_toggle_and_delete(client: Client, owner: Use
 
 
 @pytest.mark.django_db
-def test_zone_crud_view_edits_existing(client: Client, owner: User) -> None:
+def test_zone_crud_manages_custom_zones_without_exposing_official_boundaries(
+    client: Client,
+    owner: User,
+) -> None:
     client.force_login(owner)
-    zone = SearchZone.objects.get(name="Palermo")
+    palermo = SearchZone.objects.get(name="Palermo")
+    page = client.get(reverse("zones"))
+    assert page.status_code == 200
+    assert "Zonas personalizadas" in page.content.decode()
+    assert "Palermo" not in page.content.decode()
+    assert client.get(f"{reverse('zones')}?edit={palermo.pk}").status_code == 404
+    assert client.post(reverse("config-toggle", args=("searchzone", palermo.pk))).status_code == 403
+
+    created = client.post(
+        reverse("zones"),
+        {
+            "name": "Corredor norte",
+            "kind": SearchZone.Kind.CUSTOM,
+            "parent": palermo.parent_id,
+            "location_text": "Buenos Aires, Argentina",
+            "active": "on",
+            "sort_order": 2,
+            "boundary_upload": SimpleUploadedFile(
+                "corredor.geojson",
+                (
+                    b'{"type":"Polygon","coordinates":[[['
+                    b"-58.6,-34.7],[-58.5,-34.7],[-58.5,-34.6],"
+                    b"[-58.6,-34.6],[-58.6,-34.7]]]}"
+                ),
+                content_type="application/geo+json",
+            ),
+        },
+    )
+    assert created.status_code == 302
+    zone = SearchZone.objects.get(name="Corredor norte")
     response = client.post(
         reverse("zones"),
         {
             "item_id": zone.pk,
-            "name": "Palermo Norte",
+            "name": "Corredor norte actualizado",
             "kind": SearchZone.Kind.CUSTOM,
-            "location_text": "CABA",
+            "parent": palermo.parent_id,
+            "location_text": "Buenos Aires, Argentina",
             "active": "on",
             "sort_order": 2,
         },
     )
     assert response.status_code == 302
     zone.refresh_from_db()
-    assert zone.name == "Palermo Norte"
+    assert zone.name == "Corredor norte actualizado"
     assert zone.kind == SearchZone.Kind.CUSTOM
+    assert zone.parent_id == palermo.parent_id
+    assert zone.province_code == "02"
 
 
 @pytest.mark.django_db
 def test_configuration_views_require_authentication(client: Client) -> None:
-    for route in ("business-profile", "categories", "zones"):
+    for route in ("business-profile", "prompts", "categories", "zones", "message-templates"):
         assert client.get(reverse(route)).status_code == 302
+
+
+@pytest.mark.django_db
+def test_business_profile_view_renders_and_saves(client: Client, owner: User) -> None:
+    client.force_login(owner)
+
+    empty_page = client.get(reverse("business-profile"))
+    assert empty_page.status_code == 200
+    content = empty_page.content.decode()
+    assert "sin guardar" in content
+    assert "Mensajes fijos de campaña" in content
+    assert "Mensaje inicial" in content
+    assert "profile-section__chevron" in content
+
+    response = client.post(reverse("business-profile"), profile_values())
+
+    assert response.status_code == 302
+    profile = BusinessProfile.objects.get(owner=owner)
+    assert profile.company_name == "Carbones del Sur"
+    assert profile.profile_version == 1
+
+    page = client.get(reverse("business-profile"))
+    assert page.status_code == 200
+    assert "Carbones del Sur" in page.content.decode()
+
+
+@pytest.mark.django_db
+def test_business_profile_view_updates_initial_message_in_place(
+    client: Client, owner: User
+) -> None:
+    client.force_login(owner)
+    client.get(reverse("business-profile"))
+
+    response = client.post(
+        reverse("business-profile"),
+        {
+            "action": "message_template",
+            "template_prefix": "initial",
+            "initial-kind": WorkspaceMessageTemplateRevision.Kind.INITIAL,
+            "initial-subject": "Propuesta desde Perfil",
+            "initial-body": "Mensaje inicial actualizado desde el perfil.",
+        },
+    )
+
+    assert response.status_code == 302
+    updated = WorkspaceMessageTemplateRevision.objects.get(
+        workspace=owner.membership.workspace,
+        kind=WorkspaceMessageTemplateRevision.Kind.INITIAL,
+        active=True,
+    )
+    assert updated.revision == 2
+    assert updated.subject == "Propuesta desde Perfil"
+    page = client.get(reverse("business-profile"))
+    assert "Mensaje inicial actualizado desde el perfil." in page.content.decode()
+
+
+@pytest.mark.django_db
+def test_business_profile_view_reports_form_errors(client: Client, owner: User) -> None:
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("business-profile"),
+        profile_values(relevance_threshold=101),
+    )
+
+    assert response.status_code == 200
+    assert not BusinessProfile.objects.filter(owner=owner).exists()
+
+
+@pytest.mark.django_db
+def test_prompt_dashboard_rejects_form_that_exceeds_max_length(client: Client, owner: User) -> None:
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("prompts"),
+        {"email_drafting_prompt": "x" * 4001},
+    )
+
+    assert response.status_code == 200
+    assert not PromptConfiguration.objects.filter(owner=owner).exists()
+
+
+@pytest.mark.django_db
+def test_save_prompt_configuration_rejects_null_characters(owner: User) -> None:
+    with pytest.raises(ValidationError, match="carácter no permitido"):
+        save_prompt_configuration(
+            owner=owner,
+            email_drafting_prompt="texto con \x00 nulo",
+        )
+
+
+@pytest.mark.django_db
+def test_category_view_reports_invalid_form_without_creating_category(
+    client: Client, owner: User
+) -> None:
+    client.force_login(owner)
+    before = SearchCategory.objects.count()
+
+    response = client.post(
+        reverse("categories"),
+        {"name": "", "active": "on", "sort_order": 1, "variants_text": ""},
+    )
+
+    assert response.status_code == 200
+    assert SearchCategory.objects.count() == before
+
+
+@pytest.mark.django_db
+def test_toggle_and_delete_item_reject_unknown_kind(client: Client, owner: User) -> None:
+    client.force_login(owner)
+    category = SearchCategory.objects.first()
+    assert category is not None
+
+    assert client.post(reverse("config-toggle", args=("bogus", category.pk))).status_code == 404
+    assert client.post(reverse("config-delete", args=("bogus", category.pk))).status_code == 404

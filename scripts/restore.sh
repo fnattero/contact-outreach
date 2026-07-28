@@ -18,7 +18,7 @@ test -d "$backup_dir/catalogs"
 )
 
 docker compose run --rm --no-deps web python src/manage.py shell -c 'from django.conf import settings; raise SystemExit(0 if settings.SEND_KILL_SWITCH else "Activá SEND_KILL_SWITCH=true antes del restore")'
-docker compose stop worker beat web
+docker compose stop worker maintenance beat web
 docker compose up --detach postgres redis
 docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < "$backup_dir/database.dump"
 
@@ -28,6 +28,6 @@ docker compose cp "$backup_dir/catalogs/." web:/app/private/
 docker compose run --rm --no-deps --user root web chown -R app:app /app/private
 docker compose run --rm web python src/manage.py migrate_safe
 docker compose run --rm web python src/manage.py verify_restore --require-kill-switch
-docker compose up --detach --wait web worker beat
+docker compose up --detach --wait web worker maintenance beat
 
 echo "Restore verificado. Revisá el checklist live antes de desactivar el kill switch."

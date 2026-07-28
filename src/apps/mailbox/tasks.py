@@ -21,7 +21,7 @@ from apps.mailbox.manual import (
     recoverable_manual_reply_ids,
 )
 from apps.mailbox.models import GmailConnection
-from apps.mailbox.sync import sync_gmail_connection
+from apps.mailbox.sync import process_inbound_reply, sync_gmail_connection
 
 
 @shared_task(name="mailbox.deliver_message")  # type: ignore[untyped-decorator]
@@ -95,6 +95,24 @@ def sync_gmail_replies() -> int:
         sync_gmail_connection_task.delay(str(connection_id))
         count += 1
     return count
+
+
+@shared_task(name="mailbox.process_inbound_reply")  # type: ignore[untyped-decorator]
+def process_inbound_reply_task(inbound_id: str) -> str:
+    job = start_job(
+        idempotency_key=f"inbound-processing:{inbound_id}",
+        task_name="mailbox.process_inbound_reply",
+        entity_type="InboundMessage",
+        entity_id=inbound_id,
+        queue="mailbox",
+    )
+    try:
+        classification = process_inbound_reply(inbound_id)
+    except Exception as exc:
+        finish_job(job, state=BackgroundJob.State.FAILED, error=exc)
+        raise
+    finish_job(job)
+    return classification
 
 
 @shared_task(name="mailbox.deliver_manual_reply")  # type: ignore[untyped-decorator]

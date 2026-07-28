@@ -9,7 +9,7 @@ from apps.accounts.services import OwnerConflictError, ensure_owner
 
 
 class Command(BaseCommand):
-    help = "Create or rotate the single owner from OWNER_* environment variables."
+    help = "Create or rotate the bootstrap administrator from OWNER_* environment variables."
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(

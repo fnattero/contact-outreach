@@ -1,31 +1,4 @@
-{% extends "base.html" %}
-
-{% block title %}{{ root.subject }} · Contact Outreach{% endblock %}
-
-{% block content %}
-<p><a href="{% url 'responses' %}">← Volver a respuestas</a></p>
-<h1>{{ root.subject }}</h1>
-<p><strong>{{ root.prospect.name }}</strong> · {{ root.recipient }} · {{ root.campaign.name }}</p>
-
-<section aria-label="Hilo cronológico">
-    {% for item in chronology %}
-    <article class="card" style="margin-bottom: 1rem;{% if item.direction == 'outbound' %} margin-left: 8%;{% else %} margin-right: 8%;{% endif %}">
-        <p><strong>{% if item.direction == "outbound" %}Enviado{% else %}Recibido{% endif %}</strong> · {{ item.date }} · {{ item.classification }}</p>
-        <p class="muted">{{ item.sender }}</p>
-        <div style="white-space: pre-wrap">{{ item.body }}</div>
-    </article>
-    {% endfor %}
-</section>
-
-{% if inbound.is_human %}
-<section class="card form-card">
-    <h2>Responder manualmente</h2>
-    <p class="muted">Destinatario: {{ root.recipient }}. El asunto y el hilo se mantienen.</p>
-    <form method="post" action="{% url 'manual-reply' inbound.pk %}">
-        {% csrf_token %}
-        {{ form.as_p }}
-        <button type="submit">Enviar respuesta</button>
-    </form>
-</section>
-{% endif %}
-{% endblock %}
+{% extends "base.html" %}{% block title %}{{ root.subject }} · Contact Outreach{% endblock %}{% block breadcrumb %}Respuestas / Hilo{% endblock %}{% block page_title %}Hilo de respuesta{% endblock %}
+{% block content %}<header class="page-header"><div class="page-header__copy"><p><a href="{% url 'responses' %}">← Volver a respuestas</a></p><h1>{{ root.subject }}</h1><p><strong>{% if root.prospect %}{{ root.prospect.name }}{% elif root.contact %}{{ root.contact }}{% elif root.organization %}{{ root.organization.name|default:"Organización sin nombre" }}{% else %}{{ root.recipient }}{% endif %}</strong> · {{ root.recipient }}{% if root.campaign %} · <a href="{% url 'campaign-detail' root.campaign_id %}">{{ root.campaign.name }}</a>{% endif %}</p></div><div class="page-header__actions"><span class="badge badge--{{ inbound.classification|lower }}">{{ inbound.get_classification_display }}</span></div></header>
+<div class="config-layout"><section class="thread" aria-label="Conversación cronológica">{% for item in chronology %}<article class="panel thread-message thread-message--{{ item.direction }}"><div class="thread-message__meta"><strong>{% if item.direction == "outbound" %}Enviado{% else %}Recibido{% endif %}</strong><span>{{ item.date|date:"d M Y · H:i" }}</span></div><p class="muted">{{ item.sender }} · {{ item.classification }}</p><div class="thread-message__body">{{ item.body }}</div></article>{% endfor %}</section>
+{% if inbound.is_human and can_reply %}<aside class="panel"><div class="panel__header"><div><h2>Responder manualmente</h2><p class="muted">Se mantienen el destinatario, el asunto y la conversación.</p></div></div><div class="panel__body"><div class="alert alert--warning"><div><strong>Acción explícita</strong><br>Ninguna tarea redacta ni envía esta respuesta sin tu clic.</div></div><form method="post" action="{% url 'manual-reply' inbound.pk %}">{% csrf_token %}{{ form.idempotency_key }}{% include "includes/field.html" with field=form.body_text %}<button class="button" type="submit">Enviar respuesta</button></form></div></aside>{% endif %}</div>{% endblock %}

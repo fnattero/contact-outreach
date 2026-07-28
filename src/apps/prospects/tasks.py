@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -9,7 +10,9 @@ from django.utils import timezone
 
 from apps.audit.models import BackgroundJob
 from apps.audit.services import finish_job, start_job
+from apps.campaigns.models import Campaign
 from apps.prospects.analysis import analyze_prospect
+from apps.prospects.email_validation import TransientMXError
 from apps.prospects.enrichment import enrich_prospect
 from apps.prospects.exceptions import ProspectPipelineInactive, StaleProspectAnalysis
 from apps.prospects.models import AIAnalysis, Prospect
@@ -19,6 +22,19 @@ from apps.prospects.pipeline import (
     defer_prospect_pipeline,
     reserve_prospect_pipeline,
 )
+from apps.prospects.services import (
+    discover_website_email,
+    mark_fixed_campaign_prospect_ready,
+    skip_website_email_after_mx_retries,
+)
+
+CONTACT_MX_MAX_ATTEMPTS = 3
+CONTACT_MX_RETRY_BASE_SECONDS = 60
+
+
+def _contact_mx_retry_at(attempt: int) -> datetime:
+    delay_seconds = min(15 * 60, CONTACT_MX_RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)))
+    return timezone.now() + timedelta(seconds=delay_seconds)
 
 
 @shared_task(name="prospects.process_pipeline")  # type: ignore[untyped-decorator]
@@ -34,19 +50,13 @@ def process_prospect_pipeline(
     generation = (
         analysis_generation if analysis_generation is not None else prospect.analysis_generation
     )
-    job = start_job(
-        idempotency_key=f"pipeline:{prospect_id}:{generation}",
-        task_name="prospects.process_pipeline",
-        entity_type="Prospect",
-        entity_id=prospect_id,
-        queue="analysis",
-    )
     actor = User.objects.filter(pk=actor_id).first() if actor_id is not None else None
     token = reservation_token
     if not token:
         reservation = reserve_prospect_pipeline(
             prospect.pk,
             allowed_states=(
+                Prospect.PipelineState.DISCOVERED,
                 Prospect.PipelineState.EMAIL_FOUND,
                 Prospect.PipelineState.ENRICHED,
                 Prospect.PipelineState.ERROR,
@@ -56,15 +66,54 @@ def process_prospect_pipeline(
             manual=actor is not None,
         )
         if reservation is None:
-            finish_job(job)
             return prospect.pipeline_state
         token = reservation.token
     if not claim_prospect_pipeline(prospect.pk, token=token, manual=actor is not None):
-        finish_job(job)
         return prospect.pipeline_state
+    job = start_job(
+        idempotency_key=f"pipeline:{prospect_id}:{generation}",
+        task_name="prospects.process_pipeline",
+        entity_type="Prospect",
+        entity_id=prospect_id,
+        queue="analysis",
+    )
     try:
+        prospect.refresh_from_db()
+        if prospect.pipeline_state == Prospect.PipelineState.DISCOVERED:
+            snapshot = enrich_prospect(prospect.pk)
+            try:
+                prospect = discover_website_email(prospect.pk, snapshot=snapshot)
+            except TransientMXError as exc:
+                if job.attempts >= CONTACT_MX_MAX_ATTEMPTS:
+                    prospect = skip_website_email_after_mx_retries(
+                        prospect.pk,
+                        snapshot=snapshot,
+                    )
+                    finish_job(job)
+                else:
+                    finish_job(
+                        job,
+                        state=BackgroundJob.State.RETRY_WAIT,
+                        error=exc,
+                        next_retry_at=_contact_mx_retry_at(job.attempts),
+                    )
+                return prospect.pipeline_state
+            if prospect.pipeline_state in {
+                Prospect.PipelineState.SKIPPED_NO_EMAIL,
+                Prospect.PipelineState.SKIPPED_DUPLICATE,
+            }:
+                finish_job(job)
+                return prospect.pipeline_state
         if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
             enrich_prospect(prospect.pk)
+        prospect.refresh_from_db()
+        if prospect.campaign.state == Campaign.State.DISCOVERING:
+            prospect = mark_fixed_campaign_prospect_ready(prospect.pk)
+            from apps.campaigns.approval import maybe_move_campaign_to_approval
+
+            maybe_move_campaign_to_approval(prospect.campaign_id)
+            finish_job(job)
+            return prospect.pipeline_state
         analysis = analyze_prospect(
             prospect.pk,
             regeneration_nonce=regeneration_nonce,
@@ -118,10 +167,28 @@ def process_prospect_pipeline(
 @shared_task(name="prospects.recover_pipeline")  # type: ignore[untyped-decorator]
 def recover_prospect_pipeline() -> int:
     scheduled = 0
-    email_found_ids = Prospect.objects.filter(
-        pipeline_state=Prospect.PipelineState.EMAIL_FOUND
-    ).values_list("pk", flat=True)
-    for prospect_id in email_found_ids:
+    now = timezone.now()
+    contact_pipeline_rows = list(
+        Prospect.objects.filter(
+            pipeline_state__in=(
+                Prospect.PipelineState.DISCOVERED,
+                Prospect.PipelineState.EMAIL_FOUND,
+            ),
+            campaign__state__in=(Campaign.State.DISCOVERING, Campaign.State.RUNNING),
+        ).values_list("pk", "analysis_generation")
+    )
+    contact_job_keys = {
+        f"pipeline:{prospect_id}:{generation}" for prospect_id, generation in contact_pipeline_rows
+    }
+    contact_jobs = {
+        job.idempotency_key: job
+        for job in BackgroundJob.objects.filter(idempotency_key__in=contact_job_keys)
+    }
+    for prospect_id, generation in contact_pipeline_rows:
+        job = contact_jobs.get(f"pipeline:{prospect_id}:{generation}")
+        if job is not None and job.state == BackgroundJob.State.RETRY_WAIT:
+            if job.next_retry_at is None or job.next_retry_at > now:
+                continue
         reservation = reserve_prospect_pipeline(prospect_id)
         if reservation is None:
             continue
@@ -132,7 +199,7 @@ def recover_prospect_pipeline() -> int:
         scheduled += 1
     retry_analyses = AIAnalysis.objects.filter(
         status=AIAnalysis.Status.RETRY_WAIT,
-        next_retry_at__lte=timezone.now(),
+        next_retry_at__lte=now,
     ).select_related("prospect", "requested_by")
     for analysis in retry_analyses:
         reservation = reserve_prospect_pipeline(

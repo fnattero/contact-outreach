@@ -60,4 +60,4 @@ def test_audit_log_is_authenticated_and_read_only(client: Client, owner: User) -
     record_event(action="test", entity=owner, actor=None)
     response = client.get(reverse("audit-log"))
     assert response.status_code == 200
-    assert b"Audit log" in response.content
+    assert "Registro de auditoría" in response.content.decode()

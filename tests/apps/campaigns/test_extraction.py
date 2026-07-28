@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
 
 from apps.audit.models import BackgroundJob
 from apps.campaigns import tasks as campaign_tasks
@@ -20,7 +19,7 @@ from apps.catalogs.models import Catalog
 from apps.catalogs.services import create_catalog
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import suppress_email
-from apps.configuration.models import SearchCategory, SearchZone
+from apps.configuration.models import SearchCategory, SearchCategoryRule, SearchZone
 from apps.configuration.services import save_business_profile
 from apps.integrations.contracts import (
     ExtractedBusiness,
@@ -30,7 +29,7 @@ from apps.integrations.contracts import (
     SearchRequest,
 )
 from apps.integrations.fakes import MockExtractorProvider
-from apps.prospects.email_validation import MockMXResolver
+from apps.prospects.email_validation import MockMXResolver, MXStatus
 from apps.prospects.models import Prospect, ProspectEmail, ProspectIdentity
 
 
@@ -72,8 +71,34 @@ def _campaign(
     cost_limit: Decimal = Decimal("10"),
 ) -> Campaign:
     save_business_profile(owner=owner, values=_profile_values())
-    category = SearchCategory.objects.get(name="Bobinados de motores")
-    zone = SearchZone.objects.get(name="Palermo")
+    category, _ = SearchCategory.objects.get_or_create(name="Bobinados de motores")
+    SearchCategoryRule.objects.get_or_create(
+        category=category,
+        taxonomy_code="b2b_equipment_maintenance_and_repair",
+        defaults={"name_terms": ["bobinad*"]},
+    )
+    zone, _ = SearchZone.objects.get_or_create(
+        name="Palermo",
+        defaults={
+            "kind": SearchZone.Kind.NEIGHBORHOOD,
+            "location_text": "Palermo, CABA, Argentina",
+            "boundary_geojson": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [-58.45, -34.60],
+                        [-58.40, -34.60],
+                        [-58.40, -34.55],
+                        [-58.45, -34.55],
+                        [-58.45, -34.60],
+                    ]
+                ],
+            },
+            "boundary_bbox": [-58.45, -34.60, -58.40, -34.55],
+            "boundary_hash": "test-palermo-boundary-v1",
+            "boundary_source": "test fixture",
+        },
+    )
     campaign = create_campaign(
         actor=owner,
         values={
@@ -119,19 +144,92 @@ def test_mock_search_run_is_deterministic_and_tracks_business_without_email(
     )
 
     assert completed.state == SearchRun.State.SUCCEEDED
-    assert completed.provider_request_id.startswith("fake-request-")
+    assert completed.provider_request_id == ""
     assert completed.response_json["fixture_unknown"]["schema_can_change"] is True
     assert completed.raw_count == 2
     assert completed.email_count == 1
     assert completed.no_email_count == 1
     assert completed.duplicate_count == 0
-    prospect = Prospect.objects.get()
+    assert Prospect.objects.count() == 2
+    prospect = Prospect.objects.get(pipeline_state=Prospect.PipelineState.EMAIL_FOUND)
     assert prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND
     assert prospect.emails.get(is_primary=True).normalized_email == "ventas@taller-demo.example"
-    assert ProviderUsage.objects.get(run=completed).units == 2
+    assert Prospect.objects.filter(pipeline_state=Prospect.PipelineState.DISCOVERED).count() == 1
+    usage = ProviderUsage.objects.get(run=completed)
+    assert usage.units == 2
+    assert usage.operation == "fake_places_query"
+    assert usage.estimated_cost == usage.actual_cost == Decimal("0")
     assert ensure_next_search_run(campaign.pk) is None
     campaign.refresh_from_db()
     assert campaign.discovery_state == Campaign.DiscoveryState.EXHAUSTED_QUERIES
+
+
+class TransientMXResolver:
+    def resolve(self, domain: str) -> MXStatus:
+        del domain
+        return MXStatus.TRANSIENT
+
+
+@pytest.mark.django_db
+def test_transient_direct_mx_does_not_retry_or_abort_the_local_search_page(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign = _campaign(owner)
+    run = ensure_next_search_run(campaign.pk)
+    assert run is not None
+
+    completed = advance_search_run(
+        run.pk,
+        provider=MockExtractorProvider(),
+        resolver=TransientMXResolver(),
+    )
+
+    assert completed.state == SearchRun.State.SUCCEEDED
+    assert completed.email_count == 0
+    assert completed.no_email_count == 2
+    assert Prospect.objects.filter(pipeline_state=Prospect.PipelineState.DISCOVERED).count() == 2
+
+
+@pytest.mark.django_db
+def test_search_query_uses_stable_cursor_for_replay_safe_pages(
+    monkeypatch: pytest.MonkeyPatch,
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    monkeypatch.setattr(
+        "apps.campaigns.extraction._extractor_batch_size",
+        lambda owner_id: 1,
+    )
+    campaign = _campaign(owner)
+
+    first = ensure_next_search_run(campaign.pk)
+    assert first is not None
+    first = advance_search_run(
+        first.pk,
+        provider=MockExtractorProvider(),
+        resolver=MockMXResolver(),
+    )
+    first.query.refresh_from_db()
+    assert first.cursor
+    assert first.query.state == SearchQuery.State.PENDING
+
+    second = ensure_next_search_run(campaign.pk)
+    assert second is not None
+    assert second.idempotency_key.endswith(":2")
+    assert second.request_json["cursor"] == first.cursor
+    second = advance_search_run(
+        second.pk,
+        provider=MockExtractorProvider(),
+        resolver=MockMXResolver(),
+    )
+
+    second.query.refresh_from_db()
+    assert second.cursor == ""
+    assert second.query.state == SearchQuery.State.SUCCEEDED
+    assert SearchRun.objects.filter(query=second.query).count() == 2
+    assert Prospect.objects.count() == 2
 
 
 @pytest.mark.django_db
@@ -159,42 +257,26 @@ def test_global_duplicates_do_not_create_new_prospects(
         second.pk, provider=MockExtractorProvider(), resolver=MockMXResolver()
     )
 
-    assert Prospect.objects.count() == 1
+    assert Prospect.objects.count() == 2
     assert ProspectEmail.objects.count() == 1
     assert duplicate_run.email_count == 0
-    assert duplicate_run.duplicate_count == 1
-    assert duplicate_run.no_email_count == 1
+    assert duplicate_run.duplicate_count == 2
+    assert duplicate_run.no_email_count == 0
 
 
-class AsyncProvider:
+class ReplaySafeProvider:
     def __init__(self) -> None:
-        self.submit_calls = 0
-        self.poll_calls = 0
+        self.search_calls = 0
         self.parse_calls = 0
         self.run: SearchRun | None = None
 
-    def extract(self, request: SearchRequest) -> ExtractionBatch:
-        return self.submit(request)
-
-    def submit(self, request: SearchRequest) -> ExtractionBatch:
+    def search(self, request: SearchRequest) -> ExtractionBatch:
         del request
-        self.submit_calls += 1
-        return ExtractionBatch(
-            status="PENDING",
-            request_id="durable-provider-id",
-            raw_payload={"id": "durable-provider-id", "status": "Pending"},
-        )
-
-    def poll(self, *, request_id: str, timeout_seconds: float = 30.0) -> ExtractionBatch:
-        del timeout_seconds
-        self.poll_calls += 1
-        assert request_id == "durable-provider-id"
+        self.search_calls += 1
         return ExtractionBatch(
             status="SUCCEEDED",
-            request_id=request_id,
             raw_payload={
-                "id": request_id,
-                "status": "Success",
+                "status": "SUCCEEDED",
                 "data": [{"provider_id": "async-1"}],
             },
             units=Decimal("7.5"),
@@ -202,7 +284,7 @@ class AsyncProvider:
 
     def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]:
         self.parse_calls += 1
-        assert raw_payload["status"] == "Success"
+        assert raw_payload["status"] == "SUCCEEDED"
         assert self.run is not None
         self.run.refresh_from_db()
         assert self.run.raw_persisted_at is not None
@@ -218,26 +300,21 @@ class AsyncProvider:
 
 
 @pytest.mark.django_db
-def test_restart_polls_existing_job_and_does_not_duplicate_results(
+def test_replay_safe_search_persists_raw_before_parsing_and_deduplicates_results(
     owner: User, private_catalog_dir: Path
 ) -> None:
     del private_catalog_dir
     campaign = _campaign(owner)
     run = ensure_next_search_run(campaign.pk)
     assert run is not None
-    provider = AsyncProvider()
+    provider = ReplaySafeProvider()
     provider.run = run
-
-    pending = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
-    assert pending.state == SearchRun.State.RETRY_WAIT
-    assert pending.provider_request_id == "durable-provider-id"
 
     completed = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
     repeated = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
 
     assert completed.state == repeated.state == SearchRun.State.SUCCEEDED
-    assert provider.submit_calls == 1
-    assert provider.poll_calls == 1
+    assert provider.search_calls == 1
     assert provider.parse_calls == 1
     assert Prospect.objects.count() == 1
     assert ProviderUsage.objects.get(run=completed).units == Decimal("7.5")
@@ -270,17 +347,17 @@ def test_periodic_recovery_reconstructs_next_query_after_lost_message(
     assert SearchRun.objects.filter(campaign=campaign, state=SearchRun.State.SUCCEEDED).count() == 2
     campaign.refresh_from_db()
     assert campaign.discovery_state == Campaign.DiscoveryState.EXHAUSTED_QUERIES
-    assert Prospect.objects.count() == 1
+    assert Prospect.objects.count() == 2
 
 
 class CountingProvider(MockExtractorProvider):
     def __init__(self) -> None:
         super().__init__()
-        self.submit_calls = 0
+        self.search_calls = 0
 
-    def submit(self, request: SearchRequest) -> ExtractionBatch:
-        self.submit_calls += 1
-        return super().submit(request)
+    def search(self, request: SearchRequest) -> ExtractionBatch:
+        self.search_calls += 1
+        return super().search(request)
 
 
 @pytest.mark.django_db
@@ -301,7 +378,7 @@ def test_pause_and_cancel_prevent_provider_effects_and_keep_runs_recoverable(
     )
     paused_run = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
     assert paused_run.state == SearchRun.State.RETRY_WAIT
-    assert provider.submit_calls == 0
+    assert provider.search_calls == 0
 
     transition_campaign(
         campaign_id=campaign.pk,
@@ -310,7 +387,7 @@ def test_pause_and_cancel_prevent_provider_effects_and_keep_runs_recoverable(
     )
     completed = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
     assert completed.state == SearchRun.State.SUCCEEDED
-    assert provider.submit_calls == 1
+    assert provider.search_calls == 1
 
     second_campaign = _campaign(owner)
     cancelled_run = ensure_next_search_run(second_campaign.pk)
@@ -326,7 +403,7 @@ def test_pause_and_cancel_prevent_provider_effects_and_keep_runs_recoverable(
         resolver=MockMXResolver(),
     )
     assert result.state == SearchRun.State.CANCELLED
-    assert provider.submit_calls == 1
+    assert provider.search_calls == 1
 
 
 @pytest.mark.django_db
@@ -383,11 +460,10 @@ def test_extraction_dispatch_failure_finishes_observability_job(
 
 
 class MultiEmailProvider(MockExtractorProvider):
-    def submit(self, request: SearchRequest) -> ExtractionBatch:
+    def search(self, request: SearchRequest) -> ExtractionBatch:
         del request
         return ExtractionBatch(
             status="SUCCEEDED",
-            request_id="multi-email-request",
             raw_payload={"status": "Success", "data": [{"id": 1}, {"id": 2}]},
         )
 
@@ -469,7 +545,7 @@ def test_bounce_suppression_invalidates_existing_prospect_email_even_when_merged
 
 
 @pytest.mark.django_db
-def test_restart_never_resubmits_ambiguous_job_without_provider_id(
+def test_restart_replays_stale_local_search_without_provider_id(
     owner: User, private_catalog_dir: Path
 ) -> None:
     del private_catalog_dir
@@ -478,25 +554,23 @@ def test_restart_never_resubmits_ambiguous_job_without_provider_id(
     assert run is not None
     old = run.created_at - timedelta(minutes=10)
     SearchRun.objects.filter(pk=run.pk).update(state=SearchRun.State.RUNNING, updated_at=old)
-    provider = AsyncProvider()
-    provider.run = run
+    provider = CountingProvider()
 
-    failed = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
+    completed = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
 
-    assert failed.state == SearchRun.State.FAILED_PERMANENT
-    assert "no se reenvía" in failed.error
-    assert provider.submit_calls == 0
+    assert completed.state == SearchRun.State.SUCCEEDED
+    assert provider.search_calls == 1
 
 
 class RateLimitedOnceProvider(MockExtractorProvider):
     def __init__(self) -> None:
         self.calls = 0
 
-    def submit(self, request: SearchRequest) -> ExtractionBatch:
+    def search(self, request: SearchRequest) -> ExtractionBatch:
         self.calls += 1
         if self.calls == 1:
             raise RateLimitError("Cuota temporal", retry_after=1)
-        return super().submit(request)
+        return super().search(request)
 
 
 @pytest.mark.django_db
@@ -515,11 +589,11 @@ def test_provider_error_is_visible_and_retryable(owner: User, private_catalog_di
     recovered = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
     assert recovered.state == SearchRun.State.SUCCEEDED
     assert recovered.error == ""
-    assert Prospect.objects.count() == 1
+    assert Prospect.objects.count() == 2
 
 
 @pytest.mark.django_db
-def test_discovery_stops_for_qualified_target_raw_limit_and_cost(
+def test_discovery_stops_for_qualified_target_with_target_first_precedence(
     owner: User, private_catalog_dir: Path
 ) -> None:
     del private_catalog_dir
@@ -537,34 +611,7 @@ def test_discovery_stops_for_qualified_target_raw_limit_and_cost(
     assert raw_run is not None
     advance_search_run(raw_run.pk, provider=MockExtractorProvider(), resolver=MockMXResolver())
     raw_campaign.refresh_from_db()
-    assert raw_campaign.discovery_state == Campaign.DiscoveryState.EXHAUSTED_RAW_LIMIT
-
-
-@pytest.mark.django_db
-@override_settings(OUTSCRAPER_API_KEY="credential", OUTSCRAPER_MAX_COST_PER_RESULT=Decimal("1"))
-def test_cost_reservation_stops_before_starting_unaffordable_job(
-    owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    campaign = _campaign(owner, provider="outscraper", cost_limit=Decimal("0.50"))
-    assert ensure_next_search_run(campaign.pk) is None
-    campaign.refresh_from_db()
-    assert campaign.discovery_state == Campaign.DiscoveryState.EXHAUSTED_COST
-    assert SearchRun.objects.filter(campaign=campaign).count() == 0
-
-
-@pytest.mark.django_db
-@override_settings(OUTSCRAPER_API_KEY="credential", OUTSCRAPER_MAX_COST_PER_RESULT=Decimal("0.01"))
-def test_real_search_run_can_be_created_with_environment_credential(
-    owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    campaign = _campaign(owner, provider="outscraper", cost_limit=Decimal("10"))
-
-    run = ensure_next_search_run(campaign.pk)
-
-    assert run is not None
-    assert run.provider == "outscraper"
-    assert run.state == SearchRun.State.PENDING
-    assert run.provider_request_id == ""
-    assert run.request_json["enrichment"] == ["contacts_n_leads"]
+    # The first row both reaches the eligible-enrollment objective and exhausts
+    # the raw cap. The documented target-first precedence reports the outcome
+    # most useful to the operator: the campaign found its requested audience.
+    assert raw_campaign.discovery_state == Campaign.DiscoveryState.TARGET_REACHED

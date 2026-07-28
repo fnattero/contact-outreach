@@ -1,86 +1,91 @@
+{% load static contact_ui %}
 <!doctype html>
-<html lang="es">
+<html lang="es" class="no-js">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
     <title>{% block title %}Contact Outreach{% endblock %}</title>
-    <style>
-        :root { color-scheme: light; font-family: system-ui, sans-serif; }
-        body { margin: 0; background: #f5f7fb; color: #172033; }
-        header { background: #172033; color: white; padding: 0.9rem 1.5rem; }
-        nav { max-width: 76rem; margin: auto; display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
-        nav a { color: white; text-decoration: none; font-weight: 700; }
-        nav form { margin-left: auto; }
-        main { max-width: 76rem; margin: 2rem auto; padding: 0 1.25rem; }
-        .pill { border-radius: 99px; padding: 0.25rem 0.65rem; background: #fff3cd; color: #6a4b00; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
-        .card { background: white; border: 1px solid #dce2ec; border-radius: 0.75rem; padding: 1.1rem; }
-        .muted { color: #5f6b7a; }
-        button { border: 0; border-radius: 0.4rem; padding: 0.55rem 0.8rem; cursor: pointer; }
-        nav button { background: transparent; color: white; text-decoration: underline; }
-        input:not([type="checkbox"]):not([type="radio"]), select, textarea { width: 100%; box-sizing: border-box; padding: 0.65rem; margin-top: 0.3rem; }
-        label { font-weight: 650; }
-        form p { margin: 0 0 1rem; }
-        button, .button { background: #2457d6; color: white; text-decoration: none; display: inline-block; }
-        .danger { background: #a52626; }
-        .secondary { background: #576273; }
-        table { width: 100%; border-collapse: collapse; background: white; }
-        th, td { text-align: left; padding: 0.7rem; border-bottom: 1px solid #dce2ec; vertical-align: top; }
-        .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-        .actions form { margin: 0; }
-        .messages { padding: 0; list-style: none; }
-        .messages li { background: #e4f3e8; border: 1px solid #aad1b3; padding: 0.7rem; border-radius: 0.4rem; }
-        .messages li.error { background: #fae7e7; border-color: #dda9a9; }
-        .form-card { max-width: 45rem; }
-        .checkbox-list ul { columns: 2; list-style: none; padding: 0; }
-        .auth { max-width: 25rem; margin: 4rem auto; }
-        .errorlist { color: #9d1c1c; }
-        .error-text { color: #9d1c1c; }
-        .table-scroll { overflow-x: auto; }
-        .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.8rem; align-items: end; margin-bottom: 1rem; }
-        .filters .actions { align-items: end; }
-        .pagination { color: inherit; margin-top: 1rem; justify-content: center; }
-        .pagination a { color: white; }
-        :focus-visible { outline: 3px solid #f0a500; outline-offset: 2px; }
-        .skip-link { position: absolute; left: -9999px; }
-        .skip-link:focus { left: 1rem; top: 1rem; background: white; color: #172033; padding: 0.7rem; z-index: 10; }
-        details.confirm { background: white; border: 1px solid #dce2ec; border-radius: 0.4rem; padding: 0.5rem; }
-    </style>
+    <script src="{% static 'js/boot.js' %}"></script>
+    <link rel="stylesheet" href="{% static 'css/tokens.css' %}">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    <link rel="stylesheet" href="{% static 'css/layout.css' %}">
+    <link rel="stylesheet" href="{% static 'css/components.css' %}">
+    <link rel="stylesheet" href="{% static 'css/pages.css' %}">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
-    <header>
-        <nav aria-label="Navegación principal">
-            <a href="{% url 'dashboard' %}">Contact Outreach</a>
-            {% if user.is_authenticated %}
-                <a href="{% url 'campaigns' %}">Campañas</a>
-                <a href="{% url 'prospects' %}">Prospectos</a>
-                <a href="{% url 'outbound-messages' %}">Envíos</a>
-                <a href="{% url 'business-profile' %}">Perfil</a>
-                <a href="{% url 'integrations' %}">Integraciones</a>
-                <a href="{% url 'categories' %}">Rubros</a>
-                <a href="{% url 'zones' %}">Zonas</a>
-                <a href="{% url 'catalogs' %}">Catálogos</a>
-                <a href="{% url 'gmail-settings' %}">Gmail</a>
-                <a href="{% url 'responses' %}">Respuestas</a>
-                <a href="{% url 'suppressions' %}">Supresiones</a>
-                <a href="{% url 'audit-log' %}">Auditoría</a>
-                <a href="{% url 'jobs' %}">Jobs</a>
-                <span class="pill">{{ runtime_send_mode }} · kill switch {% if runtime_kill_switch %}activo{% else %}inactivo{% endif %}</span>
-                <form method="post" action="{% url 'logout' %}">
-                    {% csrf_token %}
-                    <button type="submit">Cerrar sesión</button>
-                </form>
-            {% endif %}
-        </nav>
-    </header>
-    <main id="main-content" tabindex="-1">
-        {% if messages %}
-            <ul class="messages" role="status" aria-live="polite">
-                {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
-            </ul>
-        {% endif %}
-        {% block content %}{% endblock %}
-    </main>
+    {% if user.is_authenticated %}
+    {% attention_count user as attention_total %}
+    <div class="app-shell">
+        <aside class="sidebar" id="app-navigation" aria-label="Navegación principal">
+            <a class="brand" href="{% url 'dashboard' %}">
+                <span class="brand__mark" aria-hidden="true">CO</span>
+                <span><span class="brand__name">Contact Outreach</span><span class="brand__meta">Operaciones comerciales</span></span>
+            </a>
+            <div class="sidebar__section">
+                <div class="sidebar__label">Operación</div>
+                <nav class="sidebar__nav">
+                    <a class="sidebar__link" href="{% url 'dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-3H4v3Zm10 0h6v-9h-6v9Zm0-13h6V4h-6v3Z"/></svg>Resumen</a>
+                    <a class="sidebar__link" href="{% url 'campaigns' %}" {% if request.resolver_match.url_name == 'campaigns' or request.resolver_match.url_name == 'campaign-create' or request.resolver_match.url_name == 'campaign-detail' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 3v4m8-4v4M4 10h16"/></svg>Campañas</a>
+                    <a class="sidebar__link" href="{% url 'contacts' %}" {% if request.resolver_match.url_name == 'contacts' or request.resolver_match.url_name == 'contact-create' or request.resolver_match.url_name == 'contact-detail' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.4-3.2 2.2-5 5.5-5s5.1 1.8 5.5 5M16 8h5m-2.5-2.5v5"/></svg>Contactos</a>
+                    <a class="sidebar__link" href="{% url 'attention' %}" {% if request.resolver_match.url_name == 'attention' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a7 7 0 0 0-7 7v4l-2 3h18l-2-3v-4a7 7 0 0 0-7-7Z"/><path d="M9.5 20h5"/></svg><span>Necesita atención</span>{% if attention_total %}<span class="sidebar__count" aria-label="Tareas pendientes: {{ attention_total }}">{{ attention_total }}</span>{% endif %}</a>
+                    <a class="sidebar__link" href="{% url 'outbound-messages' %}" {% if request.resolver_match.url_name == 'outbound-messages' or request.resolver_match.url_name == 'outbound-detail' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-8-8 18-2-8-8-2Z"/><path d="m11 13 5-5"/></svg>Correos</a>
+                </nav>
+            </div>
+            {% if can_administer %}<div class="sidebar__section">
+                <div class="sidebar__label">Configuración</div>
+                <nav class="sidebar__nav">
+                    <a class="sidebar__link" href="{% url 'business-profile' %}" {% if request.resolver_match.url_name == 'business-profile' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V7l8-4 8 4v14M8 10h2m4 0h2M8 14h2m4 0h2M9 21v-3h6v3"/></svg>Perfil</a>
+                    <a class="sidebar__link" href="{% url 'automation-settings' %}" {% if request.resolver_match.url_name == 'automation-settings' or request.resolver_match.url_name == 'decision-review' or request.resolver_match.url_name == 'knowledge-create' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>Respuesta automática</a>
+                    <a class="sidebar__link" href="{% url 'integrations' %}" {% if request.resolver_match.url_name == 'integrations' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12h8M12 8v8"/><circle cx="12" cy="12" r="9"/></svg>Integraciones</a>
+                    <a class="sidebar__link" href="{% url 'overture-datasets' %}" {% if request.resolver_match.url_name == 'overture-datasets' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Datos de búsqueda</a>
+                    <a class="sidebar__link" href="{% url 'categories' %}" {% if request.resolver_match.url_name == 'categories' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 7 0 9 9-7 7-9-9V4Z"/><circle cx="8" cy="8" r="1"/></svg>Rubros</a>
+                    <a class="sidebar__link" href="{% url 'zones' %}" {% if request.resolver_match.url_name == 'zones' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>Zonas personalizadas</a>
+                    <a class="sidebar__link" href="{% url 'catalogs' %}" {% if request.resolver_match.url_name == 'catalogs' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h5M9 13h6m-6 4h6"/></svg>Catálogos</a>
+                    <a class="sidebar__link" href="{% url 'gmail-settings' %}" {% if request.resolver_match.url_name == 'gmail-settings' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z"/><path d="m3 7 9 7 9-7"/></svg>Gmail</a>
+                </nav>
+            </div>{% endif %}
+            {% if can_administer %}<div class="sidebar__section">
+                <div class="sidebar__label">Sistema</div>
+                <nav class="sidebar__nav">
+                    {% if can_administer %}<a class="sidebar__link" href="{% url 'account-users' %}" {% if request.resolver_match.url_name == 'account-users' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.4-3.2 2.2-5 5.5-5s5.1 1.8 5.5 5M16 8h5m-2.5-2.5v5"/></svg>Usuarios</a>{% endif %}
+                    <a class="sidebar__link" href="{% url 'jobs' %}" {% if request.resolver_match.url_name == 'jobs' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>Tareas</a>
+                    <a class="sidebar__link" href="{% url 'audit-log' %}" {% if request.resolver_match.url_name == 'audit-log' %}aria-current="page"{% endif %}><svg class="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v17H5zM9 2h6v4H9zM8 10h8m-8 4h8m-8 4h5"/></svg>Auditoría</a>
+                </nav>
+            </div>{% endif %}
+            <div class="sidebar__footer">
+                <div class="user-card">
+                    <span class="user-avatar" aria-hidden="true">{{ user.username|slice:":2" }}</span>
+                    <span class="user-card__name">{{ user.username }}</span>
+                    <a href="{% url 'account-security' %}" class="logout-button" title="Seguridad de la cuenta"><span class="visually-hidden">Seguridad de la cuenta</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 3 8.1 7 10 4-1.9 7-5.2 7-10V6l-7-3Z"/></svg></a>
+                    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="logout-button" type="submit" title="Cerrar sesión"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5m4-4 4-3-4-3m4 3H9"/></svg><span class="visually-hidden">Cerrar sesión</span></button></form>
+                </div>
+            </div>
+        </aside>
+        <button class="nav-overlay" type="button" data-nav-overlay tabindex="-1" aria-label="Cerrar navegación"></button>
+        <div class="app-main">
+            <header class="topbar">
+                <button class="mobile-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="app-navigation"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span class="visually-hidden">Abrir navegación</span></button>
+                <div class="topbar__context">
+                    <div class="breadcrumb"><span>Contact Outreach</span><span aria-hidden="true">/</span><span>{% block breadcrumb %}Operación{% endblock %}</span></div>
+                    <p class="topbar__title">{% block page_title %}Resumen operativo{% endblock %}</p>
+                </div>
+                {% if can_administer %}<div class="topbar__status" aria-label="Estado de seguridad">
+                    {% if runtime_send_mode == 'live' %}<span class="status-chip status-chip--danger" data-tooltip="El sistema permite entregas reales, pero cada correo debe estar autorizado por la aprobación elegida y superar todos los controles."><span class="status-chip__label">Modo</span> EN VIVO</span>{% else %}<span class="status-chip status-chip--simulation" data-tooltip="Los correos se preparan y validan sin enviarse a destinatarios reales."><span class="status-chip__label">Modo</span> SIMULACIÓN</span>{% endif %}
+                    {% if runtime_kill_switch %}<span class="status-chip status-chip--warning" data-tooltip="Bloqueo general que impide cualquier envío real, aunque una campaña esté configurada en vivo."><span class="status-chip__label">Bloqueo general</span> activo</span>{% else %}<span class="status-chip status-chip--safe" data-tooltip="El bloqueo general está desactivado; siguen vigentes la aprobación elegida y los demás controles."><span class="status-chip__label">Bloqueo general</span> inactivo</span>{% endif %}
+                    <span class="status-chip status-chip--safe"><span class="status-chip__label">Sistema</span> disponible</span>
+                </div>{% endif %}
+            </header>
+            <main class="content" id="main-content" tabindex="-1">
+                {% if messages %}<ul class="messages" aria-live="polite">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>{% endif %}
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+    {% else %}
+        <main id="main-content" tabindex="-1">{% block auth_content %}{% block content_anonymous %}{% endblock %}{% endblock %}</main>
+    {% endif %}
+    <script src="{% static 'js/app.js' %}" defer></script>
 </body>
 </html>

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Mensajes fijos de campaña · Contact Outreach{% endblock %}
+{% block breadcrumb %}Configuración / Mensajes fijos{% endblock %}
+{% block page_title %}Mensajes fijos de campaña{% endblock %}
+{% block content %}
+<header class="page-header"><div class="page-header__copy"><h1>Mensajes fijos de campaña</h1><p>Este es el texto exacto que reciben todos los contactos en cada etapa. Cambiarlo no afecta correos ya enviados ni campañas en curso: sólo se aplica a las campañas que se inicien después de guardar.</p></div></header>
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+<section class="panel">
+    <div class="panel__header"><div><h2>Mensajes vigentes</h2><p class="muted">Cada uno indica el número de revisión aprobada y cuándo se aprobó.</p></div></div>
+    <div class="panel__body section-stack">
+        <article class="card">
+            <h3>{{ initial.get_kind_display }}</h3>
+            <p class="muted">Revisión {{ initial.revision }} · aprobada el {{ initial.approved_at|date:"d/m/Y H:i" }}</p>
+            <p><strong>Asunto:</strong> {{ initial.subject }}</p>
+            <p>{{ initial.body|linebreaksbr }}</p>
+        </article>
+        <article class="card">
+            <h3>{{ reminder.get_kind_display }}</h3>
+            <p class="muted">Revisión {{ reminder.revision }} · aprobada el {{ reminder.approved_at|date:"d/m/Y H:i" }}</p>
+            <p class="muted">Sin asunto propio: continúa el mismo hilo de correo del mensaje inicial.</p>
+            <p>{{ reminder.body|linebreaksbr }}</p>
+        </article>
+        <article class="card">
+            <h3>{{ referred_proposal.get_kind_display }}</h3>
+            <p class="muted">Revisión {{ referred_proposal.revision }} · aprobada el {{ referred_proposal.approved_at|date:"d/m/Y H:i" }}</p>
+            <p><strong>Asunto:</strong> {{ referred_proposal.subject }}</p>
+            <p>{{ referred_proposal.body|linebreaksbr }}</p>
+        </article>
+    </div>
+</section>
+<form method="post" class="panel form-card" novalidate>
+    {% csrf_token %}
+    <div class="panel__header"><div><h2>Aprobar una nueva revisión</h2><p class="muted">Elegí qué mensaje reemplazar y escribí el texto completo. No se admiten datos variables como nombres o direcciones dentro del mensaje.</p></div></div>
+    <div class="panel__body">
+        {% include "includes/field.html" with field=form.kind %}
+        {% include "includes/field.html" with field=form.subject %}
+        {% include "includes/field.html" with field=form.body full=True %}
+    </div>
+    <div class="panel__footer actions"><button class="button" type="submit">Aprobar nueva revisión</button><span class="muted">Queda activa de inmediato para campañas nuevas.</span></div>
+</form>
+{% endblock %}

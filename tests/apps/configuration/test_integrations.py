@@ -16,10 +16,8 @@ from apps.configuration.forms import IntegrationConfigurationForm
 from apps.configuration.integrations import (
     GMAIL_CLIENT_SECRET_PURPOSE,
     LLM_KEY_PURPOSE,
-    OUTSCRAPER_KEY_PURPOSE,
     get_gmail_oauth_client_secret,
     get_llm_api_key,
-    get_outscraper_api_key,
     redact_provider_error,
     runtime_integration_configuration,
     save_integration_configuration,
@@ -34,7 +32,7 @@ from apps.integrations.factory import (
 )
 from apps.integrations.gmail import GmailAPIProvider
 from apps.integrations.llm import OpenAICompatibleProvider
-from apps.integrations.outscraper import OutscraperProvider
+from apps.integrations.overture import OverturePlacesProvider
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection
 
@@ -42,12 +40,8 @@ from apps.mailbox.models import GmailConnection
 def integration_values(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "extractor_provider": "fake",
-        "outscraper_api_key": "",
-        "remove_outscraper_api_key": False,
-        "outscraper_base_url": "https://api.outscraper.cloud",
-        "outscraper_max_cost_per_result": Decimal("0.010000"),
-        "outscraper_batch_size": 20,
-        "outscraper_poll_seconds": 30,
+        "overture_min_confidence": Decimal("0.750"),
+        "website_fetcher": "fake",
         "llm_provider": "fake",
         "llm_model": "fake-deterministic",
         "ollama_base_url": "http://127.0.0.1:11434",
@@ -72,7 +66,7 @@ def test_secret_ciphertext_is_randomized_and_bound_to_its_purpose() -> None:
     assert "provider-secret" not in first
     assert decrypt_secret(first, purpose=LLM_KEY_PURPOSE) == "provider-secret"
     with pytest.raises(ValidationError, match="descifrar"):
-        decrypt_secret(first, purpose=OUTSCRAPER_KEY_PURPOSE)
+        decrypt_secret(first, purpose=GMAIL_CLIENT_SECRET_PURPOSE)
 
 
 @pytest.mark.django_db
@@ -95,6 +89,23 @@ def test_integration_page_requires_login_password_and_csrf(owner: User) -> None:
     assert response.status_code == 200
     assert b"contrase\xc3\xb1a actual no es correcta" in response.content.lower()
     assert b"must-not-return-in-html" not in response.content
+    assert not IntegrationConfiguration.objects.exists()
+
+
+@pytest.mark.django_db
+def test_integration_page_reports_non_password_form_errors_without_throttling(
+    client: Client, owner: User
+) -> None:
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("integrations"),
+        integration_values(llm_model=""),
+    )
+
+    assert response.status_code == 200
+    assert "llm_model" in response.context["form"].errors
+    assert "current_password" not in response.context["form"].errors
     assert not IntegrationConfiguration.objects.exists()
 
 
@@ -136,7 +147,6 @@ def test_debug_error_report_redacts_submitted_credentials(
     client.force_login(owner)
     client.raise_request_exception = False
     submitted = integration_values(
-        outscraper_api_key="debug-outscraper-credential",
         llm_api_key="debug-llm-credential",
         gmail_oauth_client_secret="debug-google-credential",
     )
@@ -173,9 +183,9 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
     response = client.post(
         reverse("integrations"),
         integration_values(
-            extractor_provider="outscraper",
-            outscraper_api_key="outscraper-dashboard-secret",
-            outscraper_batch_size=40,
+            extractor_provider="overture",
+            overture_min_confidence=Decimal("0.800"),
+            website_fetcher="http",
             llm_provider="openai-compatible",
             llm_model="provider-model",
             openai_compatible_base_url="https://llm.example.test/v1",
@@ -190,21 +200,15 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
     configuration = IntegrationConfiguration.objects.get(owner=owner)
     serialized_model = " ".join(
         (
-            configuration.outscraper_api_key_encrypted,
             configuration.llm_api_key_encrypted,
             configuration.gmail_oauth_client_secret_encrypted,
         )
     )
     for secret in (
-        "outscraper-dashboard-secret",
         "llm-dashboard-secret",
         "google-dashboard-secret",
     ):
         assert secret not in serialized_model
-    assert (
-        decrypt_secret(configuration.outscraper_api_key_encrypted, purpose=OUTSCRAPER_KEY_PURPOSE)
-        == "outscraper-dashboard-secret"
-    )
     assert (
         decrypt_secret(configuration.llm_api_key_encrypted, purpose=LLM_KEY_PURPOSE)
         == "llm-dashboard-secret"
@@ -218,12 +222,13 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
     )
 
     runtime = runtime_integration_configuration(owner.pk)
-    assert runtime.extractor_provider == "outscraper"
+    assert runtime.extractor_provider == "overture"
+    assert runtime.website_fetcher == "http"
     assert runtime.llm_provider == "openai-compatible"
     assert runtime.gmail_provider == "api"
-    assert runtime.outscraper_batch_size == 40
+    assert runtime.overture_min_confidence == Decimal("0.800")
 
-    extractor = get_extractor_provider("outscraper", owner_id=owner.pk)
+    extractor = get_extractor_provider("overture", owner_id=owner.pk)
     llm = get_llm_provider(
         "openai-compatible",
         base_url="https://llm.example.test/v1",
@@ -231,8 +236,7 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
         owner_id=owner.pk,
     )
     gmail = get_gmail_provider(owner_id=owner.pk)
-    assert isinstance(extractor, OutscraperProvider)
-    assert extractor._api_key == "outscraper-dashboard-secret"
+    assert isinstance(extractor, OverturePlacesProvider)
     assert isinstance(llm, OpenAICompatibleProvider)
     assert llm.api_key == "llm-dashboard-secret"
     assert isinstance(gmail, GmailAPIProvider)
@@ -241,7 +245,7 @@ def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, ow
     audit = AuditEvent.objects.get(action="integration_configuration.saved")
     audit_json = json.dumps({"before": audit.before, "after": audit.after})
     assert "dashboard-secret" not in audit_json
-    assert configuration.outscraper_api_key_encrypted not in audit_json
+    assert configuration.llm_api_key_encrypted not in audit_json
 
     page = client.get(reverse("integrations"))
     assert page.headers["Cache-Control"] == (
@@ -326,7 +330,6 @@ def test_integration_form_rejects_secret_bearing_and_insecure_remote_urls(owner:
     runtime = runtime_integration_configuration(owner.pk)
     form = IntegrationConfigurationForm(
         integration_values(
-            outscraper_base_url="https://attacker.example/collect",
             openai_compatible_base_url="http://attacker.example/v1?key=leak",
         ),
         user=owner,
@@ -334,7 +337,6 @@ def test_integration_form_rejects_secret_bearing_and_insecure_remote_urls(owner:
     )
 
     assert not form.is_valid()
-    assert "outscraper_base_url" in form.errors
     assert "openai_compatible_base_url" in form.errors
 
 
@@ -356,25 +358,23 @@ def test_integration_service_rejects_unsafe_urls_before_persisting(owner: User) 
 def test_restore_validation_reports_ciphertext_without_disclosing_it(owner: User) -> None:
     configuration = save_integration_configuration(
         owner=owner,
-        values=integration_values(outscraper_api_key="valid-secret"),
+        values=integration_values(llm_api_key="valid-secret"),
     )
-    configuration.outscraper_api_key_encrypted = "v1:invalid-ciphertext"
-    configuration.save(update_fields=("outscraper_api_key_encrypted", "updated_at"))
+    configuration.llm_api_key_encrypted = "v1:invalid-ciphertext"
+    configuration.save(update_fields=("llm_api_key_encrypted", "updated_at"))
 
     failures = validate_encrypted_integration_credentials()
 
-    assert failures == [f"credencial Outscraper de {configuration.pk} no descifrable"]
+    assert failures == [f"credencial LLM de {configuration.pk} no descifrable"]
     assert "invalid-ciphertext" not in failures[0]
 
 
 @pytest.mark.django_db
 def test_environment_credentials_remain_a_backward_compatible_fallback(owner: User) -> None:
     with override_settings(
-        OUTSCRAPER_API_KEY="environment-outscraper",
         LLM_API_KEY="environment-llm",
         GMAIL_OAUTH_CLIENT_SECRET="environment-google",
     ):
-        assert get_outscraper_api_key(owner.pk) == "environment-outscraper"
         assert get_llm_api_key(owner.pk) == "environment-llm"
         assert get_gmail_oauth_client_secret(owner.pk) == "environment-google"
 

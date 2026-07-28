@@ -14,13 +14,13 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.views.decorators.debug import sensitive_variables
 
+from apps.accounts.models import Membership
+from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.observability import redact_text
 from apps.audit.services import record_event
 from apps.configuration.models import IntegrationConfiguration
 from apps.core.crypto import decrypt_secret, encrypt_secret
-from apps.integrations.outscraper import OFFICIAL_OUTSCRAPER_HOSTS
 
-OUTSCRAPER_KEY_PURPOSE = "integration.outscraper.api-key"
 LLM_KEY_PURPOSE = "integration.llm.api-key"
 GMAIL_CLIENT_SECRET_PURPOSE = "integration.gmail.oauth-client-secret"
 
@@ -81,12 +81,8 @@ def validate_integration_base_url(
 @dataclass(frozen=True, slots=True)
 class RuntimeIntegrationConfiguration:
     extractor_provider: str
-    outscraper_base_url: str
-    outscraper_max_cost_per_result: Decimal
-    outscraper_batch_size: int
-    outscraper_poll_seconds: int
-    outscraper_credential_source: str
-    outscraper_credential_configured: bool
+    overture_min_confidence: Decimal
+    website_fetcher: str
     llm_provider: str
     llm_model: str
     ollama_base_url: str
@@ -116,7 +112,12 @@ def _configuration(
         queryset = queryset.select_for_update()
     if owner_id is None:
         return None
-    return queryset.filter(owner_id=owner_id).first()
+    workspace_id = (
+        Membership.objects.filter(user_id=owner_id).values_list("workspace_id", flat=True).first()
+    )
+    if workspace_id is None:
+        return None
+    return queryset.filter(workspace_id=workspace_id).first()
 
 
 def configured_integration_owner_id() -> int | None:
@@ -150,12 +151,6 @@ def runtime_integration_configuration(
     owner_id: int | None = None,
 ) -> RuntimeIntegrationConfiguration:
     configuration = _configuration(owner_id)
-    outscraper_source, outscraper_configured = _secret_status(
-        configuration,
-        source_field="outscraper_api_key_source",
-        ciphertext_field="outscraper_api_key_encrypted",
-        environment_value=settings.OUTSCRAPER_API_KEY,
-    )
     llm_source, llm_configured = _secret_status(
         configuration,
         source_field="llm_api_key_source",
@@ -170,13 +165,9 @@ def runtime_integration_configuration(
     )
     if configuration is None:
         return RuntimeIntegrationConfiguration(
-            extractor_provider=settings.EXTRACTOR_PROVIDER,
-            outscraper_base_url=settings.OUTSCRAPER_BASE_URL,
-            outscraper_max_cost_per_result=settings.OUTSCRAPER_MAX_COST_PER_RESULT,
-            outscraper_batch_size=settings.OUTSCRAPER_BATCH_SIZE,
-            outscraper_poll_seconds=settings.OUTSCRAPER_POLL_SECONDS,
-            outscraper_credential_source=outscraper_source,
-            outscraper_credential_configured=outscraper_configured,
+            extractor_provider=IntegrationConfiguration.ExtractorProvider.FAKE,
+            overture_min_confidence=Decimal("0.750"),
+            website_fetcher=settings.WEBSITE_FETCHER,
             llm_provider=settings.LLM_PROVIDER,
             llm_model=settings.LLM_MODEL,
             ollama_base_url=settings.OLLAMA_BASE_URL,
@@ -191,12 +182,8 @@ def runtime_integration_configuration(
         )
     return RuntimeIntegrationConfiguration(
         extractor_provider=configuration.extractor_provider,
-        outscraper_base_url=configuration.outscraper_base_url,
-        outscraper_max_cost_per_result=configuration.outscraper_max_cost_per_result,
-        outscraper_batch_size=configuration.outscraper_batch_size,
-        outscraper_poll_seconds=configuration.outscraper_poll_seconds,
-        outscraper_credential_source=outscraper_source,
-        outscraper_credential_configured=outscraper_configured,
+        overture_min_confidence=configuration.overture_min_confidence,
+        website_fetcher=configuration.website_fetcher,
         llm_provider=configuration.llm_provider,
         llm_model=configuration.llm_model,
         ollama_base_url=configuration.ollama_base_url,
@@ -233,16 +220,6 @@ def _resolve_secret(
     return decrypt_secret(ciphertext, purpose=purpose)
 
 
-def get_outscraper_api_key(owner_id: int | None = None) -> str:
-    return _resolve_secret(
-        owner_id,
-        source_field="outscraper_api_key_source",
-        ciphertext_field="outscraper_api_key_encrypted",
-        environment_value=settings.OUTSCRAPER_API_KEY,
-        purpose=OUTSCRAPER_KEY_PURPOSE,
-    )
-
-
 def get_llm_api_key(owner_id: int | None = None) -> str:
     return _resolve_secret(
         owner_id,
@@ -267,10 +244,8 @@ def integration_configuration_initial(owner_id: int) -> dict[str, object]:
     runtime = runtime_integration_configuration(owner_id)
     return {
         "extractor_provider": runtime.extractor_provider,
-        "outscraper_base_url": runtime.outscraper_base_url,
-        "outscraper_max_cost_per_result": runtime.outscraper_max_cost_per_result,
-        "outscraper_batch_size": runtime.outscraper_batch_size,
-        "outscraper_poll_seconds": runtime.outscraper_poll_seconds,
+        "overture_min_confidence": runtime.overture_min_confidence,
+        "website_fetcher": runtime.website_fetcher,
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
         "ollama_base_url": runtime.ollama_base_url,
@@ -283,13 +258,8 @@ def integration_configuration_initial(owner_id: int) -> dict[str, object]:
 def _safe_snapshot(runtime: RuntimeIntegrationConfiguration) -> dict[str, object]:
     return {
         "extractor_provider": runtime.extractor_provider,
-        "outscraper_base_url": runtime.outscraper_base_url,
-        "outscraper_max_cost_per_result": str(runtime.outscraper_max_cost_per_result),
-        "outscraper_batch_size": runtime.outscraper_batch_size,
-        "outscraper_poll_seconds": runtime.outscraper_poll_seconds,
-        "outscraper_credential": (
-            "configured" if runtime.outscraper_credential_configured else "missing"
-        ),
+        "overture_min_confidence": str(runtime.overture_min_confidence),
+        "website_fetcher": runtime.website_fetcher,
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
         "ollama_base_url": runtime.ollama_base_url,
@@ -346,17 +316,21 @@ def _candidate_secret_configured(
 def save_integration_configuration(
     *, owner: User, values: dict[str, Any]
 ) -> IntegrationConfiguration:
+    membership = require_user_capability(owner, Capability.MANAGE_INTEGRATIONS)
     current_runtime = runtime_integration_configuration(owner.pk)
     configuration = _configuration(owner.pk, for_update=True)
     if configuration is None:
         configuration = IntegrationConfiguration(
             owner=owner,
+            workspace=membership.workspace,
             **integration_configuration_initial(owner.pk),
         )
 
     from apps.mailbox.models import GmailConnection
 
-    existing_connection = GmailConnection.objects.select_for_update().filter(owner=owner).first()
+    existing_connection = (
+        GmailConnection.objects.select_for_update().filter(workspace=membership.workspace).first()
+    )
     gmail_credentials_change = bool(
         values.get("gmail_provider") != current_runtime.gmail_provider
         or values.get("gmail_oauth_client_id", "").strip() != current_runtime.gmail_oauth_client_id
@@ -368,13 +342,14 @@ def save_integration_configuration(
         and existing_connection is not None
         and existing_connection.refresh_token_encrypted
     ):
-        raise ValidationError("Desconectá Gmail antes de cambiar sus credenciales OAuth.")
+        raise ValidationError(
+            "Desconectá Gmail antes de cambiar sus credenciales de autorización con Google."
+        )
 
     editable_fields = (
         "extractor_provider",
-        "outscraper_max_cost_per_result",
-        "outscraper_batch_size",
-        "outscraper_poll_seconds",
+        "overture_min_confidence",
+        "website_fetcher",
         "llm_provider",
         "llm_model",
         "gmail_provider",
@@ -382,11 +357,6 @@ def save_integration_configuration(
     )
     for field in editable_fields:
         setattr(configuration, field, values[field])
-    configuration.outscraper_base_url = validate_integration_base_url(
-        values["outscraper_base_url"],
-        label="Outscraper",
-        official_hosts=OFFICIAL_OUTSCRAPER_HOSTS,
-    )
     configuration.ollama_base_url = validate_integration_base_url(
         values["ollama_base_url"],
         label="Ollama",
@@ -397,14 +367,6 @@ def save_integration_configuration(
         validate_integration_base_url(openai_base_url, label="OpenAI compatible")
         if openai_base_url
         else ""
-    )
-    _set_secret(
-        configuration,
-        value=values.get("outscraper_api_key", ""),
-        remove=bool(values.get("remove_outscraper_api_key")),
-        source_field="outscraper_api_key_source",
-        ciphertext_field="outscraper_api_key_encrypted",
-        purpose=OUTSCRAPER_KEY_PURPOSE,
     )
     _set_secret(
         configuration,
@@ -423,15 +385,6 @@ def save_integration_configuration(
         purpose=GMAIL_CLIENT_SECRET_PURPOSE,
     )
 
-    if configuration.extractor_provider == IntegrationConfiguration.ExtractorProvider.OUTSCRAPER:
-        configured = _candidate_secret_configured(
-            configuration,
-            source_field="outscraper_api_key_source",
-            ciphertext_field="outscraper_api_key_encrypted",
-            environment_value=settings.OUTSCRAPER_API_KEY,
-        )
-        if not configured:
-            raise ValidationError("Outscraper requiere una API key configurada.")
     if configuration.llm_provider == IntegrationConfiguration.LLMProvider.OPENAI_COMPATIBLE:
         configured = _candidate_secret_configured(
             configuration,
@@ -440,7 +393,9 @@ def save_integration_configuration(
             environment_value=settings.LLM_API_KEY,
         )
         if not configured:
-            raise ValidationError("El proveedor OpenAI compatible requiere una API key.")
+            raise ValidationError(
+                "El proveedor compatible con OpenAI requiere una clave de acceso."
+            )
     if configuration.gmail_provider == IntegrationConfiguration.GmailProvider.API:
         configured = _candidate_secret_configured(
             configuration,
@@ -449,7 +404,10 @@ def save_integration_configuration(
             environment_value=settings.GMAIL_OAUTH_CLIENT_SECRET,
         )
         if not configuration.gmail_oauth_client_id.strip() or not configured:
-            raise ValidationError("Google Gmail requiere client ID y client secret OAuth.")
+            raise ValidationError(
+                "Google Gmail requiere el identificador y el secreto de cliente "
+                "para la autorización con Google."
+            )
 
     configuration.revision = current_runtime.revision + 1
     configuration.full_clean()
@@ -469,7 +427,6 @@ def save_integration_configuration(
 def redact_provider_error(error: object, *, owner_id: int | None = None) -> str:
     message = " ".join(str(error).split()) or error.__class__.__name__
     getters: tuple[Callable[[int | None], str], ...] = (
-        get_outscraper_api_key,
         get_llm_api_key,
         get_gmail_oauth_client_secret,
     )
@@ -492,12 +449,6 @@ def redact_provider_error(error: object, *, owner_id: int | None = None) -> str:
 def validate_encrypted_integration_credentials() -> list[str]:
     failures: list[str] = []
     checks = (
-        (
-            "outscraper_api_key_source",
-            "outscraper_api_key_encrypted",
-            OUTSCRAPER_KEY_PURPOSE,
-            "Outscraper",
-        ),
         ("llm_api_key_source", "llm_api_key_encrypted", LLM_KEY_PURPOSE, "LLM"),
         (
             "gmail_oauth_client_secret_source",

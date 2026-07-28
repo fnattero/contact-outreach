@@ -18,6 +18,11 @@ def catalog_upload_path(instance: Catalog, filename: str) -> str:
 
 
 class Catalog(TimestampedUUIDModel):
+    workspace = models.ForeignKey(
+        "accounts.Workspace",
+        on_delete=models.PROTECT,
+        related_name="catalogs",
+    )
     name = models.CharField(max_length=200)
     version = models.PositiveIntegerField()
     file = models.FileField(
@@ -26,7 +31,7 @@ class Catalog(TimestampedUUIDModel):
     original_filename = models.CharField(max_length=255)
     detected_mime = models.CharField(max_length=100)
     byte_size = models.PositiveBigIntegerField()
-    sha256 = models.CharField(max_length=64, unique=True)
+    sha256 = models.CharField(max_length=64)
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -38,7 +43,14 @@ class Catalog(TimestampedUUIDModel):
     class Meta:
         ordering = ("name", "-version")
         constraints = [
-            models.UniqueConstraint(fields=("name", "version"), name="catalog_name_version_unique"),
+            models.UniqueConstraint(
+                fields=("workspace", "name", "version"),
+                name="catalog_workspace_name_version_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("workspace", "sha256"),
+                name="catalog_workspace_sha256_unique",
+            ),
             models.CheckConstraint(condition=Q(byte_size__gt=0), name="catalog_size_positive"),
         ]
 
@@ -47,6 +59,8 @@ class Catalog(TimestampedUUIDModel):
         return str(self.file.name)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self.workspace_id and self.uploaded_by_id:
+            self.workspace_id = self.uploaded_by.membership.workspace_id
         if not self._state.adding:
             previous = Catalog.objects.get(pk=self.pk)
             immutable_values = (
@@ -57,6 +71,7 @@ class Catalog(TimestampedUUIDModel):
                 (previous.detected_mime, self.detected_mime),
                 (previous.byte_size, self.byte_size),
                 (previous.sha256, self.sha256),
+                (previous.workspace_id, self.workspace_id),
                 (previous.uploaded_by_id, self.uploaded_by_id),
             )
             if any(before != after for before, after in immutable_values):

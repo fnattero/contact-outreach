@@ -1,55 +1,43 @@
 {% extends "base.html" %}
-
 {% block title %}Integraciones · Contact Outreach{% endblock %}
-
+{% block breadcrumb %}Configuración / Integraciones{% endblock %}
+{% block page_title %}Integraciones{% endblock %}
 {% block content %}
-<h1>Integraciones</h1>
-<p class="muted">Configurá Gmail, IA y Outscraper sin volver a mostrar credenciales guardadas. Los secretos se cifran con una clave que permanece fuera de la base.</p>
+<header class="page-header"><div class="page-header__copy"><h1>Integraciones</h1><p>Configurá Overture Maps Places, lectura web, inteligencia artificial y Gmail. Los secretos se reciben únicamente al guardar y son de <span class="help-term" data-tooltip="Se pueden reemplazar, pero el sistema nunca vuelve a mostrar su valor guardado.">sólo escritura</span>.</p></div><div class="page-header__actions"><a class="button button--secondary" href="{% url 'overture-datasets' %}">Datos de búsqueda</a><a class="button button--secondary" href="{% url 'gmail-settings' %}">Estado Gmail</a></div></header>
+<div class="alert alert--warning"><div><strong>Configuración de seguridad externa</strong><br>La clave de cifrado, el secreto de Django, la base de datos, Redis, los dominios y certificados seguros, el modo de envío y el bloqueo general nunca se editan desde este panel.</div></div>
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
 
-<div class="card">
-    <strong>Límite de seguridad:</strong>
-    <span><code>FIELD_ENCRYPTION_KEY</code>, <code>DJANGO_SECRET_KEY</code>, base de datos, Redis, hosts/TLS, <code>SEND_MODE</code> y el kill switch siguen siendo configuración externa.</span>
-</div>
-
-<form method="post" class="form-card" autocomplete="off">
+<form method="post" class="section-stack integration-form" autocomplete="off" novalidate>
     {% csrf_token %}
-    {{ form.non_field_errors }}
-
-    <section class="card">
-        <h2>Outscraper</h2>
-        <p>{{ form.extractor_provider.label_tag }}{{ form.extractor_provider }}{{ form.extractor_provider.errors }}</p>
-        <p>{{ form.outscraper_api_key.label_tag }}{{ form.outscraper_api_key }}<small class="muted">{{ form.outscraper_api_key.help_text }}</small>{{ form.outscraper_api_key.errors }}</p>
-        <p>{{ form.remove_outscraper_api_key }} {{ form.remove_outscraper_api_key.label_tag }}{{ form.remove_outscraper_api_key.errors }}</p>
-        <p>{{ form.outscraper_base_url.label_tag }}{{ form.outscraper_base_url }}{{ form.outscraper_base_url.errors }}</p>
-        <p>{{ form.outscraper_max_cost_per_result.label_tag }}{{ form.outscraper_max_cost_per_result }}{{ form.outscraper_max_cost_per_result.errors }}</p>
-        <p>{{ form.outscraper_batch_size.label_tag }}{{ form.outscraper_batch_size }}{{ form.outscraper_batch_size.errors }}</p>
-        <p>{{ form.outscraper_poll_seconds.label_tag }}{{ form.outscraper_poll_seconds }}{{ form.outscraper_poll_seconds.errors }}</p>
+    <section class="panel">
+        <div class="panel__header"><div><h2>Overture Maps Places</h2><p class="muted">Extracción local sin clave de API, dirección remota, ubicación de almacenamiento ni credenciales configurables.</p></div>{% if overture_snapshot %}<span class="badge badge--succeeded">Copia local lista</span>{% else %}<span class="badge badge--pending">Sin copia local</span>{% endif %}</div>
+        <div class="panel__body">
+            <div class="form-grid">{% include "includes/field.html" with field=form.extractor_provider %}{% include "includes/field.html" with field=form.overture_min_confidence %}</div>
+            {% if overture_snapshot %}<div class="form-summary"><div class="summary-item"><span class="summary-item__label">Copia local activa:</span><span class="summary-item__value">{{ overture_snapshot.release_id }}</span></div><div class="summary-item"><span class="summary-item__label">Lugares</span><span class="summary-item__value">{{ overture_snapshot.place_count }}</span></div><div class="summary-item"><span class="summary-item__label">Zonas</span><span class="summary-item__value">{{ overture_snapshot.zone_count }}</span></div></div>{% else %}<div class="alert alert--warning"><div><strong>No hay una copia local lista.</strong><br>Sincronizá una antes de iniciar una campaña Overture.</div></div>{% endif %}
+            {% if overture_latest_release %}<p class="muted flush-top">Última sincronización registrada: <code>{{ overture_latest_release }}</code></p>{% endif %}
+        </div>
+        <div class="panel__footer"><a class="button button--secondary" href="{% url 'overture-datasets' %}">Administrar datos y sincronizar</a></div>
     </section>
 
-    <section class="card">
-        <h2>Proveedor IA</h2>
-        <p>{{ form.llm_provider.label_tag }}{{ form.llm_provider }}{{ form.llm_provider.errors }}</p>
-        <p>{{ form.llm_model.label_tag }}{{ form.llm_model }}{{ form.llm_model.errors }}</p>
-        <p>{{ form.ollama_base_url.label_tag }}{{ form.ollama_base_url }}{{ form.ollama_base_url.errors }}</p>
-        <p>{{ form.openai_compatible_base_url.label_tag }}{{ form.openai_compatible_base_url }}{{ form.openai_compatible_base_url.errors }}</p>
-        <p>{{ form.llm_api_key.label_tag }}{{ form.llm_api_key }}<small class="muted">{{ form.llm_api_key.help_text }}</small>{{ form.llm_api_key.errors }}</p>
-        <p>{{ form.remove_llm_api_key }} {{ form.remove_llm_api_key.label_tag }}{{ form.remove_llm_api_key.errors }}</p>
+    <section class="panel">
+        <div class="panel__header"><div><h2>Sitios web</h2><p class="muted">El lector HTTP real valida el sistema de nombres y cada redirección para impedir <span class="help-term" data-tooltip="Ataque que intenta usar el servidor para acceder a direcciones internas, privadas o reservadas.">accesos indebidos a redes internas</span>, y nunca ejecuta JavaScript.</p></div></div>
+        <div class="panel__body">{% include "includes/field.html" with field=form.website_fetcher %}</div>
     </section>
 
-    <section class="card">
-        <h2>Google Gmail</h2>
-        <p>{{ form.gmail_provider.label_tag }}{{ form.gmail_provider }}{{ form.gmail_provider.errors }}</p>
-        <p>{{ form.gmail_oauth_client_id.label_tag }}{{ form.gmail_oauth_client_id }}{{ form.gmail_oauth_client_id.errors }}</p>
-        <p>{{ form.gmail_oauth_client_secret.label_tag }}{{ form.gmail_oauth_client_secret }}<small class="muted">{{ form.gmail_oauth_client_secret.help_text }}</small>{{ form.gmail_oauth_client_secret.errors }}</p>
-        <p>{{ form.remove_gmail_oauth_client_secret }} {{ form.remove_gmail_oauth_client_secret.label_tag }}{{ form.remove_gmail_oauth_client_secret.errors }}</p>
-        <p><strong>Redirect URI para Google Cloud:</strong><br><code>{{ gmail_redirect_uri }}</code></p>
-        <p class="muted">Creá una credencial OAuth de aplicación web en Google Cloud y registrá exactamente esta URI. Después de guardar, usá <a href="{% url 'gmail-settings' %}">Conectar con Google</a>.</p>
+    <section class="panel">
+        <div class="panel__header"><div><h2>Proveedor de inteligencia artificial</h2><p class="muted">El proveedor, el modelo y la dirección del servicio quedan fijos por campaña. La clave de API cifrada no vuelve a mostrarse.</p></div></div>
+        <div class="panel__body form-grid">{% include "includes/field.html" with field=form.llm_provider %}{% include "includes/field.html" with field=form.llm_model %}{% include "includes/field.html" with field=form.ollama_base_url %}{% include "includes/field.html" with field=form.openai_compatible_base_url %}{% include "includes/field.html" with field=form.llm_api_key full=True %}<div class="field field--full{% if form.remove_llm_api_key.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.remove_llm_api_key }}<span>{{ form.remove_llm_api_key.label }}</span></label>{% if form.remove_llm_api_key.errors %}<div class="field__error" role="alert">{{ form.remove_llm_api_key.errors }}</div>{% endif %}</div></div>
     </section>
 
-    <section class="card">
-        <h2>Confirmar cambio</h2>
-        <p>{{ form.current_password.label_tag }}{{ form.current_password }}<small class="muted">{{ form.current_password.help_text }}</small>{{ form.current_password.errors }}</p>
-        <button type="submit">Guardar integraciones</button>
+    <section class="panel">
+        <div class="panel__header"><div><h2>Google Gmail</h2><p class="muted"><span class="help-term" data-tooltip="Estándar que permite autorizar a la aplicación sin entregarle tu contraseña de Google.">OAuth</span> sólo es necesario para campañas en vivo. Solo revisión y simulación no requieren conexión.</p></div></div>
+        <div class="panel__body form-grid">{% include "includes/field.html" with field=form.gmail_provider %}{% include "includes/field.html" with field=form.gmail_oauth_client_id %}{% include "includes/field.html" with field=form.gmail_oauth_client_secret full=True %}<div class="field field--full{% if form.remove_gmail_oauth_client_secret.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.remove_gmail_oauth_client_secret }}<span>{{ form.remove_gmail_oauth_client_secret.label }}</span></label>{% if form.remove_gmail_oauth_client_secret.errors %}<div class="field__error" role="alert">{{ form.remove_gmail_oauth_client_secret.errors }}</div>{% endif %}</div><div class="field field--full"><span class="field__label"><span class="help-term" data-tooltip="Dirección a la que Google devuelve el navegador después de autorizar la cuenta.">Dirección de retorno para Google Cloud</span></span><code>{{ gmail_redirect_uri }}</code><p class="field__help">Registrá exactamente esta dirección en una credencial OAuth de aplicación web. Después de guardar, conectá la cuenta desde Gmail.</p></div></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Confirmar cambio</h2><p class="muted">Todo guardado de integraciones exige la contraseña actual y queda auditado sin secretos.</p></div></div>
+        <div class="panel__body">{% include "includes/field.html" with field=form.current_password %}</div>
+        <div class="panel__footer"><button class="button" type="submit">Guardar integraciones</button></div>
     </section>
 </form>
 {% endblock %}

@@ -9,16 +9,39 @@ import pytest
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+from apps.configuration.integrations import runtime_integration_configuration
+from contact_outreach import settings as production_settings
 from contact_outreach.settings import env_bool, env_list
+
+
+def test_delivery_worker_mounts_private_catalogs_read_only() -> None:
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text()
+    worker_section = compose.split("  worker:\n", maxsplit=1)[1].split("  beat:\n", maxsplit=1)[0]
+
+    assert "- private_catalogs:/app/private:ro" in worker_section
 
 
 def test_safe_runtime_defaults_use_fake_providers() -> None:
     assert settings.SEND_MODE == "dry-run"
     assert settings.SEND_KILL_SWITCH is True
-    assert settings.EXTRACTOR_PROVIDER == "fake"
+    assert not hasattr(settings, "EXTRACTOR_PROVIDER")
+    assert runtime_integration_configuration().extractor_provider == "fake"
     assert settings.WEBSITE_FETCHER == "fake"
     assert settings.LLM_PROVIDER == "fake"
     assert settings.GMAIL_PROVIDER == "fake"
+    assert settings.AUTO_REPLY_KILL_SWITCH is True
+    assert settings.RELATIONSHIP_KILL_SWITCH is True
+
+
+def test_static_files_are_configured_for_gunicorn() -> None:
+    assert production_settings.MIDDLEWARE[0] == (
+        "apps.core.security.TrustedProxySecurityMiddleware"
+    )
+    assert production_settings.MIDDLEWARE[1] == "django.middleware.security.SecurityMiddleware"
+    assert production_settings.MIDDLEWARE[2] == "whitenoise.middleware.WhiteNoiseMiddleware"
+    assert production_settings.STORAGES["staticfiles"]["BACKEND"] == (
+        "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )
 
 
 def test_test_settings_override_live_parent_environment() -> None:
@@ -28,7 +51,7 @@ def test_test_settings_override_live_parent_environment() -> None:
             "DJANGO_SETTINGS_MODULE": "contact_outreach.settings_test",
             "SEND_MODE": "live",
             "SEND_KILL_SWITCH": "false",
-            "EXTRACTOR_PROVIDER": "outscraper",
+            "EXTRACTOR_PROVIDER": "overture",
             "WEBSITE_FETCHER": "http",
             "LLM_PROVIDER": "openai-compatible",
             "GMAIL_PROVIDER": "api",
@@ -39,11 +62,17 @@ def test_test_settings_override_live_parent_environment() -> None:
         part for part in (source_path, environment.get("PYTHONPATH", "")) if part
     )
     script = """
+import django
 from django.conf import settings
+
+django.setup()
 
 assert settings.SEND_MODE == "dry-run"
 assert settings.SEND_KILL_SWITCH is True
-assert settings.EXTRACTOR_PROVIDER == "fake"
+assert not hasattr(settings, "EXTRACTOR_PROVIDER")
+
+from apps.configuration.integrations import runtime_integration_configuration
+assert runtime_integration_configuration().extractor_provider == "fake"
 assert settings.WEBSITE_FETCHER == "fake"
 assert settings.LLM_PROVIDER == "fake"
 assert settings.GMAIL_PROVIDER == "fake"

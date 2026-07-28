@@ -47,6 +47,9 @@ ALLOWED_INBOUND_HEADERS = frozenset(
         "date",
         "from",
         "in-reply-to",
+        "feedback-type",
+        "list-id",
+        "list-unsubscribe",
         "message-id",
         "precedence",
         "references",
@@ -263,7 +266,7 @@ class GmailAPIProvider(GmailProvider):
         return self._send(request.raw_message, thread_id=request.thread_id)
 
     def find_by_message_id(self, message_id: str) -> GmailSendResult | None:
-        query = quote(f"rfc822msgid:{message_id}")
+        query = quote(f"in:sent rfc822msgid:{message_id}")
         response = self.transport.request(
             method="GET",
             url=f"{GMAIL_API}/users/me/messages?q={query}&maxResults=2",
@@ -272,6 +275,10 @@ class GmailAPIProvider(GmailProvider):
         messages = response.payload.get("messages", [])
         if not isinstance(messages, list) or not messages:
             return None
+        if len(messages) != 1:
+            raise ValidationProviderError(
+                "Gmail encontró más de un mensaje enviado con el mismo identificador."
+            )
         item = messages[0]
         if not isinstance(item, dict) or not item.get("id") or not item.get("threadId"):
             raise ValidationProviderError("Respuesta de reconciliación Gmail inválida.")

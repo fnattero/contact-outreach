@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET, require_POST
 
+from apps.accounts.permissions import Capability, require_capability
 from apps.audit.models import AuditEvent, BackgroundJob
 from apps.campaigns.delivery import retry_failed_message
 from apps.campaigns.models import OutboundMessage
 from apps.mailbox.tasks import deliver_message_task
 
 
-@login_required
+@require_capability(Capability.VIEW_AUDIT)
+@require_GET
+@never_cache
 def audit_log(request: HttpRequest) -> HttpResponse:
     events = AuditEvent.objects.select_related("actor")
     if query := request.GET.get("q", "").strip():
@@ -39,7 +42,9 @@ def audit_log(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@require_capability(Capability.VIEW_JOBS)
+@require_GET
+@never_cache
 def job_list(request: HttpRequest) -> HttpResponse:
     jobs = BackgroundJob.objects.all()
     if query := request.GET.get("q", "").strip():
@@ -69,14 +74,14 @@ def job_list(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@require_capability(Capability.VIEW_JOBS)
 @require_POST
 def retry_job(request: HttpRequest, job_id: str) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
     job = get_object_or_404(BackgroundJob, pk=job_id)
     if job.entity_type != "OutboundMessage":
-        messages.error(request, "Este job no tiene un reintento manual seguro disponible.")
+        messages.error(request, "Esta tarea no tiene un reintento manual seguro disponible.")
         return redirect("jobs")
     try:
         message = retry_failed_message(
@@ -87,10 +92,21 @@ def retry_job(request: HttpRequest, job_id: str) -> HttpResponse:
     except (OutboundMessage.DoesNotExist, ValidationError) as exc:
         messages.error(request, str(exc))
     else:
-        if message.campaign.state == message.campaign.State.RUNNING:
+        campaign = message.campaign
+        if (
+            message.state == OutboundMessage.State.QUEUED
+            and campaign is not None
+            and campaign.state == campaign.State.RUNNING
+        ):
             deliver_message_task.delay(str(message.pk))
-        messages.success(
-            request,
-            "Se reencoló la misma fila y clave idempotente; no se creó otro mensaje.",
-        )
+        if message.state == OutboundMessage.State.REVIEW_READY:
+            messages.success(
+                request,
+                "El mensaje volvió a revisión y requiere aprobación antes del reintento.",
+            )
+        else:
+            messages.success(
+                request,
+                "Se reencoló la misma fila y clave idempotente; no se creó otro mensaje.",
+            )
     return redirect("jobs")

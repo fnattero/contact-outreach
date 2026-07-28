@@ -1,13 +1,20 @@
 # Contact Outreach
 
-Aplicación local Django para outreach B2B de un único propietario. El incremento actual incluye
-autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría,
-extracción durable, enriquecimiento web seguro, generación personalizada, OAuth Gmail y entrega
-controlada de primeros mensajes. También incluye métricas derivadas, filtros, búsqueda, paginación,
-CSV seguro, progreso/reintento de jobs, logs JSON correlacionados, errores amigables y
-backup/restore verificado. Los proveedores mock
-son el default sin red; Outscraper, el fetch HTTP y los proveedores IA quedan aislados por
-contratos internos y son opt-in.
+Aplicación Django de una sola empresa y varios usuarios para outreach B2B y seguimiento de
+Contactos. Los administradores configuran campañas, aprobaciones, Gmail, información autorizada y
+automatización; los vendedores pueden leer campañas, correos y conversaciones sin modificar nada.
+
+Las campañas buscan empresas por rubro, provincia y distrito, envían un mensaje fijo con uno o más
+PDF, y pueden enviar un único recordatorio si no hubo respuesta. Una respuesta humana convierte a
+toda la empresa en Contacto y la excluye de nuevas campañas. El flujo de IA empieza recién allí:
+en modo observación propone una decisión; en modo automático sólo responde consultas sustentadas o
+redirige una propuesta a una dirección literal validada. Reuniones, precios, negociación,
+reclamos, ambigüedades y fallos siempre crean una tarea para una persona.
+
+PostgreSQL, Redis, Celery, Gmail, Overture y los proveedores de IA quedan detrás de servicios
+idempotentes y contratos internos. Los proveedores fake y los kill switches activos son los
+valores predeterminados. La aplicación incluye métricas derivadas, auditoría, bloqueo de login,
+TOTP para administradores, archivos privados, logs redactados y backup/restore verificado.
 
 ## Requisitos
 
@@ -54,7 +61,8 @@ make --version
 
 La web queda disponible en <http://127.0.0.1:8000/>. El arranque aplica las migraciones built-in
 de Django bajo un advisory lock de PostgreSQL y crea o rota el propietario configurado sin imprimir
-la contraseña. PostgreSQL y Redis no publican puertos al host.
+la contraseña. La imagen recolecta los archivos estáticos y Gunicorn los sirve mediante WhiteNoise;
+no se necesita un servidor Node ni un CDN. PostgreSQL y Redis no publican puertos al host.
 
 Para seguir los logs:
 
@@ -76,8 +84,26 @@ de estado cuando corresponde. No incluye query strings, cuerpos, destinatarios n
   make smoke-worker
   ```
 
-El dashboard requiere iniciar sesión con `OWNER_USERNAME` y `OWNER_PASSWORD` de `.env`. No existe
-registro público. El logout es una acción POST protegida por CSRF.
+El dashboard requiere iniciar sesión con `OWNER_USERNAME` y `OWNER_PASSWORD` de `.env`. Ese primer
+usuario se crea como administrador. No existe registro público: luego un administrador crea cada
+usuario y entrega una sola vez su enlace de activación de 24 horas. Los administradores deben
+configurar TOTP y reciben diez códigos de recuperación de un solo uso. El login se bloquea durante
+30 minutos al quinto intento fallido; también hay protección contra intentos repartidos entre
+muchos nombres de usuario. El logout es una acción POST protegida por CSRF.
+
+## Exposición a Internet
+
+La aplicación incluye configuración de producción para hosts y orígenes exactos, cookies seguras,
+redirección HTTPS, proxy confiable, HSTS gradual, CSP sin scripts inline, protección de frame,
+referrer y tipos de contenido. Los detalles de integraciones y salud degradada son sólo para
+administradores; liveness y readiness públicas no revelan diagnósticos.
+
+Esto no constituye por sí solo un despliegue público: Compose mantiene `HOST_BIND=127.0.0.1` por
+defecto y este alcance no aprovisiona DNS, certificado TLS ni reverse proxy. Antes de publicar debe
+aprobarse un plan HTTPS separado. Como mínimo, ese despliegue deberá definir `APP_ENV=production`,
+`PUBLIC_BASE_URL=https://…`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, cookies y
+redirección seguras; `DJANGO_PROXY_HTTPS=true` sólo se admite junto con la IP o red CIDR exacta del
+proxy en `DJANGO_TRUSTED_PROXY_IPS`. Validar luego con `python src/manage.py check --deploy`.
 
 ## Datos de demostración
 
@@ -89,46 +115,61 @@ make demo
 ```
 
 El comando requiere además la habilitación explícita que agrega el target `demo`; producción nunca
-lo ejecuta automáticamente. Los seeds de las migraciones crean 23 rubros y los 48 barrios oficiales
-de CABA; el comando demo continúa creando únicamente el propietario.
+lo ejecuta automáticamente. Los seeds de las migraciones crean 23 rubros con reglas deterministas,
+las 24 jurisdicciones provinciales, 529 partidos/departamentos/comunas de GeoRef y conservan los 48
+barrios de CABA como nivel seleccionable. Las fuentes oficiales quedan versionadas y atribuidas
+dentro del repositorio; el comando demo continúa creando únicamente el propietario.
 
 ## Configurar una campaña
 
 Después de iniciar sesión:
 
-1. Completar el perfil comercial.
-2. Revisar Integraciones; los defaults permanecen fake hasta habilitarlos expresamente.
-3. Revisar o editar rubros y zonas.
-4. Cargar un PDF válido de hasta 15 MiB en Catálogos.
-5. Crear una campaña, seleccionando al menos un rubro, una zona y una versión de catálogo.
-6. Ajustar objetivo, máximo crudo, costo, límite diario, intervalo, horario, zona horaria y umbral.
-7. Iniciar el borrador para congelar perfil, configuración, selecciones, catálogo y consultas.
+1. Completar el perfil comercial y su firma aprobada.
+2. Revisar Integraciones y seleccionar Overture si se usarán datos reales.
+3. Abrir **Datos de búsqueda** y preparar la partición de cada provincia que se quiera usar.
+4. Revisar los rubros y cargar al menos un PDF válido en Catálogos.
+5. Crear una campaña y elegir una o más provincias; dentro de cada una, marcar sus partidos,
+   departamentos, comunas o barrios.
+6. Elegir uno o más PDF, el calendario, el ritmo, el modo de entrega y si habrá un recordatorio.
+7. Iniciar la búsqueda. Todavía no se envía ningún correo.
+8. Revisar la audiencia completa, el texto fijo exacto, la firma, los PDF y el calendario.
+9. Aprobar toda la campaña —modo recomendado— o aprobar mensajes individuales y luego iniciar sólo
+   los aprobados.
 
 El objetivo inicial es 300. `SEND_MODE` y `SEND_KILL_SWITCH` se muestran en el dashboard pero sólo
-se configuran por entorno. Con los defaults, cualquier campaña es dry-run, el kill switch está
-activo y web/IA usan fakes sin sockets. La extracción mock usa también un resolver MX
-determinístico; la extracción Outscraper usa DNS MX real desde el worker.
+se configuran por entorno y controlan exclusivamente Gmail live. Con los defaults, las campañas
+nuevas siguen siendo dry-run y los proveedores permanecen fake. **Solo revisión** es un modo de
+campaña distinto: deja los correos disponibles para leer, pero nunca entra al flujo Gmail. La
+búsqueda inicial no usa IA para relevancia ni redacción y no personaliza el mensaje por empresa.
 
 Antes de guardar la primera credencial, definir una única `FIELD_ENCRYPTION_KEY` aleatoria en
 `.env` y respaldarla por un canal cifrado separado. Puede generarse sin reutilizar ninguna
 contraseña existente con `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Perderla
 impide recuperar tokens y credenciales; copiarla junto con la base anula la separación de seguridad.
 
-Cada prospecto con email obtiene un snapshot de la home y hasta tres páginas internas. Luego una
-única llamada lógica evalúa relevancia y redacta JSON estructurado. Sólo un resultado enteramente
-válido y sobre el umbral crea un mensaje `PREPARED`; no existe fallback de copy. Beat reconstruye
-la cola desde PostgreSQL: en dry-run genera y hashea el MIME sin llamar Gmail; en live sólo entrega
-si pasan modo, kill switch, conexión probada, cuota, intervalo, horario, catálogo, supresión y
-ledger global. Desde el detalle se puede regenerar únicamente un candidato que todavía no entró
-en entrega.
+Cada empresa se deduplica globalmente dentro del espacio de trabajo y puede tener varios emails. Si
+Overture no aporta uno válido y existe un sitio oficial, el lector busca únicamente direcciones
+visibles y enlaces `mailto:`; nunca inventa direcciones. Antes de preparar, aprobar, encolar y enviar
+se vuelve a comprobar email, Contacto, baja, rebote, restricción, modo, Gmail e integridad de todos
+los PDF. Una reserva transaccional impide que dos campañas escriban al mismo email el mismo día;
+el segundo envío se mueve al próximo día permitido.
 
-Campañas, Prospectos, Envíos, Respuestas, Jobs y Auditoría ofrecen búsqueda, filtros y paginación.
-Prospectos, Envíos y Respuestas exportan el conjunto filtrado a CSV con neutralización de fórmulas.
-Jobs muestra heartbeat, intentos, próximo retry y error redactado. Un fallo final sólo puede
-reintentarse con motivo explícito, sobre la misma fila, Message-ID e idempotency key; un estado
-ambiguo se reconcilia y no ofrece ese botón.
+**Contactos** reúne todos los hilos de una empresa, sus distintas direcciones, procedencia,
+campañas, restricciones, notas, tareas y próximo contacto. **Necesita atención** concentra las
+conversaciones que requieren una persona. Las listas normales omiten cuerpos e identificadores
+técnicos; los detalles con contenido usan `private, no-store`. Jobs conserva intentos y errores
+redactados. Todo reintento reutiliza la fila, el Message-ID y la clave de idempotencia; un estado
+Gmail ambiguo se reconcilia antes de repetir.
+
+El recordatorio se envía como máximo una vez, en el hilo original y sin adjuntos. Una respuesta
+humana, una carga manual en Contactos, una baja o un rebote lo cancela; una respuesta automática de
+ausencia no lo cancela. Los seguimientos periódicos de Contactos son independientes, opt-in,
+desactivados por defecto y tienen su propio kill switch.
 
 ## Conectar Gmail
+
+Este paso es opcional para **Solo revisión** y dry-run. Google OAuth sólo es necesario para probar
+un envío real o ejecutar campañas `LIVE`; conectarlo no vuelve enviables campañas de revisión.
 
 El proveedor fake permite probar todo el flujo sin red desde la pantalla Gmail. Para OAuth real:
 
@@ -146,40 +187,108 @@ esa prueba es un envío real, también exige `SEND_MODE=live` y `SEND_KILL_SWITC
 
 Para habilitar una campaña live deben configurarse además `SEND_MODE=live` y
 `SEND_KILL_SWITCH=false`. El scheduler envía un destinatario por MIME, sin CC/BCC, HTML ni tracking,
-y adjunta la versión PDF congelada. Un timeout ambiguo pasa a reconciliación por `Message-ID`; un
-reinicio de web/worker reconstruye pendientes y reconciliaciones desde la base.
+y adjunta en orden todas las versiones PDF congeladas. Los archivos fuente no pueden superar 17
+MiB combinados ni el MIME final 24 MiB; si falta uno, no se envía ninguno. Un timeout ambiguo pasa a
+reconciliación por `Message-ID`; un reinicio de web/worker reconstruye pendientes y
+reconciliaciones desde la base.
 
-## Habilitar enriquecimiento web e IA
+## Configurar la IA para respuestas
 
-El fetch HTTP real se activa globalmente con `WEBSITE_FETCHER=http`. Sólo acepta HTTP/HTTPS por
+El fetch HTTP real se selecciona en **Integraciones → Sitios web**. Sólo acepta HTTP/HTTPS por
 80/443, valida todas las respuestas DNS y cada redirect, conecta a la IP pública validada y aplica
 límites de páginas, bytes, redirects y tiempo. El contenido resultante siempre se trata como dato
-no confiable.
+no confiable. `WEBSITE_FETCHER` queda como fallback para instalaciones todavía no configuradas
+desde el dashboard.
 
 En **Integraciones** se puede elegir `Ollama` u `OpenAI compatible`, indicar URL base/modelo y, para
 el proveedor remoto, ingresar una API key. Guardar exige la contraseña actual. La key queda como
 ciphertext write-only; la página sólo informa si está configurada y su origen. Dejar el campo vacío
 conserva el valor; marcar eliminar lo borra y desactiva el fallback de entorno.
 
-La URL/modelo elegidos se congelan en cada campaña. Esos campos se muestran de sólo lectura al
-crear la campaña y el servidor ignora overrides POST, de modo que redirigir una API key siempre
+El proveedor analiza sólo respuestas recibidas y seguimientos opt-in; no interviene en el mensaje
+inicial fijo. El servidor ignora overrides de campaña, de modo que redirigir una API key siempre
 exige reautenticarse en Integraciones. HTTP sólo se acepta para servicios locales/privados; URLs
 con credenciales/query/fragment y redirects se rechazan para evitar reenviar el header de
 autorización. Ambos adaptadores exigen salida JSON schema y vuelven a validarla localmente; los
 tests sustituyen sus transports y mantienen todos los sockets bloqueados.
 
-## Habilitar Outscraper
+La pantalla **Respuesta automática** empieza en **Sólo observar**. Allí se cargan y aprueban
+versiones de hechos o preguntas frecuentes; los PDF nunca se convierten solos en conocimiento. Por
+cada respuesta, el sistema conserva sólo un manifiesto con IDs, versiones y hashes de un contexto
+acotado a 24.000 caracteres: texto nuevo completo, propuesta original, padre directo, hasta seis
+mensajes recientes entre hilos, memoria estructurada y hasta ocho datos aprobados.
 
-Revisar primero el precio vigente. En **Integraciones**, seleccionar Outscraper, ingresar la API key,
-ajustar reserva conservadora, tamaño de lote y polling, confirmar la contraseña actual y guardar.
+El modo automático queda bloqueado hasta revisar al menos 30 decisiones —diez aptas para
+automatización—, alcanzar 90% de precisión y no marcar ninguna respuesta que habría sido automática
+como “Necesitaba una persona”. Activarlo vuelve a pedir la contraseña. Incluso entonces mandan
+`AUTO_REPLY_KILL_SWITCH`, las restricciones, los límites de tres respuestas por conversación en 24
+horas y veinte por espacio de trabajo al día.
 
-Las campañas nuevas toman `Outscraper` como snapshot de sólo lectura desde esa configuración.
-Iniciar crea un `SearchRun` durable; el worker envía la consulta asíncrona con enrichment de
-contactos, guarda el ID y el JSON crudo, y Beat reanuda el polling después de reinicios. Los errores
-y el uso/costo estimado aparecen en el detalle de campaña.
-La API key se guarda sólo como ciphertext ligado a Outscraper; no se incluye en URL, task, snapshot,
-HTML, log ni auditoría. Web/workers leen la configuración vigente desde PostgreSQL, por lo que una
-rotación no requiere reinicio. No existe fallback de scraping directo.
+## Sincronizar Overture Maps Places
+
+Overture no requiere API key. En **Integraciones**, seleccionar `Overture Maps Places`, fijar la
+confianza mínima de existencia y confirmar con la contraseña actual. Después:
+
+1. Elegir la provincia cuya cobertura se quiere preparar.
+2. Abrir **Datos de búsqueda** y revisar la última versión detectada por el chequeo diario
+   exitoso de metadata.
+3. Revisar el release detectado y pulsar **Sincronizar última versión**. El servidor acepta sólo el
+   `latest` del catálogo oficial ya persistido y delega la importación al worker `maintenance` de
+   concurrencia uno; el request del navegador no puede elegir una URL, bucket ni release oculto.
+4. Esperar el estado `READY` de esa provincia; un import fallido deja intactas las particiones
+   anteriores y las demás provincias del mismo release.
+5. Repetir sólo para las provincias necesarias y revisar lugares, distritos, fuentes, licencias y
+   atribución.
+
+El import usa el cliente Python oficial con modo STAC y el release exacto: hace una lectura acotada
+por el bounding box de una provincia, transmite lotes PyArrow, descarta cualquier GERS ID repetido,
+filtra cada punto contra los polígonos exactos de sus distritos, excluye `permanently_closed` y
+guarda la partición inmutable en PostgreSQL. El catálogo STAC raíz y el catálogo del release están
+fijados al host oficial; la fuente Places queda fijada al bucket S3 oficial.
+
+Antes de activar se comprueban `taxonomy`, `basic_category`, IDs, geometrías, hashes, conteos,
+procedencia y licencias. Como el catálogo STAC actual publica `schema:version` nulo, cada release
+admitido se fija a una versión del schema oficial previamente revisada; cualquier release futuro o
+versión declarada distinta falla cerrado hasta actualizar el importador. La taxonomía persistida es
+el release exacto porque STAC no publica otra versión semántica independiente. El campo histórico
+`categories` no participa en las búsquedas. Un cambio incompatible deja el nuevo snapshot en
+`FAILED` y nunca reemplaza la cobertura vigente. Una campaña puede combinar varias provincias,
+pero todas sus particiones deben pertenecer al mismo release. Cada consulta usa únicamente la
+partición que contiene su distrito y conserva release, reglas, límites y paginación estable.
+
+Places es un dataset multilicencia: se conservan las licencias de cada fuente y los NOTICE
+aplicables; si el snapshot incluye Foursquare, el dashboard muestra su aviso Apache-2.0. Revisar
+siempre fuentes, licencias, notices y atribución del snapshot antes de usar o redistribuir los
+datos. Se conservan el activo, el anterior y todos los snapshots referenciados por campañas. Nunca
+se scrapea Google Maps ni se acepta una URL, bucket o credencial de dataset escrita por el usuario.
+
+Referencias oficiales: [Places](https://docs.overturemaps.org/guides/places/),
+[cliente Python](https://docs.overturemaps.org/getting-data/overturemaps-py/),
+[taxonomía](https://docs.overturemaps.org/guides/places/taxonomy/),
+[calendario de releases](https://docs.overturemaps.org/release-calendar/) y
+[atribución/licencias](https://docs.overturemaps.org/attribution/).
+
+Las zonas custom se suben como GeoJSON WGS84 `Polygon` o `MultiPolygon`, máximo 1 MiB, 100 partes,
+200 anillos y 20.000 coordenadas. Se rechazan CRS custom, valores no finitos/fuera de rango y
+geometrías inválidas o autointersectadas. Una edición cambia revisión/hash: campañas iniciadas
+conservan el límite anterior y las nuevas esperan una sincronización que cubra el nuevo.
+
+Si todavía no existe una fila de configuración en PostgreSQL, el extractor falla seguro a `fake`.
+La selección `fake|overture` vive en el dashboard; `.env` no usa `EXTRACTOR_PROVIDER`, claves
+Overture, credenciales de dataset ni URLs alternativas.
+
+## Actualizar una instalación que usaba el proveedor retirado
+
+1. Dejar `SEND_KILL_SWITCH=true` y crear un backup verificado de PostgreSQL y catálogos.
+2. Revocar la clave del proveedor retirado. Borrarla de `.env`, del gestor de secretos y de
+   cualquier copia operativa; retirar además sus variables históricas. Borrar el valor local sin
+   revocarlo no invalida la credencial.
+3. Desplegar esta versión y aplicar las migraciones forward. Los borradores pasan a Overture; los
+   runs no terminados quedan cerrados con `provider_retired`; historial terminado y costos quedan
+   disponibles sólo lectura.
+4. Confirmar los distritos y preparar las provincias necesarias desde **Datos de búsqueda**.
+5. Revisar cobertura y hashes, conteos, contactos, fuentes, licencias, notices, atribución y health.
+6. Ejecutar una campaña pequeña **Solo revisión**, leer cada email y recién después ampliar uso.
 
 ## Detener y limpiar
 
@@ -201,7 +310,8 @@ make up
 
 El backup incluye un dump consistente de PostgreSQL y el volumen privado de catálogos, con hashes
 SHA-256 y permisos restrictivos. No incluye `FIELD_ENCRYPTION_KEY`: respaldarla separadamente es
-obligatorio para recuperar Gmail OAuth y las credenciales cifradas de Integraciones.
+obligatorio para recuperar Gmail OAuth y las credenciales cifradas de Integraciones. Los releases
+y sus particiones Overture viven en PostgreSQL y quedan incluidos en el dump.
 
 ```bash
 make backup
@@ -216,8 +326,11 @@ make restore BACKUP=backups/20260716T120000Z
 ```
 
 Restore verifica checksums, restaura base/catálogos con propiedad del usuario no privilegiado
-`app`, aplica migraciones, recalcula hashes y prueba que los refresh tokens se puedan descifrar
-junto con cada credencial cifrada antes de reiniciar workers. Ver incidentes de disco, proveedores y reinicios en
+`app`, aplica migraciones y ejecuta `verify_restore`: comprueba migraciones, hashes de catálogos
+PDF, espacio, descifrado de refresh tokens/credenciales y que las particiones Overture usadas por
+campañas activas estén `READY`. Después del restore hay que revisar manualmente en **Datos de
+búsqueda** los hashes de cobertura, conteos, licencias y atribución antes de iniciar una campaña o
+habilitar live. Ver incidentes de disco, proveedores y reinicios en
 [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Quality gates
@@ -234,12 +347,13 @@ make test-e2e
 
 También están disponibles por separado `make lint`, `make typecheck` y `make test`.
 `make check` valida Ruff, formato, mypy, pytest, migraciones pendientes y checks de Django. Pytest
-bloquea sockets y usa exclusivamente los proveedores fake.
+bloquea sockets externos y usa proveedores fake o fixtures Overture locales; nunca descarga un
+dataset ni llama Gmail/LLM reales.
 
-La aceptación automatizada
-`tests/e2e/test_base_application.py::test_full_fake_acceptance_flow_from_ui` recorre desde la UI
-perfil, PDF, OAuth/prueba fake, campaña, pipeline, entrega, respuesta entrante, clasificación,
-respuesta manual y exportaciones.
+Las pruebas de aceptación fake recorren perfil, varios PDF, campaña, aprobación, entrega,
+respuesta entrante, promoción a Contacto, decisiones estructuradas, redirección, recordatorio,
+restricciones, conversaciones y permisos. Las pruebas bloquean HTTP, DNS, Gmail, Overture e IA
+reales.
 
 ## Checklist obligatorio antes de SEND_MODE=live
 
@@ -248,17 +362,24 @@ No cambiar `SEND_MODE=live` ni desactivar el kill switch hasta completar y regis
 - [ ] `make check` y `make test-e2e` pasan sobre el commit a desplegar.
 - [ ] `.env`, backups, catálogos/exportaciones y claves no están versionados; el escaneo de secretos
   no encuentra valores reales.
-- [ ] Bind/proxy/orígenes/cookies fueron revisados; fuera de loopback hay TLS, cookies secure y HSTS.
+- [ ] Existe un plan de despliegue HTTPS aprobado; bind, proxy confiable, hosts, orígenes, cookies,
+  CSP y HSTS pasaron `check --deploy` en una configuración equivalente a producción.
 - [ ] `FIELD_ENCRYPTION_KEY` tiene backup separado y un backup+restore reciente pasó
   `verify_restore` con el kill switch activo.
 - [ ] Gmail OAuth usa exactamente `gmail.send` y `gmail.readonly`, la prueba propia pasó y se revisó
   la política de expiración del refresh token.
-- [ ] Identidad legal, vendedor, domicilio, firma, asunto `PUBLICIDAD -` y BAJA están completos; la
-  campaña tuvo revisión legal y de entregabilidad.
-- [ ] Catálogo conserva tamaño/hash y el disco supera `MIN_FREE_DISK_BYTES`.
-- [ ] Supresiones fueron revisadas y se probaron baja, bounce e invalidez tardía.
+- [ ] Identidad, vendedor, domicilio, firma y los tres mensajes fijos están completos y aprobados.
+- [ ] Todos los catálogos conservan tamaño/hash, el MIME final respeta 24 MiB y el disco supera
+  `MIN_FREE_DISK_BYTES`.
+- [ ] Las restricciones dentro de Contactos fueron revisadas y se probaron baja irreversible,
+  rebote, “No contactar”, “No usar este email” e invalidez tardía.
 - [ ] Límite diario, intervalo, días, horario y `America/Argentina/Buenos_Aires` son conservadores.
 - [ ] Se probaron pausa, cancelación, kill switch, proveedor caído, retry/reconciliación y reinicio.
+- [ ] La audiencia, texto, firma, PDF y calendario quedaron congelados por una aprobación de
+  campaña, o el modo individual excluyó de forma explícita los mensajes no aprobados.
+- [ ] Se probaron protección de mismo día y recordatorio en hilo con cancelación ante respuesta.
+- [ ] `AUTO_REPLY_KILL_SWITCH` y `RELATIONSHIP_KILL_SWITCH` siguen activos durante el rollout;
+  **Sólo observar** acumuló y superó la evaluación antes de considerar respuestas reales.
 - [ ] `/health/ready/` está `ok` y `/health/degraded/` no tiene componentes críticos degradados.
 - [ ] Primero se cambia `SEND_MODE=live` manteniendo `SEND_KILL_SWITCH=true`; recién después del
   preflight se desactiva el kill switch para una campaña LIVE confirmada.
@@ -268,6 +389,8 @@ No cambiar `SEND_MODE=live` ni desactivar el kill switch hasta completar y regis
 - `HOST_BIND=127.0.0.1`
 - `SEND_MODE=dry-run`
 - `SEND_KILL_SWITCH=true`
+- `AUTO_REPLY_KILL_SWITCH=true`
+- `RELATIONSHIP_KILL_SWITCH=true`
 - extractor, web, IA y Gmail en `fake`
 - catálogos fuera de static/media público, bajo `PRIVATE_STORAGE_ROOT`
 - sin API keys, OAuth real, SMTP, scraping ni llamadas de red de proveedores

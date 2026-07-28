@@ -4,30 +4,32 @@ import re
 import uuid
 from decimal import Decimal
 from email.utils import getaddresses
+from functools import partial
 
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.audit.services import record_event
 from apps.campaigns.models import OutboundMessage
-from apps.compliance.models import SuppressionEntry
-from apps.compliance.services import normalize_email, suppress_email
+from apps.compliance.services import normalize_email
 from apps.configuration.integrations import redact_provider_error
+from apps.contacts.services import apply_inbound_contact_effect
 from apps.integrations.contracts import (
     AuthenticationError,
     GmailCursor,
     GmailHistoryExpired,
     GmailInboundMessage,
     GmailProvider,
+    LLMProvider,
     PermanentProviderError,
-    ProviderError,
     ValidationProviderError,
 )
-from apps.integrations.factory import get_llm_provider
-from apps.mailbox.classification import classify_message, deterministic_classification
+from apps.mailbox.classification import deterministic_classification
 from apps.mailbox.models import GmailConnection, InboundMessage
 from apps.mailbox.sanitizer import sanitize_email_bodies
+from apps.prospects.email_validation import MXResolver
 
 _RFC_MESSAGE_ID = re.compile(r"<[^<>\s]+>")
 MAX_RFC_MESSAGE_ID_LENGTH = 255
@@ -64,49 +66,42 @@ def _related_outbound(
     connection: GmailConnection,
     candidate: GmailInboundMessage,
 ) -> OutboundMessage | None:
-    by_thread = (
+    workspace_scope = Q(organization__workspace_id=connection.workspace_id) | Q(
+        organization__isnull=True,
+        campaign__workspace_id=connection.workspace_id,
+    )
+    referenced = normalize_references((candidate.in_reply_to, *candidate.references))
+    if referenced:
+        # In-Reply-To/References identify the direct parent needed by the
+        # bounded LLM context. A thread can contain several of our messages, so
+        # resolving the thread first would silently collapse the parent to the
+        # original proposal.
+        referenced_message = (
+            OutboundMessage.objects.filter(
+                workspace_scope,
+                message_id__in=referenced,
+            )
+            .exclude(message_id="")
+            .order_by("-created_at")
+            .first()
+        )
+        if referenced_message is not None:
+            return referenced_message
+    return (
         OutboundMessage.objects.filter(
-            campaign__created_by=connection.owner,
+            workspace_scope,
             gmail_thread_id=candidate.thread_id,
         )
         .exclude(gmail_thread_id="")
         .order_by("created_at")
         .first()
     )
-    if by_thread is not None:
-        return by_thread
-    referenced = normalize_references((candidate.in_reply_to, *candidate.references))
-    if not referenced:
-        return None
-    return (
-        OutboundMessage.objects.filter(
-            campaign__created_by=connection.owner,
-            message_id__in=referenced,
-        )
-        .exclude(message_id="")
-        .order_by("created_at")
-        .first()
-    )
 
 
-def _apply_classification_effect(message: InboundMessage) -> None:
-    email = message.related_outbound.recipient
-    if message.classification == InboundMessage.Classification.UNSUBSCRIBE:
-        suppress_email(
-            email=email,
-            reason=SuppressionEntry.Reason.UNSUBSCRIBE,
-            actor=None,
-            source="gmail_reply",
-            evidence=f"InboundMessage:{message.pk}",
-        )
-    elif message.classification == InboundMessage.Classification.BOUNCE:
-        suppress_email(
-            email=email,
-            reason=SuppressionEntry.Reason.BOUNCE,
-            actor=None,
-            source="gmail_bounce",
-            evidence=f"InboundMessage:{message.pk}",
-        )
+def _enqueue_inbound_processing(message_id: uuid.UUID) -> None:
+    from apps.mailbox.tasks import process_inbound_reply_task
+
+    process_inbound_reply_task.delay(str(message_id))
 
 
 def _persist_candidate(
@@ -164,29 +159,17 @@ def _persist_candidate(
         body_text=message.body_text,
         headers=message.headers,
     )
-    classification: str
+    needs_processing = deterministic is None
     if deterministic is not None:
         classification, confidence = deterministic
         error = ""
     else:
-        try:
-            provider = get_llm_provider(
-                related.campaign.llm_provider,
-                base_url=related.campaign.llm_base_url,
-                model=related.campaign.llm_model,
-                owner_id=related.campaign.created_by_id,
-            )
-        except (ImproperlyConfigured, ProviderError, ValueError) as exc:
-            classification = InboundMessage.Classification.OTHER
-            confidence = 0.0
-            error = redact_provider_error(exc, owner_id=related.campaign.created_by_id)
-        else:
-            classification, confidence, error = classify_message(
-                message=message,
-                provider=provider,
-                apply_deterministic=False,
-                owner_id=related.campaign.created_by_id,
-            )
+        # The durable inbound and its Contact are committed before any LLM provider is
+        # constructed. The post-commit task is the compatibility seam for the richer
+        # structured reply-decision workflow.
+        classification = InboundMessage.Classification.OTHER
+        confidence = 0.0
+        error = ""
     message.classification = classification
     message.classification_confidence = Decimal(str(confidence))
     message.classification_error = error
@@ -203,7 +186,7 @@ def _persist_candidate(
             "updated_at",
         )
     )
-    _apply_classification_effect(message)
+    effect = apply_inbound_contact_effect(message)
     record_event(
         action="gmail.reply_imported",
         entity=message,
@@ -212,9 +195,110 @@ def _persist_candidate(
             "classification": message.classification,
             "campaign_id": str(related.campaign_id),
             "prospect_id": str(related.prospect_id),
+            "organization_id": str(related.organization_id or ""),
+            "contact_id": str(effect.contact.pk) if effect.contact is not None else "",
         },
     )
+    if needs_processing and effect.contact is not None and effect.conversation is not None:
+        # Preserve literal mailto targets before the raw HTML leaves this provider
+        # boundary. The sanitized body intentionally removes link attributes.
+        from apps.automation.candidates import (
+            extract_mailto_literals,
+            persist_email_candidates,
+        )
+
+        persist_email_candidates(
+            message,
+            mailto_literals=extract_mailto_literals(candidate.body_html),
+        )
+        transaction.on_commit(
+            partial(_enqueue_inbound_processing, message.pk),
+            robust=True,
+        )
     return message
+
+
+def process_inbound_reply(
+    inbound_id: uuid.UUID | str,
+    *,
+    provider: LLMProvider | None = None,
+    resolver: MXResolver | None = None,
+) -> str:
+    """Record a structured reply decision outside the Gmail synchronization lock.
+
+    The decision service owns candidate extraction, bounded context and policy evaluation.
+    This compatibility seam mirrors only safe, non-deterministic classifications for legacy
+    screens; deterministic unsubscribe, bounce and auto-reply effects remain authoritative.
+    It never authorizes or performs a Gmail send.
+    """
+
+    message = InboundMessage.objects.select_related(
+        "related_outbound__campaign",
+        "contact",
+        "conversation",
+    ).get(pk=inbound_id)
+    if message.contact_id is None or message.conversation_id is None or not message.is_human:
+        return message.classification
+    deterministic = deterministic_classification(
+        sender=message.sender,
+        subject=message.subject,
+        body_text=message.body_text,
+        headers=message.headers,
+    )
+    if deterministic is not None:
+        return message.classification
+
+    # Local import avoids coupling Gmail synchronization module import order to automation.
+    from apps.automation.services import process_inbound_decision
+
+    decision = process_inbound_decision(
+        message.pk,
+        provider=provider,
+        resolver=resolver,
+    )
+    if decision is None:
+        return message.classification
+    allowed = {
+        InboundMessage.Classification.INTERESTED,
+        InboundMessage.Classification.NOT_INTERESTED,
+        InboundMessage.Classification.OTHER,
+    }
+    classification = decision.classification
+    confidence = decision.confidence
+    error = ""
+    if classification not in allowed:
+        classification = InboundMessage.Classification.OTHER
+        confidence = Decimal("0")
+        error = "La decisión intentó aplicar un efecto reservado para reglas determinísticas."
+    with transaction.atomic():
+        locked = InboundMessage.objects.select_for_update().get(pk=message.pk)
+        if not locked.is_human or locked.classification in {
+            InboundMessage.Classification.AUTO_REPLY,
+            InboundMessage.Classification.BOUNCE,
+            InboundMessage.Classification.UNSUBSCRIBE,
+        }:
+            return locked.classification
+        locked.classification = classification
+        locked.classification_confidence = Decimal(str(confidence))
+        locked.classification_error = error
+        locked.save(
+            update_fields=(
+                "classification",
+                "classification_confidence",
+                "classification_error",
+                "updated_at",
+            )
+        )
+        record_event(
+            action="gmail.reply_classified",
+            entity=locked,
+            actor=None,
+            after={
+                "classification": classification,
+                "reply_decision_id": str(decision.pk),
+            },
+        )
+        return locked.classification
 
 
 @transaction.atomic
@@ -224,7 +308,9 @@ def _sync_gmail_connection_locked(
     provider: GmailProvider | None = None,
 ) -> int:
     connection = (
-        GmailConnection.objects.select_for_update().select_related("owner").get(pk=connection_id)
+        GmailConnection.objects.select_for_update()
+        .select_related("owner", "workspace")
+        .get(pk=connection_id)
     )
     if connection.status != GmailConnection.Status.CONNECTED:
         return 0

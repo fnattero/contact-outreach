@@ -10,15 +10,17 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from apps.accounts.permissions import Capability, require_capability
 from apps.configuration.integrations import (
     configured_integration_owner_id,
     get_gmail_oauth_client_secret,
     get_llm_api_key,
-    get_outscraper_api_key,
     runtime_integration_configuration,
 )
+from apps.configuration.models import SearchZone
 from apps.integrations.gmail import GMAIL_SCOPES
 from apps.mailbox.models import GmailConnection
+from apps.overture.services import get_active_snapshot
 
 
 @require_GET
@@ -49,11 +51,12 @@ def readiness(request: HttpRequest) -> JsonResponse:
 
     ready = all(value == "ok" for value in components.values())
     return JsonResponse(
-        {"status": "ok" if ready else "unavailable", "components": components},
+        {"status": "ok" if ready else "unavailable"},
         status=200 if ready else 503,
     )
 
 
+@require_capability(Capability.MANAGE_INTEGRATIONS)
 @require_GET
 @never_cache
 def degraded(request: HttpRequest) -> JsonResponse:
@@ -88,15 +91,27 @@ def degraded(request: HttpRequest) -> JsonResponse:
         gmail_status = "unavailable"
         runtime = None
     try:
-        extractor_status = (
-            "fake"
-            if runtime is not None and runtime.extractor_provider == "fake"
-            else (
-                "configured"
-                if get_outscraper_api_key(integration_owner_id)
-                else "missing_configuration"
-            )
-        )
+        if runtime is None or runtime.extractor_provider == "fake":
+            extractor_status = "fake"
+        else:
+            snapshot = get_active_snapshot()
+            if snapshot is None:
+                extractor_status = "missing_dataset"
+            else:
+                active_hashes = set(
+                    SearchZone.objects.filter(
+                        active=True,
+                        archived_at__isnull=True,
+                    ).values_list("boundary_hash", flat=True)
+                )
+                covered_hashes = set(
+                    snapshot.zones.filter(boundary_hash__in=active_hashes).values_list(
+                        "boundary_hash", flat=True
+                    )
+                )
+                extractor_status = (
+                    "ready" if active_hashes and covered_hashes == active_hashes else "stale"
+                )
     except Exception:
         extractor_status = "unavailable"
     try:

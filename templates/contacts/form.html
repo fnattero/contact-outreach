@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Agregar contacto · Contact Outreach{% endblock %}
+{% block breadcrumb %}Contactos / Agregar{% endblock %}
+{% block page_title %}Agregar contacto{% endblock %}
+{% block content %}
+<header class="page-header"><div class="page-header__copy"><p><a href="{% url 'contacts' %}">← Volver a Contactos</a></p><h1>Agregar un contacto actual</h1><p>Usalo para clientes o personas que ya conocés. La empresa quedará fuera de nuevas campañas para evitar contactos no deseados.</p></div></header>
+<section class="panel form-card">
+  <div class="panel__header"><div><h2>Datos del contacto</h2><p class="muted">Sólo el email es obligatorio. El resto se puede completar después.</p></div></div>
+  <div class="panel__body">
+    <form method="post" novalidate>{% csrf_token %}
+      {% if form.non_field_errors %}<div class="alert alert--error" role="alert"><div><strong>No pudimos guardar el contacto.</strong>{{ form.non_field_errors }}</div></div>{% endif %}
+      <fieldset><legend class="visually-hidden">Datos del nuevo contacto</legend>
+        {% include "includes/field.html" with field=form.email %}
+        {% include "includes/field.html" with field=form.organization_name %}
+        {% include "includes/field.html" with field=form.contact_name %}
+        {% include "includes/field.html" with field=form.notes %}
+      </fieldset>
+      <div class="actions"><button class="button" type="submit">Guardar contacto</button><a class="button button--secondary" href="{% url 'contacts' %}">Cancelar</a></div>
+    </form>
+  </div>
+</section>
+{% endblock %}

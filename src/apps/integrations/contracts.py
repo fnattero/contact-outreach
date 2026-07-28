@@ -50,6 +50,14 @@ class SearchRequest:
     query: str
     correlation_id: str
     idempotency_key: str
+    category: str = ""
+    zone: str = ""
+    location: str = ""
+    criteria: dict[str, Any] | None = None
+    zone_boundary_hash: str = ""
+    min_confidence: Decimal | None = None
+    dataset_snapshot_id: str = ""
+    cursor: str = ""
     limit: int = 20
     timeout_seconds: float = 30.0
 
@@ -60,6 +68,8 @@ class ExtractedEmail:
     source: str = "provider"
     is_primary: bool = False
     order: int = 0
+    source_url: str = ""
+    source_content_hash: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,8 +89,10 @@ class ExtractedBusiness:
 @dataclass(frozen=True, slots=True)
 class ExtractionBatch:
     status: str
-    request_id: str
     raw_payload: dict[str, Any]
+    operation: str = "business_discovery"
+    next_cursor: str = ""
+    exhausted: bool = True
     units: Decimal | None = None
     estimated_cost: Decimal | None = None
     actual_cost: Decimal | None = None
@@ -97,6 +109,15 @@ class WebsiteRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class WebsiteEmailCandidate:
+    value: str
+    source: str
+    page_url: str
+    page_content_hash: str
+    order: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class WebsitePage:
     requested_url: str
     final_url: str
@@ -105,6 +126,7 @@ class WebsitePage:
     content_type: str = "text/plain"
     content_hash: str = ""
     byte_count: int = 0
+    email_candidates: tuple[WebsiteEmailCandidate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +199,83 @@ class ReplyClassification:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplyContextBlock:
+    """A bounded, explicitly labelled piece of context supplied to the reply model."""
+
+    source_id: str
+    role: str
+    provenance: str
+    text: str
+    mandatory: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class EmailCandidateRef:
+    candidate_id: str
+    normalized_email: str
+    region: str
+    validation_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class FactRevisionRef:
+    revision_id: str
+    version: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyDecisionRequest:
+    context: tuple[ReplyContextBlock, ...]
+    candidates: tuple[EmailCandidateRef, ...]
+    facts: tuple[FactRevisionRef, ...]
+    correlation_id: str
+    idempotency_key: str
+    policy_version: str
+    schema_version: str = "1"
+    timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyDecisionResult:
+    classification: str
+    intent: str
+    action: str
+    confidence: float
+    candidate_id: str | None
+    fact_revision_ids: tuple[str, ...]
+    proposed_body: str | None
+    human_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledContactDraftRequest:
+    """Bounded inputs for one relationship-contact draft.
+
+    The scheduler owns the date and recipient.  The provider can only propose
+    copy and cite approved fact revision IDs from this request.
+    """
+
+    context: tuple[ReplyContextBlock, ...]
+    facts: tuple[FactRevisionRef, ...]
+    purpose: str
+    goal: str
+    correlation_id: str
+    idempotency_key: str
+    schema_version: str = "1"
+    timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledContactDraftResult:
+    status: str
+    subject: str | None
+    body_text: str | None
+    fact_revision_ids: tuple[str, ...]
+    human_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class GmailConnectionData:
     email: str
     refresh_token: str
@@ -244,11 +343,7 @@ class GmailSyncBatch:
 
 
 class ExtractorProvider(Protocol):
-    def extract(self, request: SearchRequest) -> ExtractionBatch: ...
-
-    def submit(self, request: SearchRequest) -> ExtractionBatch: ...
-
-    def poll(self, *, request_id: str, timeout_seconds: float = 30.0) -> ExtractionBatch: ...
+    def search(self, request: SearchRequest) -> ExtractionBatch: ...
 
     def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]: ...
 
@@ -261,6 +356,12 @@ class LLMProvider(Protocol):
     def analyze(self, request: AnalysisRequest) -> AIAnalysisResult: ...
 
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification: ...
+
+    def decide_reply(self, request: ReplyDecisionRequest) -> ReplyDecisionResult: ...
+
+    def draft_scheduled_contact(
+        self, request: ScheduledContactDraftRequest
+    ) -> ScheduledContactDraftResult: ...
 
 
 class GmailProvider(Protocol):

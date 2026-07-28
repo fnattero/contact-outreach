@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Contactos · Contact Outreach{% endblock %}
+{% block breadcrumb %}Contactos{% endblock %}
+{% block page_title %}Contactos{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div class="page-header__copy">
+    <h1>Contactos</h1>
+    <p>Personas y empresas con las que ya existe una relación. No se incluyen en nuevas campañas.</p>
+  </div>
+  {% if can_manage_contacts %}<div class="page-header__actions"><a class="button" href="{% url 'contact-create' %}">Agregar contacto</a></div>{% endif %}
+</header>
+
+<form method="get" class="panel filters" aria-label="Filtrar contactos">
+  <div class="filters__grid">
+    {% include "includes/field.html" with field=filter_form.q %}
+    {% include "includes/field.html" with field=filter_form.status %}
+    {% include "includes/field.html" with field=filter_form.attention %}
+    <div class="filters__actions"><button class="button" type="submit">Aplicar filtros</button><a class="button button--secondary" href="{% url 'contacts' %}">Limpiar</a></div>
+  </div>
+</form>
+
+<p class="muted">{{ page_obj.paginator.count }} contacto{{ page_obj.paginator.count|pluralize }}.</p>
+{% if page_obj %}
+<div class="table-scroll">
+  <table>
+    <thead><tr><th>Contacto</th><th>Email preferido</th><th>Estado</th><th>Última interacción</th><th>Próximo contacto</th><th>Atención</th></tr></thead>
+    <tbody>
+      {% for contact in page_obj %}<tr>
+        <td><a class="table-primary" href="{% url 'contact-detail' contact.pk %}">{{ contact.name|default:contact.organization.name|default:"Contacto sin nombre" }}</a>{% if contact.name and contact.organization.name %}<span class="table-meta">{{ contact.organization.name }}</span>{% endif %}</td>
+        <td>{{ contact.preferred_email.original_email|default:"Todavía no definido" }}</td>
+        <td><span class="badge badge--{{ contact.status|lower }}">{{ contact.get_status_display }}</span></td>
+        <td>{% if contact.last_interaction_at %}{{ contact.last_interaction_at|date:"d M Y · H:i" }}{% else %}Sin interacciones registradas{% endif %}</td>
+        <td>{% if contact.communication_plan.next_due_at and contact.communication_plan.state == "ACTIVE" %}{{ contact.communication_plan.next_due_at|date:"d M Y" }}<span class="table-meta">{{ contact.communication_plan.get_purpose_display }}</span>{% elif contact.communication_plan.state == "PAUSED" %}Pausado{% else %}No programado{% endif %}</td>
+        <td>{% if contact.open_task_count %}<a class="badge badge--warning" href="{% url 'contact-detail' contact.pk %}#attention">Necesita que lo revises ({{ contact.open_task_count }})</a>{% else %}<span class="muted">Sin pendientes</span>{% endif %}</td>
+      </tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<section class="panel empty-state">
+  <div class="empty-state__icon" aria-hidden="true">◎</div>
+  <h2>No hay contactos para mostrar</h2>
+  <p>{% if request.GET %}Probá limpiar los filtros. Si una persona responde una campaña, aparecerá aquí automáticamente.{% else %}Los contactos aparecen cuando alguien responde o cuando un administrador los agrega manualmente.{% endif %}</p>
+  {% if can_manage_contacts %}<a class="button" href="{% url 'contact-create' %}">Agregar el primer contacto</a>{% endif %}
+</section>
+{% endif %}
+{% include "includes/pagination.html" %}
+{% endblock %}

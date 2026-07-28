@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Usuarios · Contact Outreach{% endblock %}
+{% block breadcrumb %}Usuarios{% endblock %}
+{% block page_title %}Usuarios y permisos{% endblock %}
+{% block content %}
+<div class="page-stack">
+  <section class="panel">
+    <div class="panel__header"><div><h1>Invitar a una persona</h1><p class="muted">La persona define su propia contraseña desde un enlace que funciona una sola vez durante 24 horas.</p></div></div>
+    {% if activation_url %}<div class="alert alert--success" role="status"><strong>Copiá este enlace ahora.</strong><p>No volverá a mostrarse al salir de esta página.</p><textarea rows="3" readonly aria-label="Enlace de activación">{{ activation_url }}</textarea></div>{% endif %}
+    <form method="post" class="form-grid">{% csrf_token %}
+      {% include "includes/field.html" with field=form.username %}
+      {% include "includes/field.html" with field=form.email %}
+      {% include "includes/field.html" with field=form.role %}
+      {% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+      <div><button class="button" type="submit">Crear usuario y mostrar enlace</button></div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel__header"><div><h2>Personas con acceso</h2><p class="muted">Administrador puede realizar cambios. Vendedor solo puede consultar campañas, correos enviados y conversaciones.</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Persona</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
+    {% for membership in memberships %}<tr>
+      <td><strong>{{ membership.user.username }}</strong><br><span class="muted">{{ membership.user.email }}</span></td>
+      <td><form method="post" action="{% url 'account-user-role' membership.user_id %}">{% csrf_token %}<select name="role" aria-label="Rol de {{ membership.user.username }}"><option value="ADMIN"{% if membership.role == 'ADMIN' %} selected{% endif %}>Administrador</option><option value="VENDEDOR"{% if membership.role == 'VENDEDOR' %} selected{% endif %}>Vendedor</option></select> <button class="button button--secondary" type="submit">Guardar rol</button></form></td>
+      <td>{% if membership.user.is_active %}Activo{% else %}Pendiente o desactivado{% endif %}</td>
+      <td class="table-actions">
+        <form method="post" action="{% url 'account-user-status' membership.user_id %}">{% csrf_token %}<input type="hidden" name="active" value="{% if membership.user.is_active %}0{% else %}1{% endif %}"><button class="button button--secondary" type="submit">{% if membership.user.is_active %}Desactivar{% else %}Activar{% endif %}</button></form>
+        <form method="post" action="{% url 'account-user-reset' membership.user_id %}">{% csrf_token %}<button class="button button--secondary" type="submit">Crear enlace para nueva contraseña</button></form>
+      </td>
+    </tr>{% empty %}<tr><td colspan="4">Todavía no hay usuarios.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel__header"><div><h2>Quitar un bloqueo de ingreso</h2><p class="muted">Usalo si una persona quedó bloqueada después de varios intentos fallidos.</p></div></div>
+    <form method="post" action="{% url 'account-user-unlock' %}" class="form-grid">{% csrf_token %}
+      {% include "includes/field.html" with field=unlock_form.username %}
+      {% include "includes/field.html" with field=unlock_form.client_ip %}
+      <div><button class="button button--secondary" type="submit">Quitar bloqueo</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

@@ -88,7 +88,7 @@ def test_valid_pdf_is_private_hashed_versioned_and_audited(
     ("upload", "message"),
     [
         (pdf_upload(name="catalogo.txt"), "extensión"),
-        (pdf_upload(content=b"not a pdf\n%%EOF"), "MIME detectado"),
+        (pdf_upload(content=b"not a pdf\n%%EOF"), "tipo de archivo detectado"),
         (pdf_upload(content=b"%PDF-1.4\nno eof"), "estructura"),
         (pdf_upload(content=b""), "vacío"),
     ],
@@ -182,4 +182,4 @@ def test_catalog_view_shows_validation_error(
         reverse("catalogs"), {"name": "Falso", "file": pdf_upload(content=b"fake")}
     )
     assert response.status_code == 200
-    assert "MIME detectado" in response.content.decode()
+    assert "tipo de archivo detectado" in response.content.decode()

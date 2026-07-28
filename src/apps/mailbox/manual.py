@@ -8,13 +8,16 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
+from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
 from apps.configuration.integrations import redact_provider_error
+from apps.contacts.models import CommunicationRestriction, EmailAddress
 from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
@@ -33,6 +36,12 @@ from apps.mailbox.sync import normalize_message_id, normalize_references
 
 RECONCILE_AFTER = timedelta(minutes=1)
 STALE_SENDING_AFTER = timedelta(minutes=2)
+ACTIVE_REPLY_STATES = (
+    OutboundMessage.State.QUEUED,
+    OutboundMessage.State.SENDING,
+    OutboundMessage.State.RECONCILING,
+    OutboundMessage.State.SENT,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +60,92 @@ def _reply_references(inbound: InboundMessage, root: OutboundMessage) -> tuple[s
     return normalize_references((root.message_id, *values, inbound.message_id))
 
 
+def _contact_email(message: OutboundMessage) -> EmailAddress | None:
+    if message.email_address is not None:
+        return message.email_address
+    enrollment = message.campaign_enrollment
+    return enrollment.selected_email if enrollment is not None else None
+
+
+def _active_contact_restriction(
+    message: OutboundMessage,
+    *,
+    workspace_id: uuid.UUID | str,
+    contact_id: object | None,
+    email_address: EmailAddress | None,
+) -> bool:
+    targets = Q()
+    if email_address is not None:
+        targets |= Q(email_address_id=email_address.pk)
+    if contact_id is not None:
+        targets |= Q(contact_id=contact_id)
+    if message.organization_id is not None:
+        targets |= Q(contact__organization_id=message.organization_id)
+    if not targets:
+        return False
+    return (
+        CommunicationRestriction.objects.filter(
+            workspace_id=workspace_id,
+            revoked_at__isnull=True,
+        )
+        .filter(targets)
+        .exists()
+    )
+
+
+def _channel_eligibility_error(
+    message: OutboundMessage,
+    *,
+    workspace_id: uuid.UUID | str,
+    contact_id: object | None,
+) -> str:
+    try:
+        normalized = normalize_email(message.recipient)
+    except ValidationError:
+        return "El destinatario ya no es un email válido."
+    if normalized != message.recipient_normalized:
+        return "El destinatario ya no coincide con el email guardado."
+
+    email_address = _contact_email(message)
+    legacy_email = message.prospect_email
+    if email_address is not None:
+        if (
+            email_address.workspace_id != workspace_id
+            or email_address.normalized_email != normalized
+            or email_address.validity != EmailAddress.Validity.VALID
+            or bool(email_address.invalid_reason)
+        ):
+            return "El email del contacto ya no es válido para responder."
+        if (
+            message.organization_id is not None
+            and email_address.organization_id != message.organization_id
+        ):
+            return "El email ya no pertenece a la organización de esta conversación."
+    elif legacy_email is not None:
+        if (
+            legacy_email.normalized_email != normalized
+            or legacy_email.is_invalid
+            or not legacy_email.is_primary
+            or not legacy_email.syntax_valid
+            or legacy_email.mx_status != legacy_email.MXStatus.VALID
+            or bool(legacy_email.exclusion_reason)
+        ):
+            return "El correo del prospecto ya no es válido para responder."
+    else:
+        return "La conversación no tiene un email validado para responder."
+
+    if _active_contact_restriction(
+        message,
+        workspace_id=workspace_id,
+        contact_id=contact_id,
+        email_address=email_address,
+    ):
+        return "Este contacto o email tiene una restricción activa."
+    if SuppressionEntry.objects.filter(normalized_email=normalized).exists():
+        return "El destinatario está suprimido."
+    return ""
+
+
 def _validate_authorization(
     *,
     inbound: InboundMessage,
@@ -65,31 +160,67 @@ def _validate_authorization(
     if len(cleaned_body) > 10_000:
         raise ValidationError("La respuesta excede el máximo permitido.")
     if not inbound.is_human:
-        raise ValidationError("No se puede responder manualmente a un rebote o auto-respuesta.")
-    if campaign.delivery_mode != Campaign.DeliveryMode.LIVE:
-        raise ValidationError("Las respuestas manuales requieren una campaña live.")
+        raise ValidationError(
+            "No se puede responder manualmente a un rebote o respuesta automática."
+        )
+    if root.delivery_mode != Campaign.DeliveryMode.LIVE or (
+        campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE
+    ):
+        raise ValidationError("Las respuestas manuales requieren una campaña con envío en vivo.")
     if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
-        raise ValidationError("SEND_MODE o el kill switch bloquean la respuesta manual.")
+        raise ValidationError(
+            "La configuración global de envío o el bloqueo general impiden la respuesta manual."
+        )
     if not connection.is_ready or set(connection.scopes) != set(GMAIL_SCOPES):
         raise ValidationError("Gmail debe estar conectado y probado.")
-    recipient = root.recipient
-    normalized = normalize_email(recipient)
-    email = root.prospect_email
-    if (
-        normalized != root.recipient_normalized
-        or email.normalized_email != normalized
-        or email.is_invalid
-        or not email.is_primary
-        or not email.syntax_valid
-        or email.mx_status != email.MXStatus.VALID
-        or email.exclusion_reason
+    normalized = normalize_email(root.recipient)
+    if channel_error := _channel_eligibility_error(
+        root,
+        workspace_id=connection.workspace_id,
+        contact_id=inbound.contact_id or root.contact_id,
     ):
-        raise ValidationError("El email del prospecto ya no es válido para responder.")
-    if SuppressionEntry.objects.filter(normalized_email=normalized).exists():
-        raise ValidationError("El email del prospecto está suprimido.")
+        raise ValidationError(channel_error)
     if not inbound.gmail_thread_id or not normalize_message_id(inbound.message_id):
-        raise ValidationError("El hilo no tiene IDs Gmail/RFC suficientes para responder.")
+        raise ValidationError(
+            "La conversación no tiene los identificadores de Gmail y del correo necesarios "
+            "para responder."
+        )
     return root, cleaned_body, normalized
+
+
+def _automatic_reply_conflict(inbound: InboundMessage) -> bool:
+    from apps.automation.models import ReplyDecision
+
+    if ReplyDecision.objects.filter(
+        inbound=inbound,
+        state__in=(
+            ReplyDecision.State.AUTO_ELIGIBLE,
+            ReplyDecision.State.AUTHORIZED,
+            ReplyDecision.State.EXECUTING,
+        ),
+    ).exists():
+        return True
+    return (
+        OutboundMessage.objects.filter(parent_inbound=inbound)
+        .filter(
+            Q(
+                kind__in=(
+                    OutboundMessage.Kind.AUTOMATIC_REPLY,
+                    OutboundMessage.Kind.REDIRECT_ACK,
+                ),
+                state__in=ACTIVE_REPLY_STATES,
+            )
+            | Q(
+                kind=OutboundMessage.Kind.REFERRED_PROPOSAL,
+                state__in=(
+                    OutboundMessage.State.QUEUED,
+                    OutboundMessage.State.SENDING,
+                    OutboundMessage.State.RECONCILING,
+                ),
+            )
+        )
+        .exists()
+    )
 
 
 @transaction.atomic
@@ -100,8 +231,12 @@ def authorize_manual_reply(
     body_text: str,
     request_key: uuid.UUID | str,
 ) -> tuple[OutboundMessage, bool]:
+    membership = require_user_capability(actor, Capability.SEND_REPLIES)
     key = f"manual-reply:{inbound_id}:{request_key}"
-    existing = OutboundMessage.objects.filter(idempotency_key=key).first()
+    existing = OutboundMessage.objects.filter(
+        idempotency_key=key,
+        campaign__workspace=membership.workspace,
+    ).first()
     if existing is not None:
         return existing, False
     inbound = (
@@ -111,8 +246,16 @@ def authorize_manual_reply(
             "related_outbound__campaign",
             "related_outbound__catalog",
             "related_outbound__prospect_email",
+            "related_outbound__email_address",
+            "related_outbound__organization",
+            "related_outbound__campaign_enrollment",
+            "related_outbound__campaign_enrollment__selected_email",
+            "related_outbound__contact",
+            "related_outbound__conversation",
+            "contact",
+            "conversation",
         )
-        .get(pk=inbound_id, connection__owner=actor)
+        .get(pk=inbound_id, connection__workspace=membership.workspace)
     )
     existing = OutboundMessage.objects.filter(
         kind=OutboundMessage.Kind.MANUAL_REPLY,
@@ -120,19 +263,30 @@ def authorize_manual_reply(
     ).first()
     if existing is not None:
         return existing, False
+    if _automatic_reply_conflict(inbound):
+        raise ValidationError(
+            "Esta respuesta ya tiene una contestación automática autorizada o enviada. "
+            "Revisá el historial antes de continuar."
+        )
     root, cleaned_body, normalized = _validate_authorization(
         inbound=inbound,
         body_text=body_text,
     )
     now = timezone.now()
     references = _reply_references(inbound, root)
+    email_address = _contact_email(root)
     try:
         with transaction.atomic():
             message = OutboundMessage.objects.create(
                 kind=OutboundMessage.Kind.MANUAL_REPLY,
                 campaign=root.campaign,
+                organization=root.organization,
+                campaign_enrollment=root.campaign_enrollment,
+                contact=inbound.contact or root.contact,
+                conversation=inbound.conversation or root.conversation,
                 prospect=root.prospect,
                 prospect_email=root.prospect_email,
+                email_address=email_address,
                 analysis=None,
                 parent_inbound=inbound,
                 sent_by=actor,
@@ -143,7 +297,7 @@ def authorize_manual_reply(
                 catalog=root.catalog,
                 catalog_version=root.catalog_version,
                 state=OutboundMessage.State.QUEUED,
-                delivery_mode=Campaign.DeliveryMode.LIVE,
+                delivery_mode=root.delivery_mode,
                 idempotency_key=key,
                 message_id=deterministic_message_id(key),
                 in_reply_to=normalize_message_id(inbound.message_id),
@@ -196,24 +350,22 @@ def _effect_eligibility_error(
     connection: GmailConnection | None,
 ) -> str:
     if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
-        return "SEND_MODE o el kill switch bloquean la respuesta manual."
-    if message.delivery_mode != Campaign.DeliveryMode.LIVE:
-        return "La respuesta no pertenece a una campaña live."
+        return "La configuración global de envío o el bloqueo general impiden la respuesta manual."
+    campaign = message.campaign
+    if message.delivery_mode != Campaign.DeliveryMode.LIVE or (
+        campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE
+    ):
+        return "La respuesta no pertenece a una campaña con envío en vivo."
     if connection is None or not connection.is_ready or set(connection.scopes) != set(GMAIL_SCOPES):
         return "Gmail no está conectado y probado."
-    if SuppressionEntry.objects.filter(normalized_email=message.recipient_normalized).exists():
-        return "El destinatario está suprimido."
-    email = message.prospect_email
-    if (
-        email.normalized_email != message.recipient_normalized
-        or email.is_invalid
-        or not email.is_primary
-        or not email.syntax_valid
-        or email.mx_status != email.MXStatus.VALID
-        or email.exclusion_reason
-    ):
-        return "El email del prospecto ya no es válido para responder."
-    return ""
+    parent = message.parent_inbound
+    if parent is None or parent.connection_id != connection.pk:
+        return "La respuesta perdió la referencia segura a la conversación original."
+    return _channel_eligibility_error(
+        message,
+        workspace_id=connection.workspace_id,
+        contact_id=message.contact_id or parent.contact_id,
+    )
 
 
 def _finish_manual_reply(
@@ -267,7 +419,16 @@ def _prepare_manual_effect(
 ) -> ManualReplyEffect | str:
     message = (
         OutboundMessage.objects.select_for_update()
-        .select_related("campaign__created_by", "prospect_email", "sent_by")
+        .select_related(
+            "campaign__created_by",
+            "prospect_email",
+            "email_address",
+            "campaign_enrollment__selected_email",
+            "organization",
+            "contact",
+            "parent_inbound__connection",
+            "sent_by",
+        )
         .get(pk=message_id, kind=OutboundMessage.Kind.MANUAL_REPLY)
     )
     if message.state in {
@@ -287,11 +448,14 @@ def _prepare_manual_effect(
             state=OutboundMessage.State.SEND_FAILED,
             error="La autorización manual no estaba en cola.",
         )
-    connection = (
-        GmailConnection.objects.select_for_update()
-        .filter(owner=message.campaign.created_by)
-        .first()
-    )
+    parent = message.parent_inbound
+    connection = None
+    if parent is not None:
+        connection = (
+            GmailConnection.objects.select_for_update()
+            .filter(pk=parent.connection_id, workspace_id=parent.connection.workspace_id)
+            .first()
+        )
     eligibility_error = _effect_eligibility_error(message, connection)
     if eligibility_error:
         return _finish_manual_reply(
@@ -330,16 +494,28 @@ def _execute_manual_effect(
     lock_email_eligibility(effect.recipient_normalized)
     message = (
         OutboundMessage.objects.select_for_update()
-        .select_related("campaign__created_by", "prospect_email", "sent_by")
+        .select_related(
+            "campaign__created_by",
+            "prospect_email",
+            "email_address",
+            "campaign_enrollment__selected_email",
+            "organization",
+            "contact",
+            "parent_inbound__connection",
+            "sent_by",
+        )
         .get(pk=effect.message_id, kind=OutboundMessage.Kind.MANUAL_REPLY)
     )
     if message.state != OutboundMessage.State.SENDING:
         return message.state
-    connection = (
-        GmailConnection.objects.select_for_update()
-        .filter(owner=message.campaign.created_by)
-        .first()
-    )
+    parent = message.parent_inbound
+    connection = None
+    if parent is not None:
+        connection = (
+            GmailConnection.objects.select_for_update()
+            .filter(pk=parent.connection_id, workspace_id=parent.connection.workspace_id)
+            .first()
+        )
     eligibility_error = _effect_eligibility_error(message, connection)
     if eligibility_error:
         return _finish_manual_reply(
@@ -367,19 +543,19 @@ def _execute_manual_effect(
         return _finish_manual_reply(
             message,
             state=OutboundMessage.State.RECONCILING,
-            error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
+            error=redact_provider_error(exc, owner_id=connection.owner_id),
         )
     except (AuthenticationError, PermanentProviderError, ValidationProviderError) as exc:
         return _finish_manual_reply(
             message,
             state=OutboundMessage.State.SEND_FAILED,
-            error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
+            error=redact_provider_error(exc, owner_id=connection.owner_id),
         )
     except (ProviderError, ValidationError) as exc:
         return _finish_manual_reply(
             message,
             state=OutboundMessage.State.RECONCILING,
-            error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
+            error=redact_provider_error(exc, owner_id=connection.owner_id),
         )
     return _finish_manual_reply(
         message,
@@ -405,16 +581,37 @@ def reconcile_manual_reply(
     *,
     provider: GmailProvider | None = None,
 ) -> str:
-    message = OutboundMessage.objects.select_related("campaign__created_by").get(
-        pk=message_id,
-        kind=OutboundMessage.Kind.MANUAL_REPLY,
-    )
+    message = OutboundMessage.objects.select_related(
+        "campaign__created_by",
+        "parent_inbound__connection",
+    ).get(pk=message_id, kind=OutboundMessage.Kind.MANUAL_REPLY)
     if message.state not in {
         OutboundMessage.State.SENDING,
         OutboundMessage.State.RECONCILING,
     }:
         return message.state
-    connection = GmailConnection.objects.get(owner=message.campaign.created_by)
+    campaign = message.campaign
+    parent = message.parent_inbound
+    if (
+        message.delivery_mode != Campaign.DeliveryMode.LIVE
+        or (campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE)
+        or parent is None
+    ):
+        with transaction.atomic():
+            locked = (
+                OutboundMessage.objects.select_for_update()
+                .select_related("sent_by")
+                .get(pk=message.pk)
+            )
+            return _finish_manual_reply(
+                locked,
+                state=OutboundMessage.State.SEND_FAILED,
+                error="La respuesta no pertenece a una campaña con envío en vivo.",
+            )
+    connection = GmailConnection.objects.get(
+        pk=parent.connection_id,
+        workspace_id=parent.connection.workspace_id,
+    )
     try:
         if provider is None:
             from apps.mailbox.services import provider_for_connection
@@ -427,7 +624,7 @@ def reconcile_manual_reply(
             return _finish_manual_reply(
                 locked,
                 state=OutboundMessage.State.RECONCILING,
-                error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
+                error=redact_provider_error(exc, owner_id=connection.owner_id),
             )
     except ProviderError as exc:
         with transaction.atomic():
@@ -435,7 +632,7 @@ def reconcile_manual_reply(
             return _finish_manual_reply(
                 locked,
                 state=OutboundMessage.State.SEND_FAILED,
-                error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
+                error=redact_provider_error(exc, owner_id=connection.owner_id),
             )
     except ValidationError as exc:
         with transaction.atomic():
@@ -443,7 +640,7 @@ def reconcile_manual_reply(
             return _finish_manual_reply(
                 locked,
                 state=OutboundMessage.State.SEND_FAILED,
-                error=redact_provider_error(exc, owner_id=message.campaign.created_by_id),
+                error=redact_provider_error(exc, owner_id=connection.owner_id),
             )
     with transaction.atomic():
         locked = (
@@ -459,7 +656,7 @@ def reconcile_manual_reply(
         return _finish_manual_reply(
             locked,
             state=OutboundMessage.State.SEND_FAILED,
-            error="Gmail confirmó que el Message-ID de la respuesta no existe.",
+            error="Gmail confirmó que el identificador del mensaje de respuesta no existe.",
         )
 
 
@@ -467,21 +664,34 @@ def pending_manual_reply_ids() -> tuple[uuid.UUID, ...]:
     return tuple(
         OutboundMessage.objects.filter(
             kind=OutboundMessage.Kind.MANUAL_REPLY,
+            delivery_mode=Campaign.DeliveryMode.LIVE,
             state=OutboundMessage.State.QUEUED,
-        ).values_list("pk", flat=True)
+        )
+        .filter(Q(campaign__isnull=True) | Q(campaign__delivery_mode=Campaign.DeliveryMode.LIVE))
+        .values_list("pk", flat=True)
     )
 
 
 def recoverable_manual_reply_ids(now: datetime | None = None) -> tuple[uuid.UUID, ...]:
     moment = now or timezone.now()
-    stale_sending = OutboundMessage.objects.filter(
-        kind=OutboundMessage.Kind.MANUAL_REPLY,
-        state=OutboundMessage.State.SENDING,
-        sending_started_at__lte=moment - STALE_SENDING_AFTER,
-    ).values_list("pk", flat=True)
-    reconciling = OutboundMessage.objects.filter(
-        kind=OutboundMessage.Kind.MANUAL_REPLY,
-        state=OutboundMessage.State.RECONCILING,
-        next_attempt_at__lte=moment,
-    ).values_list("pk", flat=True)
+    stale_sending = (
+        OutboundMessage.objects.filter(
+            kind=OutboundMessage.Kind.MANUAL_REPLY,
+            delivery_mode=Campaign.DeliveryMode.LIVE,
+            state=OutboundMessage.State.SENDING,
+            sending_started_at__lte=moment - STALE_SENDING_AFTER,
+        )
+        .filter(Q(campaign__isnull=True) | Q(campaign__delivery_mode=Campaign.DeliveryMode.LIVE))
+        .values_list("pk", flat=True)
+    )
+    reconciling = (
+        OutboundMessage.objects.filter(
+            kind=OutboundMessage.Kind.MANUAL_REPLY,
+            delivery_mode=Campaign.DeliveryMode.LIVE,
+            state=OutboundMessage.State.RECONCILING,
+            next_attempt_at__lte=moment,
+        )
+        .filter(Q(campaign__isnull=True) | Q(campaign__delivery_mode=Campaign.DeliveryMode.LIVE))
+        .values_list("pk", flat=True)
+    )
     return tuple(stale_sending) + tuple(reconciling)

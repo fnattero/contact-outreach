@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.conf import settings
 from django.db import models
 
@@ -12,6 +14,11 @@ class GmailConnection(TimestampedUUIDModel):
         ERROR = "ERROR", "Con error"
         DISCONNECTED = "DISCONNECTED", "Desconectada"
 
+    workspace = models.OneToOneField(
+        "accounts.Workspace",
+        on_delete=models.PROTECT,
+        related_name="gmail_connection",
+    )
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -38,6 +45,11 @@ class GmailConnection(TimestampedUUIDModel):
             and self.refresh_token_encrypted
             and self.last_tested_at
         )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self.workspace_id and self.owner_id:
+            self.workspace_id = self.owner.membership.workspace_id
+        super().save(*args, **kwargs)
 
 
 class FakeGmailMessage(TimestampedUUIDModel):
@@ -81,6 +93,34 @@ class InboundMessage(TimestampedUUIDModel):
 
     connection = models.ForeignKey(
         GmailConnection,
+        on_delete=models.PROTECT,
+        related_name="inbound_messages",
+    )
+    organization = models.ForeignKey(
+        "contacts.Organization",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="inbound_messages",
+    )
+    campaign_enrollment = models.ForeignKey(
+        "contacts.CampaignEnrollment",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="inbound_messages",
+    )
+    contact = models.ForeignKey(
+        "contacts.Contact",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="inbound_messages",
+    )
+    conversation = models.ForeignKey(
+        "contacts.Conversation",
+        blank=True,
+        null=True,
         on_delete=models.PROTECT,
         related_name="inbound_messages",
     )

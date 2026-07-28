@@ -6,6 +6,7 @@ import uuid
 from datetime import timedelta
 from decimal import ROUND_FLOOR, Decimal
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -16,6 +17,7 @@ from apps.configuration.integrations import (
     redact_provider_error,
     runtime_integration_configuration,
 )
+from apps.contacts.models import CampaignEnrollment
 from apps.integrations.contracts import (
     AuthenticationError,
     CostLimitError,
@@ -35,7 +37,6 @@ from apps.prospects.email_validation import (
     MXResolver,
     TransientMXError,
 )
-from apps.prospects.models import Prospect
 from apps.prospects.services import (
     DeduplicationConflict,
     IngestOutcome,
@@ -45,6 +46,7 @@ from apps.prospects.services import (
 )
 
 MAX_PROVIDER_ATTEMPTS = 3
+DEFAULT_EXTRACTION_BATCH_SIZE = 20
 ACTIVE_RUN_STATES = (
     SearchRun.State.PENDING,
     SearchRun.State.RUNNING,
@@ -52,10 +54,49 @@ ACTIVE_RUN_STATES = (
 )
 
 
+def _campaign_accepts_discovery(campaign: Campaign) -> bool:
+    return campaign.state in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}
+
+
 def _unit_cost(provider: str, *, owner_id: int) -> Decimal:
-    if provider == "fake":
+    del owner_id
+    if provider in {"fake", "overture"}:
         return Decimal("0")
-    return runtime_integration_configuration(owner_id).outscraper_max_cost_per_result
+    raise ImproperlyConfigured(f"Extractor provider {provider!r} is not supported")
+
+
+def _extractor_batch_size(owner_id: int) -> int:
+    runtime = runtime_integration_configuration(owner_id)
+    # Prefer a future provider-neutral dashboard setting, while retaining a
+    # stable local default when the schema intentionally has no paid-API knob.
+    value = getattr(runtime, "extractor_batch_size", DEFAULT_EXTRACTION_BATCH_SIZE)
+    return int(value)
+
+
+def _dataset_snapshot_id(campaign: Campaign, query: SearchQuery | None = None) -> str:
+    if query is not None and query.coverage_selection_id is not None:
+        coverage = query.coverage_selection
+        if coverage is not None:
+            return str(coverage.partition.snapshot_id)
+    for attribute in (
+        "overture_snapshot_id",
+        "overture_dataset_snapshot_id",
+        "extractor_dataset_snapshot_id",
+        "dataset_snapshot_id",
+    ):
+        value = getattr(campaign, attribute, None)
+        if value:
+            return str(value)
+    for key in (
+        "overture_snapshot_id",
+        "overture_dataset_snapshot_id",
+        "extractor_dataset_snapshot_id",
+        "dataset_snapshot_id",
+    ):
+        value = campaign.settings_snapshot.get(key)
+        if value:
+            return str(value)
+    return ""
 
 
 def _campaign_cost(campaign: Campaign) -> Decimal:
@@ -71,9 +112,10 @@ def _campaign_cost(campaign: Campaign) -> Decimal:
 
 
 def _qualified_count(campaign: Campaign) -> int:
-    # Phase 6/7 moves only threshold-approved prospects to QUEUED. EMAIL_FOUND is not qualified.
-    return Prospect.objects.filter(
-        campaign=campaign, pipeline_state=Prospect.PipelineState.QUEUED
+    return CampaignEnrollment.objects.filter(
+        campaign=campaign,
+        state__in=(CampaignEnrollment.State.ELIGIBLE, CampaignEnrollment.State.PREPARED),
+        selected_email__isnull=False,
     ).count()
 
 
@@ -91,6 +133,10 @@ def _finish_discovery_locked(campaign: Campaign, state: str, reason: str) -> Non
         before=before,
         after={"discovery_state": state, "discovery_stop_reason": reason},
     )
+    if campaign.state == Campaign.State.DISCOVERING:
+        from apps.campaigns.approval import maybe_move_campaign_to_approval
+
+        transaction.on_commit(lambda: maybe_move_campaign_to_approval(campaign.pk))
 
 
 def _apply_stop_conditions(campaign: Campaign) -> bool:
@@ -110,15 +156,6 @@ def _apply_stop_conditions(campaign: Campaign) -> bool:
             f"raw={raw}; max_raw_records={campaign.max_raw_records}",
         )
         return True
-    cost = _campaign_cost(campaign)
-    if cost >= campaign.cost_limit:
-        _finish_discovery_locked(
-            campaign,
-            Campaign.DiscoveryState.EXHAUSTED_COST,
-            f"estimated_or_actual_cost={cost}; limit={campaign.cost_limit} "
-            f"{campaign.cost_currency}",
-        )
-        return True
     return False
 
 
@@ -126,7 +163,7 @@ def _apply_stop_conditions(campaign: Campaign) -> bool:
 def ensure_next_search_run(campaign_id: uuid.UUID | str) -> SearchRun | None:
     campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
     if (
-        campaign.state != Campaign.State.RUNNING
+        not _campaign_accepts_discovery(campaign)
         or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
     ):
         return None
@@ -161,8 +198,9 @@ def ensure_next_search_run(campaign_id: uuid.UUID | str) -> SearchRun | None:
         return None
 
     raw_used = sum(campaign.search_runs.values_list("raw_count", flat=True))
-    runtime = runtime_integration_configuration(campaign.created_by_id)
-    requested_limit = min(runtime.outscraper_batch_size, campaign.max_raw_records - raw_used)
+    requested_limit = min(
+        _extractor_batch_size(campaign.created_by_id), campaign.max_raw_records - raw_used
+    )
     per_unit = _unit_cost(campaign.extractor_provider, owner_id=campaign.created_by_id)
     cost_remaining = campaign.cost_limit - _campaign_cost(campaign)
     if per_unit > 0:
@@ -176,19 +214,35 @@ def ensure_next_search_run(campaign_id: uuid.UUID | str) -> SearchRun | None:
         )
         return None
 
-    idempotency_key = f"extract:{query.pk}:1"
+    previous_run = (
+        query.runs.filter(state=SearchRun.State.SUCCEEDED).order_by("-created_at").first()
+    )
+    cursor = previous_run.cursor if previous_run is not None else ""
+    page_number = query.run_count + 1
+    idempotency_key = f"extract:{query.pk}:{page_number}"
+    dataset_snapshot_id = _dataset_snapshot_id(campaign, query)
+    coverage_selection = query.coverage_selection
+    query_partition = coverage_selection.partition if coverage_selection is not None else None
     run = SearchRun.objects.create(
         campaign=campaign,
         query=query,
         provider=campaign.extractor_provider,
+        overture_snapshot=(
+            query_partition.snapshot if query_partition is not None else campaign.overture_snapshot
+        ),
+        overture_partition=query_partition,
         idempotency_key=idempotency_key,
         request_json={
             "query": query.query_text,
+            "category": query.category_snapshot,
+            "zone": query.zone_snapshot,
+            "location": query.location_snapshot,
+            "dataset_snapshot_id": dataset_snapshot_id,
+            "cursor": cursor,
             "limit": requested_limit,
-            "async": True,
-            "enrichment": ["contacts_n_leads"],
-            "language": "es-419",
-            "region": "AR",
+            "criteria": query.criteria_json,
+            "zone_boundary_hash": query.zone_boundary_hash,
+            "min_confidence": str(campaign.overture_min_confidence),
         },
         requested_limit=requested_limit,
         cost_reserved=per_unit * requested_limit,
@@ -206,6 +260,8 @@ def ensure_next_search_run(campaign_id: uuid.UUID | str) -> SearchRun | None:
             "requested_limit": requested_limit,
             "cost_reserved": str(run.cost_reserved),
             "currency": run.currency,
+            "dataset_snapshot_id": dataset_snapshot_id,
+            "page": page_number,
         },
     )
     return run
@@ -221,15 +277,16 @@ def _persist_provider_response(run_id: uuid.UUID, batch: ExtractionBatch) -> Sea
     run = SearchRun.objects.select_for_update().get(pk=run_id)
     if run.processed_at is not None:
         return run
-    if run.provider_request_id and run.provider_request_id != batch.request_id:
-        raise PermanentProviderError("El proveedor cambió el identificador del trabajo.")
     if batch.currency and batch.currency != run.currency:
         raise PermanentProviderError(
             f"El proveedor informó moneda {batch.currency}; la campaña usa {run.currency}."
         )
-    run.provider_request_id = batch.request_id
+    request_cursor = str(run.request_json.get("cursor", ""))
+    if batch.next_cursor and batch.next_cursor == request_cursor:
+        raise PermanentProviderError("El proveedor devolvió un cursor que no avanza.")
     run.response_json = batch.raw_payload
     run.response_hash = _payload_hash(batch.raw_payload)
+    run.cursor = batch.next_cursor
     run.raw_persisted_at = timezone.now()
     if batch.estimated_cost is not None:
         run.cost_estimated = batch.estimated_cost
@@ -240,9 +297,9 @@ def _persist_provider_response(run_id: uuid.UUID, batch: ExtractionBatch) -> Sea
     run.error = ""
     run.save(
         update_fields=(
-            "provider_request_id",
             "response_json",
             "response_hash",
+            "cursor",
             "raw_persisted_at",
             "cost_estimated",
             "cost_actual",
@@ -255,7 +312,7 @@ def _persist_provider_response(run_id: uuid.UUID, batch: ExtractionBatch) -> Sea
         run=run,
         defaults={
             "provider": run.provider,
-            "operation": "google_maps_search",
+            "operation": batch.operation,
             "campaign": run.campaign,
             "currency": run.currency,
         },
@@ -268,11 +325,13 @@ def _persist_provider_response(run_id: uuid.UUID, batch: ExtractionBatch) -> Sea
         usage.actual_cost = batch.actual_cost
     if batch.usage_metadata is not None:
         usage.metadata = batch.usage_metadata
-    usage.request_id = batch.request_id
+    usage.operation = batch.operation
+    usage.request_id = ""
     usage.currency = run.currency
     usage.save(
         update_fields=(
             "units",
+            "operation",
             "estimated_cost",
             "actual_cost",
             "metadata",
@@ -285,33 +344,12 @@ def _persist_provider_response(run_id: uuid.UUID, batch: ExtractionBatch) -> Sea
 
 
 @transaction.atomic
-def _mark_pending(run_id: uuid.UUID, *, retry_after: float | None = None) -> SearchRun:
-    run_pointer = SearchRun.objects.only("campaign_id").get(pk=run_id)
-    campaign = Campaign.objects.select_for_update().get(pk=run_pointer.campaign_id)
-    run = SearchRun.objects.select_for_update().select_related("query").get(pk=run_id)
-    if (
-        campaign.state != Campaign.State.RUNNING
-        or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
-        or run.state == SearchRun.State.CANCELLED
-    ):
-        return run
-    runtime = runtime_integration_configuration(campaign.created_by_id)
-    delay = retry_after if retry_after is not None else runtime.outscraper_poll_seconds
-    run.state = SearchRun.State.RETRY_WAIT
-    run.next_poll_at = timezone.now() + timedelta(seconds=max(1.0, delay))
-    run.query.state = SearchQuery.State.RETRY_WAIT
-    run.save(update_fields=("state", "next_poll_at", "updated_at"))
-    run.query.save(update_fields=("state", "updated_at"))
-    return run
-
-
-@transaction.atomic
 def _mark_retryable(run_id: uuid.UUID, error: Exception) -> SearchRun:
     run_pointer = SearchRun.objects.only("campaign_id").get(pk=run_id)
     campaign = Campaign.objects.select_for_update().get(pk=run_pointer.campaign_id)
     run = SearchRun.objects.select_for_update().select_related("query").get(pk=run_id)
     if (
-        campaign.state != Campaign.State.RUNNING
+        not _campaign_accepts_discovery(campaign)
         or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
         or run.state == SearchRun.State.CANCELLED
     ):
@@ -356,7 +394,7 @@ def _mark_permanent(run_id: uuid.UUID, error: Exception) -> SearchRun:
     campaign = Campaign.objects.select_for_update().get(pk=run_pointer.campaign_id)
     run = SearchRun.objects.select_for_update().select_related("query").get(pk=run_id)
     if (
-        campaign.state != Campaign.State.RUNNING
+        not _campaign_accepts_discovery(campaign)
         or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
         or run.state == SearchRun.State.CANCELLED
     ):
@@ -394,7 +432,7 @@ def _process_persisted_response(
     if run.processed_at is not None:
         return run
     if (
-        run.campaign.state != Campaign.State.RUNNING
+        not _campaign_accepts_discovery(run.campaign)
         or run.campaign.discovery_state != Campaign.DiscoveryState.RUNNING
         or run.state == SearchRun.State.CANCELLED
     ):
@@ -420,7 +458,7 @@ def _persist_processed_records(
     if run.processed_at is not None:
         return run
     if (
-        campaign.state != Campaign.State.RUNNING
+        not _campaign_accepts_discovery(campaign)
         or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
         or run.state == SearchRun.State.CANCELLED
     ):
@@ -437,6 +475,8 @@ def _persist_processed_records(
         result = ingest_prepared_business(run=run, prepared=item)
         if result.outcome == IngestOutcome.CREATED:
             email_count += 1
+        elif result.outcome == IngestOutcome.NO_EMAIL:
+            no_email_count += 1
         elif result.outcome == IngestOutcome.DUPLICATE:
             duplicate_count += 1
     no_email_count += sum(
@@ -453,7 +493,9 @@ def _persist_processed_records(
         run.cost_estimated = (
             _unit_cost(run.provider, owner_id=run.campaign.created_by_id) * raw_count
         )
-    run.query.state = SearchQuery.State.SUCCEEDED
+    # A non-empty keyset cursor means this query has another replay-safe page.
+    # The completed page remains immutable while orchestration creates a new run.
+    run.query.state = SearchQuery.State.PENDING if run.cursor else SearchQuery.State.SUCCEEDED
     run.query.last_error = ""
     run.save(
         update_fields=(
@@ -473,7 +515,7 @@ def _persist_processed_records(
         run=run,
         defaults={
             "provider": run.provider,
-            "operation": "google_maps_search",
+            "operation": f"{run.provider}_places_query",
             "campaign": run.campaign,
             "currency": run.currency,
         },
@@ -481,7 +523,7 @@ def _persist_processed_records(
     if usage.units is None:
         usage.units = Decimal(raw_count)
     usage.estimated_cost = run.cost_estimated
-    usage.request_id = run.provider_request_id
+    usage.request_id = ""
     usage.save(update_fields=("units", "estimated_cost", "request_id", "updated_at"))
     record_event(
         action="extraction.run_succeeded",
@@ -507,22 +549,18 @@ def _call_provider_with_campaign_lock(
     provider: ExtractorProvider,
     request: SearchRequest,
 ) -> tuple[SearchRun, ExtractionBatch] | None:
-    """Serialize paid provider effects with campaign pause/cancellation."""
+    """Serialize one replay-safe provider query with campaign cancellation."""
 
     run_pointer = SearchRun.objects.only("campaign_id").get(pk=run_id)
     campaign = Campaign.objects.select_for_update().get(pk=run_pointer.campaign_id)
     run = SearchRun.objects.select_for_update().get(pk=run_id)
     if (
-        campaign.state != Campaign.State.RUNNING
+        not _campaign_accepts_discovery(campaign)
         or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
         or run.state != SearchRun.State.RUNNING
     ):
         return None
-    batch = (
-        provider.poll(request_id=run.provider_request_id)
-        if run.provider_request_id
-        else provider.submit(request)
-    )
+    batch = provider.search(request)
     persisted = _persist_provider_response(run.pk, batch)
     return persisted, batch
 
@@ -536,16 +574,19 @@ def advance_search_run(
     run = SearchRun.objects.select_related("campaign", "query").get(pk=run_id)
     if run.state in {SearchRun.State.SUCCEEDED, SearchRun.State.FAILED_PERMANENT}:
         return run
-    if run.campaign.state != Campaign.State.RUNNING:
+    if not _campaign_accepts_discovery(run.campaign):
         return run
     try:
         active_provider = provider or get_extractor_provider(
             run.provider, owner_id=run.campaign.created_by_id
         )
-    except (AuthenticationError, ValidationProviderError) as exc:
+    except (AuthenticationError, ImproperlyConfigured, ValidationProviderError) as exc:
         return _mark_permanent(run.pk, exc)
     active_resolver = resolver or (MockMXResolver() if run.provider == "fake" else DNSMXResolver())
-    stored_success = str(run.response_json.get("status", "")).casefold() == "success"
+    stored_success = str(run.response_json.get("status", "")).casefold() in {
+        "success",
+        "succeeded",
+    }
     if run.raw_persisted_at is not None and run.processed_at is None and stored_success:
         try:
             return _process_persisted_response(
@@ -556,23 +597,11 @@ def advance_search_run(
         except DeduplicationConflict as exc:
             return _mark_permanent(run.pk, exc)
     stale_before = timezone.now() - timedelta(minutes=5)
-    if (
-        run.state == SearchRun.State.RUNNING
-        and run.updated_at < stale_before
-        and not run.provider_request_id
-    ):
-        return _mark_permanent(
-            run.pk,
-            PermanentProviderError(
-                "La creación externa quedó ambigua tras el reinicio; no se reenvía el trabajo."
-            ),
-        )
-
     with transaction.atomic():
         campaign = Campaign.objects.select_for_update().get(pk=run.campaign_id)
         current = SearchRun.objects.select_for_update().get(pk=run.pk)
         if (
-            campaign.state != Campaign.State.RUNNING
+            not _campaign_accepts_discovery(campaign)
             or campaign.discovery_state != Campaign.DiscoveryState.RUNNING
         ):
             return current
@@ -585,9 +614,17 @@ def advance_search_run(
         current.save(update_fields=("state", "started_at", "next_poll_at", "updated_at"))
 
     request = SearchRequest(
-        query=run.query.query_text,
+        query=str(run.request_json.get("query", run.query.query_text)),
         correlation_id=str(run.pk),
         idempotency_key=run.idempotency_key,
+        category=str(run.request_json.get("category", run.query.category_snapshot)),
+        zone=str(run.request_json.get("zone", run.query.zone_snapshot)),
+        location=str(run.request_json.get("location", run.query.location_snapshot)),
+        dataset_snapshot_id=str(run.request_json.get("dataset_snapshot_id", "")),
+        criteria=dict(run.request_json.get("criteria", {})),
+        zone_boundary_hash=str(run.request_json.get("zone_boundary_hash", "")),
+        min_confidence=Decimal(str(run.request_json.get("min_confidence", "0.750"))),
+        cursor=str(run.request_json.get("cursor", "")),
         limit=run.requested_limit,
     )
     try:
@@ -600,17 +637,10 @@ def advance_search_run(
             return SearchRun.objects.get(pk=run.pk)
         persisted, batch = provider_result
         if batch.status == "PENDING":
-            if (
-                persisted.started_at is not None
-                and persisted.started_at <= timezone.now() - timedelta(hours=4)
-            ):
-                return _mark_permanent(
-                    run.pk,
-                    PermanentProviderError(
-                        "El resultado de Outscraper expiró antes de poder recuperarse."
-                    ),
-                )
-            return _mark_pending(run.pk)
+            return _mark_retryable(
+                persisted.pk,
+                RetryableProviderError("El proveedor local no terminó la consulta sincrónica."),
+            )
         if batch.status == "FAILED":
             return _mark_permanent(
                 run.pk, PermanentProviderError("El trabajo del proveedor falló.")
@@ -621,14 +651,6 @@ def advance_search_run(
     except RateLimitError as exc:
         return _mark_retryable(run.pk, exc)
     except RetryableProviderError as exc:
-        # Without a provider ID, retrying submission could create a duplicate external job.
-        if not run.provider_request_id:
-            return _mark_permanent(
-                run.pk,
-                PermanentProviderError(
-                    "Resultado ambiguo al crear el trabajo; no se reenvía para evitar duplicados."
-                ),
-            )
         return _mark_retryable(run.pk, exc)
     except TransientMXError as exc:
         return _mark_retryable(run.pk, exc)
@@ -650,7 +672,7 @@ def recoverable_search_run_ids() -> list[uuid.UUID]:
             Q(state=SearchRun.State.PENDING)
             | Q(state=SearchRun.State.RETRY_WAIT, next_poll_at__lte=now)
             | Q(state=SearchRun.State.RUNNING, updated_at__lt=now - timedelta(minutes=5)),
-            campaign__state=Campaign.State.RUNNING,
+            campaign__state__in=(Campaign.State.DISCOVERING, Campaign.State.RUNNING),
             campaign__discovery_state=Campaign.DiscoveryState.RUNNING,
         ).values_list("pk", flat=True)
     )
@@ -661,7 +683,7 @@ def recoverable_campaign_ids() -> list[uuid.UUID]:
 
     return list(
         Campaign.objects.filter(
-            state=Campaign.State.RUNNING,
+            state__in=(Campaign.State.DISCOVERING, Campaign.State.RUNNING),
             discovery_state=Campaign.DiscoveryState.RUNNING,
         )
         .exclude(search_runs__state__in=ACTIVE_RUN_STATES)

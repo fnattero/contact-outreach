@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
@@ -13,12 +12,23 @@ from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.accounts.permissions import (
+    Capability,
+    has_capability,
+    require_capability,
+    workspace_for_user,
+)
 from apps.campaigns.models import OutboundMessage
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.dashboard.csv_export import csv_download
-from apps.dashboard.queries import owner_campaigns, response_queryset
+from apps.dashboard.queries import (
+    outbound_workspace_filter,
+    response_queryset,
+    workspace_campaigns,
+)
 from apps.integrations.contracts import ProviderError
 from apps.integrations.fakes import FakeGmailProvider
 from apps.mailbox.forms import FakeInboundForm, ManualReplyForm
@@ -48,18 +58,34 @@ class ThreadItem:
     classification: str
 
 
-@login_required
+def _message_party_label(message: OutboundMessage) -> str:
+    if message.prospect is not None:
+        return message.prospect.name
+    if message.contact is not None:
+        return str(message.contact)
+    if message.organization is not None:
+        return message.organization.name or "Organización sin nombre"
+    return message.recipient_normalized
+
+
+@require_capability(Capability.MANAGE_INTEGRATIONS)
+@never_cache
 def gmail_settings(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
-    connection = GmailConnection.objects.filter(owner=owner).first()
+    workspace = workspace_for_user(owner, Capability.MANAGE_INTEGRATIONS)
+    connection = GmailConnection.objects.filter(workspace=workspace).first()
     runtime = runtime_integration_configuration(owner.pk)
     fake_outbound = OutboundMessage.objects.none()
     if runtime.gmail_provider == "fake":
-        fake_outbound = OutboundMessage.objects.filter(
-            campaign__created_by=owner,
-            state=OutboundMessage.State.SENT,
-        ).select_related("campaign", "prospect")
+        fake_outbound = (
+            OutboundMessage.objects.filter(
+                outbound_workspace_filter(workspace.pk),
+                state=OutboundMessage.State.SENT,
+            )
+            .select_related("campaign", "prospect", "organization", "contact")
+            .distinct()
+        )
     return render(
         request,
         "mailbox/settings.html",
@@ -73,7 +99,7 @@ def gmail_settings(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@require_capability(Capability.MANAGE_INTEGRATIONS)
 @require_POST
 def gmail_connect(request: HttpRequest) -> HttpResponse:
     owner = request.user
@@ -99,7 +125,7 @@ def gmail_connect(request: HttpRequest) -> HttpResponse:
     return redirect(url)
 
 
-@login_required
+@require_capability(Capability.MANAGE_INTEGRATIONS)
 @require_GET
 def gmail_oauth_callback(request: HttpRequest) -> HttpResponse:
     state = request.GET.get("state", "")
@@ -107,7 +133,10 @@ def gmail_oauth_callback(request: HttpRequest) -> HttpResponse:
     expected_state = request.session.pop(OAUTH_STATE_SESSION_KEY, "")
     verifier = request.session.pop(OAUTH_VERIFIER_SESSION_KEY, "")
     if not state or not secrets_compare(state, expected_state) or not code or not verifier:
-        messages.error(request, "La respuesta OAuth no pasó la validación de estado/PKCE.")
+        messages.error(
+            request,
+            "La autorización de Google no superó la verificación segura de la sesión.",
+        )
         return redirect("gmail-settings")
     owner = request.user
     assert isinstance(owner, User)
@@ -122,7 +151,10 @@ def gmail_oauth_callback(request: HttpRequest) -> HttpResponse:
     except (ValidationError, ProviderError) as exc:
         messages.error(request, str(exc))
     else:
-        messages.success(request, "Cuenta Gmail conectada. Enviá la prueba antes de usar live.")
+        messages.success(
+            request,
+            "Cuenta Gmail conectada. Enviá la prueba antes de habilitar el envío en vivo.",
+        )
     return redirect("gmail-settings")
 
 
@@ -132,7 +164,7 @@ def secrets_compare(left: str, right: str) -> bool:
     return hmac.compare_digest(left.encode(), right.encode())
 
 
-@login_required
+@require_capability(Capability.MANAGE_INTEGRATIONS)
 @require_POST
 def gmail_test(request: HttpRequest) -> HttpResponse:
     owner = request.user
@@ -146,7 +178,7 @@ def gmail_test(request: HttpRequest) -> HttpResponse:
     return redirect("gmail-settings")
 
 
-@login_required
+@require_capability(Capability.MANAGE_INTEGRATIONS)
 @require_POST
 def gmail_disconnect(request: HttpRequest) -> HttpResponse:
     owner = request.user
@@ -156,15 +188,18 @@ def gmail_disconnect(request: HttpRequest) -> HttpResponse:
     except (GmailConnection.DoesNotExist, ValidationError) as exc:
         messages.error(request, str(exc))
     else:
-        messages.success(request, "Cuenta Gmail desconectada y token local eliminado.")
+        messages.success(request, "Cuenta Gmail desconectada y credencial local eliminada.")
     return redirect("gmail-settings")
 
 
-@login_required
+@require_capability(Capability.VIEW_CONTACTS)
+@require_GET
+@never_cache
 def response_list(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
-    responses = response_queryset(request.GET, owner_id=owner.pk)
+    workspace = workspace_for_user(owner, Capability.VIEW_CONTACTS)
+    responses = response_queryset(request.GET, workspace_id=workspace.pk)
     page = Paginator(responses, 25).get_page(request.GET.get("page"))
     query = request.GET.copy()
     query.pop("page", None)
@@ -175,17 +210,20 @@ def response_list(request: HttpRequest) -> HttpResponse:
             "responses": page,
             "page_obj": page,
             "query_string": query.urlencode(),
-            "campaigns": owner_campaigns(owner.pk),
+            "campaigns": workspace_campaigns(workspace.pk, include_drafts=False),
             "classifications": InboundMessage.Classification.choices,
         },
     )
 
 
-@login_required
+@require_capability(Capability.EXPORT_DATA)
+@require_GET
+@never_cache
 def response_export(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
-    rows = response_queryset(request.GET, owner_id=owner.pk)
+    workspace = workspace_for_user(owner, Capability.EXPORT_DATA)
+    rows = response_queryset(request.GET, workspace_id=workspace.pk)
     return csv_download(
         filename="respuestas.csv",
         headers=(
@@ -200,8 +238,12 @@ def response_export(request: HttpRequest) -> HttpResponse:
         rows=(
             (
                 item.external_at,
-                item.related_outbound.campaign.name,
-                item.related_outbound.prospect.name,
+                (
+                    item.related_outbound.campaign.name
+                    if item.related_outbound.campaign is not None
+                    else "Sin campaña"
+                ),
+                _message_party_label(item.related_outbound),
                 item.sender,
                 item.subject,
                 item.get_classification_display(),
@@ -212,26 +254,28 @@ def response_export(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
+@require_capability(Capability.MANAGE_INTEGRATIONS)
 @require_POST
 def fake_inbound(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
+    workspace = workspace_for_user(owner, Capability.MANAGE_INTEGRATIONS)
     if runtime_integration_configuration(owner.pk).gmail_provider != "fake":
         raise Http404
     form = FakeInboundForm(request.POST)
     if not form.is_valid():
-        messages.error(request, "Elegí un envío y un escenario fake válido.")
+        messages.error(request, "Elegí un envío y un escenario simulado válido.")
         return redirect("gmail-settings")
     outbound = get_object_or_404(
-        OutboundMessage.objects.select_related("campaign", "prospect"),
+        OutboundMessage.objects.filter(outbound_workspace_filter(workspace.pk))
+        .select_related("campaign", "prospect", "organization", "contact")
+        .distinct(),
         pk=form.cleaned_data["outbound_id"],
-        campaign__created_by=owner,
         state=OutboundMessage.State.SENT,
     )
     connection = get_object_or_404(
         GmailConnection,
-        owner=owner,
+        workspace=workspace,
         status=GmailConnection.Status.CONNECTED,
     )
     provider = provider_for_connection(connection, persist_fake=True)
@@ -243,7 +287,7 @@ def fake_inbound(request: HttpRequest) -> HttpResponse:
         "NOT_INTERESTED": "No me interesa por el momento.",
         "UNSUBSCRIBE": "Solicito la BAJA y no recibir más mensajes.",
         "AUTO_REPLY": "Respuesta automática: estoy fuera de la oficina.",
-        "BOUNCE": "Permanent failure: user unknown.",
+        "BOUNCE": "Falla permanente: usuario desconocido.",
     }
     provider.inject_inbound(
         thread_id=outbound.gmail_thread_id,
@@ -255,30 +299,38 @@ def fake_inbound(request: HttpRequest) -> HttpResponse:
         references=(outbound.message_id,),
     )
     sync_gmail_connection_task.delay(str(connection.pk))
-    messages.success(request, "Respuesta fake inyectada y sincronización solicitada.")
+    messages.success(request, "Respuesta simulada generada y sincronización solicitada.")
     return redirect("responses")
 
 
-@login_required
+@require_capability(Capability.VIEW_CONTACTS)
+@require_GET
+@never_cache
 def response_thread(request: HttpRequest, inbound_id: uuid.UUID) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
+    workspace = workspace_for_user(owner, Capability.VIEW_CONTACTS)
     inbound = get_object_or_404(
         InboundMessage.objects.select_related(
             "related_outbound__campaign",
             "related_outbound__prospect",
             "related_outbound__prospect_email",
+            "related_outbound__organization",
+            "related_outbound__contact",
+            "related_outbound__email_address",
         ),
         pk=inbound_id,
-        connection__owner=owner,
+        connection__workspace=workspace,
     )
     root = inbound.related_outbound
     inbound_items = InboundMessage.objects.filter(
         connection=inbound.connection,
     ).filter(Q(related_outbound=root) | Q(gmail_thread_id=inbound.gmail_thread_id))
-    outbound_items = root.campaign.messages.filter(
-        Q(pk=root.pk) | Q(parent_inbound__related_outbound=root)
-    ).distinct()
+    outbound_items = (
+        OutboundMessage.objects.filter(outbound_workspace_filter(workspace.pk))
+        .filter(Q(pk=root.pk) | Q(gmail_thread_id=inbound.gmail_thread_id))
+        .distinct()
+    )
     chronology = [
         ThreadItem(
             direction="inbound",
@@ -309,11 +361,12 @@ def response_thread(request: HttpRequest, inbound_id: uuid.UUID) -> HttpResponse
             "root": root,
             "chronology": chronology,
             "form": form,
+            "can_reply": has_capability(owner, Capability.SEND_REPLIES),
         },
     )
 
 
-@login_required
+@require_capability(Capability.SEND_REPLIES)
 @require_POST
 def manual_reply(request: HttpRequest, inbound_id: uuid.UUID) -> HttpResponse:
     owner = request.user

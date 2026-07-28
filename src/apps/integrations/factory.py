@@ -6,7 +6,6 @@ from django.core.exceptions import ImproperlyConfigured
 from apps.configuration.integrations import (
     get_gmail_oauth_client_secret,
     get_llm_api_key,
-    get_outscraper_api_key,
     runtime_integration_configuration,
 )
 from apps.integrations.contracts import (
@@ -22,7 +21,6 @@ from apps.integrations.fakes import (
 )
 from apps.integrations.gmail import GmailAPIProvider
 from apps.integrations.llm import MockLLMProvider, OllamaProvider, OpenAICompatibleProvider
-from apps.integrations.outscraper import OutscraperProvider
 from apps.integrations.website import HttpWebsiteFetcher
 
 
@@ -41,11 +39,10 @@ def get_extractor_provider(
     selected = provider_name or runtime.extractor_provider
     if selected == "fake":
         return FakeExtractorProvider()
-    if selected == "outscraper":
-        return OutscraperProvider(
-            api_key=get_outscraper_api_key(owner_id),
-            base_url=runtime.outscraper_base_url,
-        )
+    if selected == "overture":
+        from apps.integrations.overture import OverturePlacesProvider
+
+        return OverturePlacesProvider()
     raise ImproperlyConfigured(f"Extractor provider {selected!r} is not supported")
 
 

@@ -5,6 +5,7 @@ role="${1:-web}"
 
 case "$role" in
     web)
+        python src/manage.py collectstatic --noinput
         python src/manage.py migrate_safe
         python src/manage.py bootstrap_owner --if-configured
         exec gunicorn contact_outreach.wsgi:application \
@@ -19,6 +20,15 @@ case "$role" in
             --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
             --hostname="worker@%h" \
             --concurrency="${CELERY_WORKER_CONCURRENCY:-2}"
+        ;;
+    maintenance-worker)
+        exec celery -A contact_outreach worker \
+            --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
+            --hostname="maintenance@%h" \
+            --queues=maintenance \
+            --concurrency=1 \
+            --prefetch-multiplier=1 \
+            --max-tasks-per-child=1
         ;;
     beat)
         exec celery -A contact_outreach beat \

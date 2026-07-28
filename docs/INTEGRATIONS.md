@@ -1,21 +1,23 @@
 # Integraciones
 
-## 1. Contratos comunes
+## 1. Contratos y frontera de efectos
 
-Los contratos viven en dominio Python y no exponen SDKs externos:
+El dominio define protocolos inmutables; ningún model/view/task consume schemas de SDK:
 
 ```python
 class ExtractorProvider(Protocol):
-    def submit(self, request: SearchRequest) -> ExtractionBatch: ...
-    def poll(self, request_id: str) -> ExtractionBatch: ...
-    def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]: ...
+    def search(self, request: SearchRequest) -> ExtractionBatch: ...
 
 class WebsiteFetcher(Protocol):
     def fetch(self, request: WebsiteRequest) -> WebsiteResult: ...
 
 class LLMProvider(Protocol):
-    def analyze(self, request: AnalysisRequest) -> AIAnalysisResult: ...
-    def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification: ...
+    def analyze(self, request: AnalysisRequest) -> AIAnalysisResult: ...  # sólo legacy
+    def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification: ...  # compatibilidad
+    def decide_reply(self, request: ReplyDecisionRequest) -> ReplyDecisionResult: ...
+    def draft_scheduled_contact(
+        self, request: ScheduledContactDraftRequest
+    ) -> ScheduledContactDraftResult: ...
 
 class GmailProvider(Protocol):
     def authorization_url(self, state: str, redirect_uri: str) -> str: ...
@@ -24,110 +26,216 @@ class GmailProvider(Protocol):
     def test_connection(self) -> GmailAccountInfo: ...
     def send(self, request: GmailSendRequest) -> GmailSendResult: ...
     def reply(self, request: GmailReplyRequest) -> GmailSendResult: ...
+    def find_by_message_id(self, message_id: str) -> GmailMessageMatch: ...
     def sync(self, cursor: GmailCursor | None) -> GmailSyncBatch: ...
 ```
 
-Requests/results son dataclasses o modelos Pydantic inmutables. Todo adaptador acepta timeout, correlation/idempotency key y configuración explícita. Excepciones comunes: `RetryableProviderError`, `RateLimitError(retry_after)`, `AuthenticationError`, `ValidationProviderError`, `CostLimitError` y `PermanentProviderError`.
+Requests/results son dataclasses o Pydantic tipados, sin ORM ni secretos serializados. Adaptadores
+reciben timeout, correlation/idempotency y configuración explícitos. Excepciones comunes:
+`RetryableProviderError`, `RateLimitError(retry_after)`, `AuthenticationError`,
+`ValidationProviderError`, `AmbiguousProviderResult` y `PermanentProviderError`.
 
-`submit` y `poll` devuelven estado, request ID, payload crudo y uso/costo cuando el proveedor lo
-informa. El servicio persiste ese payload antes de llamar `parse_response`; así un reinicio puede
-reanudar desde PostgreSQL sin depender de Redis ni volver a crear el trabajo externo. `extract`
-permanece como alias de compatibilidad para proveedores síncronos y fixtures, pero la orquestación
-durable usa las tres operaciones explícitas.
+El LLM nunca tiene GmailProvider ni tool calling. `decide_reply` sólo propone una salida. Los
+servicios de dominio validan IDs/policy, crean OutboundMessage durable y recién un worker separado
+ejecuta `send`/`reply`. No se incorpora LangGraph: estado, retries, compensación e idempotencia
+viven explícitamente en PostgreSQL.
+`draft_scheduled_contact` también sólo propone asunto/cuerpo y cita IDs de revisiones aprobadas:
+el scheduler fija fecha, Contacto y destinatario, y el executor conserva toda autoridad de envío.
 
-## 2. Outscraper
+Tests sólo construyen fakes e impiden sockets/HTTP/DNS/Gmail/Overture/LLM reales.
 
-`OutscraperProvider` implementa `ExtractorProvider`; no existe cliente propio de Google Maps. Construye consultas con rubro, zona y ubicación snapshot, solicita email/contact enrichment y conserva la respuesta JSON exacta antes de mapearla. El parser versionado tolera campos faltantes y registra desconocidos sin incorporarlos automáticamente al dominio.
+## 2. Overture Maps Places por provincia
 
-El adaptador vigente usa `GET /google-maps-search` con `async=true`, enrichment
-`contacts_n_leads`, región `AR` e idioma `es-419`; autentica exclusivamente con `X-API-KEY` y
-recupera trabajos con `GET /requests/{requestId}`. El transport HTTP es inyectable para impedir red
-en tests. La API key se resuelve justo antes de construir el adaptador desde
-`IntegrationConfiguration` cifrada o, durante migración, desde `OUTSCRAPER_API_KEY`. Nunca entra en
-URL, request JSON, task, snapshot ni auditoría. La URL base editable sigue limitada por el propio
-adaptador a HTTPS y hosts oficiales de Outscraper.
+`OverturePlacesProvider.search()` consulta sólo PostgreSQL. `SearchRequest` fija release,
+partition ID provincial, district hash, reglas, confidence, cursor, limit e idempotency key. El
+resultado conserva orden/replay, release/partition/versiones/proveniencia y costo cero.
 
-Si la API devuelve un request asíncrono, `SearchRun` persiste el request ID y el polling es idempotente. Un run no se repite con una nueva solicitud después de timeout si puede consultarse el request existente. Se respetan 429/403, `Retry-After`, estado de cuenta y errores permanentes.
+Maintenance es la única integración de red Overture. Para cada provincia ejecuta una llamada
+`overturemaps.record_batch_reader("place", ..., stac=True)` con su bbox; después filtra cada punto
+por polígonos exactos. Dos provincias lejanas implican dos reads acotados. El cliente sólo acepta
+STAC/S3 oficiales definidos en código, batches streaming, máximo configurable de places, dedupe por
+GERS ID, exclusión `permanently_closed` y validación fail-closed de schema, taxonomy,
+`basic_category`, provenance, licencias y NOTICE.
 
-Las campañas Outscraper se expresan exclusivamente en USD hasta que exista conversión de moneda.
-Las unidades informadas por el proveedor se conservan; sólo se infieren desde la cantidad cruda
-cuando la respuesta no trae unidades.
+`OvertureRelease` separa identidad/metadatos de `OvertureCoveragePartition`. Cada provincia puede
+estar IMPORTING/READY/FAILED/SUPERSEDED independientemente. Activar una nueva partición no cambia
+otras; campañas sólo combinan READY del mismo release. Beat consulta metadata una vez por día; sólo
+un POST admin+CSRF inicia import en cola `maintenance` concurrency=1.
 
-**COSTO:** precios/unidades cambian y no se codifican. El adaptador recibe costo máximo por unidad configurado, reserva un upper bound antes de llamar y guarda costo real cuando esté disponible. No inicia un lote que pueda superar el cap restante. Referencia: [API oficial](https://docs.outscraper.com/) y [precios](https://outscraper.com/pricing/).
+El snapshot legacy activo se backfillea como CABA cuando coincide con cobertura esperada;
+cobertura inesperada queda histórica. No se reescriben migraciones previas. La retención protege
+particiones usadas por campañas, activa y anterior provincial.
 
-`MockExtractorProvider` devuelve fixtures determinísticos con registros válidos, sin email, duplicados y payload desconocido; permite paginación, 429 y error permanente programables.
+`MockExtractorProvider` pagina fixtures determinísticos con direct email, fallback web, duplicados,
+sin email y errores; nunca abre red.
 
-## 3. Email y DNS MX
+## 3. DNS/email y WebsiteFetcher
 
-La sintaxis se valida con `email-validator`; se normaliza dominio IDNA y se conserva local part sin aplicar reglas específicas de Gmail (`+`, puntos). Se excluyen local parts configurados y patrones evidentemente no comerciales.
+Email usa `email-validator`, dominio IDNA, local part conservado y sin canonicalizaciones
+específicas de Gmail. MX usa resolver inyectable; null MX/NXDOMAIN inválidos, timeout/SERVFAIL
+transitorios y nunca SMTP handshake.
 
-Un resolver inyectable basado en `dnspython` consulta MX con timeout. Null MX significa inválido; NXDOMAIN/sin MX es inválido después de considerar fallback A/AAAA conforme política documentada; timeout/SERVFAIL es transitorio y se reintenta. No se intenta handshake SMTP ni se contrata verificador externo.
+Los canales agregados manualmente se guardan primero como `UNKNOWN` y una task separada ejecuta MX
+fuera del request. Resultado válido habilita el canal; inválido lo bloquea; transitorio queda como
+“Validación pendiente” y reintenta hasta tres veces. Tests fuerzan `mock` y bloquean DNS real.
 
-Selección: email marcado principal por proveedor, luego mismo dominio empresarial, luego rol comercial (`ventas`, `info`, `contacto`), luego orden original. Candidatos excluidos o inválidos nunca se seleccionan. Gmail/Hotmail pueden aceptarse para pequeños negocios, pero su dominio no deduplica empresas.
-Todas las direcciones validadas, no sólo la principal seleccionada, participan en el lock y las
-identidades globales de deduplicación.
+`HttpWebsiteFetcher` aplica la matriz SSRF de `SECURITY.md`, transport con IP fijado, misma PSL
+embebida, máximo home + tres páginas, contenido/bytes/redirects/timeouts acotados y sin JavaScript.
+Devuelve texto limpio y emails **literales** visibles/`mailto:` con URL/offset/hash; no infiere
+direcciones ni guarda HTML completo.
 
-## 4. WebsiteFetcher
+Esta extracción de prospecting es distinta de `EmailCandidate`: al importar un inbound, la
+aplicación analiza texto plano y mailto ya sanitizado, no WebsiteFetcher, y conserva hasta diez
+literales por regiones NEW_CONTENT/SIGNATURE/QUOTED.
 
-`HttpWebsiteFetcher` usa un cliente HTTP sin JavaScript y resolver/transport inyectables. Aplica las reglas SSRF de `SECURITY.md`, permite sólo HTML/texto y procesa como máximo home más tres links internos relevantes. El presupuesto total incluye resolución DNS; la resolución recibe el tiempo restante. La selección puntúa paths/títulos como servicios, productos, nosotros, reparaciones y contacto, siempre dentro del mismo dominio registrable calculado con una Public Suffix List embebida, sin descarga en runtime.
+## 4. Proveedores LLM
 
-El resultado contiene páginas, final URLs, fechas, status, content hashes, extracto limpio, clase de error y error parcial. Sólo una URL rechazada por política queda `REJECTED`; timeout, 5xx, tamaño o content type dejan un `FALLBACK` auditable sin texto web y no bloquean IA. `FakeWebsiteFetcher` no abre sockets y modela redirects, timeout, oversize y host prohibido.
+Implementaciones:
 
-## 5. Proveedores LLM
+- `MockLLMProvider`: decisiones y fallos determinísticos, incluyendo schema violations.
+- `OllamaProvider`: endpoint/modelo explícitos y JSON schema cuando soporte.
+- `OpenAICompatibleProvider`: base URL/modelo/API key, endpoint compatible y schema/JSON mode con
+  validación local siempre.
 
-- `MockLLMProvider`: reglas determinísticas y outputs configurables para éxito/error.
-- `OllamaProvider`: endpoint local configurable, modelo explícito y JSON schema cuando la versión lo soporte; no presupone GPU.
-- `OpenAICompatibleProvider`: base URL, modelo y API key; usa `/v1/chat/completions` compatible y modo JSON/schema si está disponible, siempre con validación local.
+URLs rechazan userinfo/query/fragment; HTTP sólo para destinos locales/privados explícitamente
+permitidos y no siguen redirects con Authorization. API key se resuelve desde ciphertext/fallback
+de entorno al construir el adaptador.
 
-Proveedor, modelo y URLs base tienen defaults editables en Integraciones y se congelan en cada
-campaña. El formulario de campaña los muestra deshabilitados y el servidor ignora cualquier
-override POST: cambiarlos exige reautenticarse en Integraciones. La API key se resuelve desde
-ciphertext o fallback de entorno sólo al construir el adaptador. URLs con
-userinfo/query/fragment se rechazan; HTTP sólo se admite para hosts
-locales/privados, y el transport no sigue redirects para no reenviar el header `Authorization` a
-otro origen.
+### 4.1 Campañas nuevas y compatibilidad
 
-El input contiene hechos con IDs estables, perfil snapshot, reglas y texto web rotulado no confiable. `evidence` sólo admite hechos del input. El prefijo `PUBLICIDAD -`, firma y BAJA se aplican/validan en código de dominio para no depender del modelo. El prompt descuenta del presupuesto las palabras del footer determinístico y el validador exige que el cuerpo final compuesto, no sólo el fragmento del modelo, tenga 70–130 palabras.
+Nuevas campañas iniciales realizan **cero** llamadas `analyze`: rubro/zonas/email determinan
+audiencia y el mensaje fijo se compone en dominio. `analyze` y `classify_reply` permanecen
+temporalmente para leer/reprocesar únicamente flujos legacy permitidos; `AIAnalysis` histórico es
+read-only y nunca se regenera para enviar una campaña completada.
 
-Una llamada lógica por prospecto puede tener hasta tres intentos técnicos con el mismo input hash. JSON/schema inválido se reintenta localmente de manera acotada; rate limit o falla transitoria se persiste como `RETRY_WAIT` y se reprograma respetando `Retry-After`/backoff, sin agotar intentos en un loop sin espera. No se encadenan llamadas de corrección ni fallback genérico. El caché incluye input, prompt/schema, proveedor y modelo. Clasificación de respuestas es una operación distinta; BAJA y bounce se resuelven primero con reglas.
+### 4.2 ReplyDecisionRequest
 
-## 6. Gmail OAuth y envío
+La aplicación construye, en este orden, hasta 24.000 caracteres:
 
-El dashboard guarda client ID y client secret de la aplicación web; el secreto queda cifrado y
-write-only. Guardar la configuración exige reingreso de contraseña y una conexión activa debe
-desconectarse antes de cambiar esas credenciales. El redirect se deriva del callback o de la
-configuración externa explícita y debe registrarse manualmente en Google Cloud.
+1. completos y obligatorios: texto recién escrito del inbound, mensaje INITIAL o
+   REFERRED_PROPOSAL original y padre directo;
+2. hasta seis mensajes recientes relevantes del Contacto, incluso de otros threads;
+3. `ConversationMemory` estructurada con IDs fuente para historia anterior;
+4. hasta ocho `KnowledgeFactRevision` aprobadas y relevantes.
 
-Flujo OAuth web-server con PKCE/state, redirect local configurado, acceso offline y scopes:
+PDFs y HTML crudo quedan fuera. Si el bloque obligatorio no entra no se invoca proveedor y se abre
+HumanTask. El contexto cruzado no es “todo el hilo”: el selector preserva causalidad sin saturar.
 
-- `https://www.googleapis.com/auth/gmail.send`
-- `https://www.googleapis.com/auth/gmail.readonly`
+El request incluye:
 
-No se usa SMTP ni `mail.google.com`. La app valida que los scopes concedidos sean los esperados, cifra refresh token y obtiene el email de la cuenta mediante recursos Gmail permitidos. En modo Testing, Google puede expirar refresh tokens externos a los siete días: [OAuth 2.0](https://developers.google.com/identity/protocols/oauth2).
+- inbound/contact/conversation IDs opacos y versión de policy;
+- bloques rotulados por rol/proveniencia como untrusted data;
+- lista de `EmailCandidateRef(id, normalized, region, validation_state)`;
+- lista de `FactRevisionRef(id, version, text)` aprobada;
+- enums dinámicos de candidate/fact IDs y actions/intents;
+- instrucciones de que reuniones, precios y demás categorías de riesgo deben pedir humano.
 
-Al conectar por primera vez se guarda el `historyId` actual como baseline y no se importa correo histórico. Si se reconecta sin cursor confiable, se aplica el fallback acotado sólo contra threads/cabeceras de campañas conocidas.
+El hash canónico cubre IDs/versiones/orden/textos efectivos. DB persiste sólo manifest con IDs,
+versiones, char counts y hash; el cuerpo ya vive en sus tablas y no se duplica en logs/prompts.
 
-MIME se construye con la librería estándar `email`: `text/plain; charset=utf-8`, PDF base64, un `To`, sin CC/BCC, Date, deterministic Message-ID y headers opacos `X-Contact-Outreach-Campaign`/`Message`. No incluyen email, categoría ni PII. Se codifica base64url y usa `users.messages.send`: [guía de envío](https://developers.google.com/workspace/gmail/api/guides/sending).
+### 4.3 ReplyDecisionResult
 
-Para respuestas manuales el POST explícito persiste una autorización durable e idempotente; un worker invoca `reply()` sólo para esa fila autorizada y envía con `threadId`, `In-Reply-To`, `References` y asunto del hilo. Justo antes del efecto toma el mismo lock de elegibilidad que supresión y revalida dirección, conexión, modo y kill switch. Antes de cualquier retry ambiguo se busca el Message-ID; una segunda autorización sobre el mismo inbound reutiliza la fila existente en lugar de crear otro envío.
+Schema estricto (`extra=forbid`):
 
-`FakeGmailProvider` simula autorización, exchange, revocación y mailbox en memoria/base de prueba; deduplica por Message-ID, modela cuotas/historyId/404/rebotes y nunca abre red.
+```text
+classification
+intent
+action
+confidence 0..1
+candidate_id | null
+fact_revision_ids[]
+proposed_body | null
+human_reason | null
+```
+
+El servicio rechaza candidate/fact IDs no presentes, duplicados, region no permitida, body cuando
+la acción no lo admite, ausencia de fact para respuestas fundamentadas, intent/action
+incompatibles y confidence fuera de rango. El raw inválido no se almacena como decisión válida; el
+error se redacta. Reintentos técnicos son acotados y no convierten un fallo en respuesta genérica.
+
+Allowlist auto: `APPROVED_PRODUCT_INFORMATION`, `APPROVED_COMPANY_FACT`,
+`GROUNDED_SIMPLE_CLARIFICATION`, `EXPLICIT_PROPOSAL_REDIRECTION`. `POLITE_ACKNOWLEDGEMENT` y
+`NOT_INTERESTED` deben producir `NO_ACTION`. Meeting/date, quote/pricing, negotiation, complaint,
+legal/privacy, unsupported technical advice, multiple intent, ambiguity, conflict e insufficient
+context deben devolver `HUMAN` con reason enum; el policy engine impone lo mismo aunque el modelo no
+lo haga.
+
+## 5. Extracción de candidatos inbound
+
+Un parser determinista opera antes de `decide_reply`:
+
+- usa el texto plain/sanitized y href `mailto:`; regex/parser sólo acepta literales RFC plausibles;
+- recorta puntuación envolvente, normaliza dominio IDNA y valida sintaxis;
+- divide new authored content, firma y quoted history mediante MIME/markers conservadores;
+- deduplica sin perder regiones/proveniencia y persiste máximo diez;
+- no transforma “nombre arroba dominio” ni otras ofuscaciones;
+- MX/restricción/ownership se resuelven fuera del modelo.
+
+El modelo elige candidate ID sólo en una redirección explícita. Únicamente `NEW_CONTENT` es
+auto-elegible. Varios candidatos plausibles, candidato de firma/cita, ownership de otra
+Organization, MX inválido/transitorio inconcluso o restricción crean HumanTask.
+
+## 6. Gmail OAuth, MIME y efectos
+
+OAuth web-server usa PKCE/state, offline access, redirect exacto y scopes `gmail.send` y
+`gmail.readonly`. Guardar credenciales exige reauth; refresh token/client secret se cifran.
+Conectar establece history baseline sin importar inbox completo.
+
+MIME usa `email` estándar: text/plain UTF-8, un To, sin CC/BCC, Message-ID determinístico y headers
+opacos. INITIAL/REFERRED_PROPOSAL adjuntan el orden exacto de OutboundAttachment; reminder/replies
+no adjuntan por default. Antes de codificar se validan cada PDF y suma <=17 MiB; tras serializar se
+exige <=24 MiB. Un fallo aborta todo el efecto.
+
+`send` inicia hilo para INITIAL, REFERRED_PROPOSAL y SCHEDULED_CONTACT. `reply` conserva threadId,
+subject, In-Reply-To y References para REMINDER, MANUAL_REPLY, AUTOMATIC_REPLY y REDIRECT_ACK.
+El contexto visto por LLM no se confunde con headers: parent/original se resuelven y guardan antes
+de formar reply.
+
+Toda llamada parte de OutboundMessage `SENDING`. Éxito persiste gmail IDs/`SENT`. Timeout queda
+`RECONCILING`; `find_by_message_id` debe concluir aceptación/ausencia antes de retry. Proposal y ACK
+de redirect son mensajes/idempotency keys distintas; ACK sólo se autoriza tras proposal SENT.
+
+`FakeGmailProvider` deduplica Message-ID, conserva threads/headers/MIME, simula history, quotas,
+auth, timeout antes/después de aceptación y reconciliation sin sockets.
 
 ## 7. Sincronización Gmail
 
-Beat solicita cambios con `history.list(startHistoryId)`, pagina, obtiene sólo metadata/raw necesarios y actualiza el cursor al confirmar toda la transacción. History expirado (HTTP 404) activa una búsqueda `newer_than:30d`, máximo 1000 candidatos, que filtra por Gmail thread IDs o headers propios antes de persistir. Gmail indica que history suele conservarse al menos una semana pero puede expirar antes: [sincronización oficial](https://developers.google.com/workspace/gmail/api/guides/sync).
+Beat encola cada minuto por default. Un lock por GmailConnection rodea history pagination,
+persistencia y cursor, no clasificación/LLM. History 404 captura baseline y aplica fallback
+`newer_than:30d`/1000 candidatos, filtrando por thread IDs o headers propios. Cursor legacy vacío
+inicializa baseline sin importar histórico indiscriminado.
 
-Se guarda sólo el hilo relacionado y cuerpos sanitizados. Las partes de texto detached se recuperan por `attachmentId`, pero archivos con nombre y adjuntos no textuales no se importan. IDs Gmail únicos hacen repetible cada sync. Una falla de clasificación no revierte importación ni cursor; deja `OTHER`/job pendiente según corresponda. Fallos permanentes/auth degradan la conexión y un cursor legacy vacío se inicializa desde el perfil sin ejecutar fallback histórico.
+Se persisten sólo metadata/parts necesarios de hilos asociados. Texto detached se recupera; no se
+importan adjuntos no textuales. Gmail/Message IDs hacen sync repetible. En la transacción:
 
-## 8. Política de reintentos
+1. upsert inbound y asociación;
+2. sanitizar/separar texto authored;
+3. aplicar unsubscribe/bounce/auto-reply determinísticos;
+4. promover Contact humano, Conversation y cancelar reminders;
+5. actualizar cursor.
 
-| Integración | Reintentos | Acción permanente |
+Sólo `transaction.on_commit` encola candidate extraction/decision. Fallar LLM no revierte inbound
+ni cursor.
+
+## 8. Alertas por Gmail
+
+Al abrir HumanTask se crea una NotificationDelivery por email de admin activo. Requiere
+`PUBLIC_BASE_URL`; request contiene subject fijo `Hay una conversación que necesita revisión` y
+cuerpo fijo con link a la ruta task. No contiene cuerpo/asunto inbound, contacto, empresa ni
+dirección. Usa Message-ID determinístico, `send`, reconciliation y límites propios. Fallo sólo
+marca delivery; HumanTask permanece.
+
+## 9. Política de retries
+
+| Integración | Retry | Resultado terminal |
 | --- | --- | --- |
-| Outscraper | 3, respeta Retry-After, backoff+jitter | detener extracción/campaña según error |
-| DNS MX | 2 para timeout/SERVFAIL | prospecto ERROR si no concluye |
-| Web | 1 por página | continuar con fallback |
-| LLM | 3 intentos técnicos; transitorios diferidos y persistidos | prospecto ERROR, sin mensaje |
-| Gmail send | no retry ciego; reconciliar primero | pausar ante ambigüedad/auth |
-| Gmail sync | 3; fallback ante history 404 | degradar sync, nunca bloquear UI |
+| Overture local | DB transitorio con cursor/idempotency | cerrar query; conservar datos |
+| Import provincial | retry manual/idempotente en partition no activa | FAILED; anterior sigue READY |
+| DNS MX | hasta 3 diferidos | invalid/inconclusive; retry visible en Contactos; humano si redirect |
+| Website | uno por página dentro de presupuesto | fallback auditable |
+| LLM decide | máximo 3 técnicos; rate limits diferidos | HumanTask/provider failure; nunca auto fallback |
+| Gmail send/reply | no retry ciego | RECONCILING o FAILED/HumanTask |
+| Gmail sync | 3; fallback history 404 | conexión degradada, UI disponible |
+| Notification | retry + reconciliation por Message-ID | FAILED; task durable |
 
-Cada llamada tiene timeout y presupuesto total. Los tests sustituyen todos los adaptadores y sockets; no existe opt-in accidental a live dentro de pytest.
+Cada llamada tiene timeout y presupuesto total. Tests no ofrecen un flag que habilite red real.

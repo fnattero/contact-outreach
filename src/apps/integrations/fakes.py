@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from hashlib import sha256
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -20,6 +21,8 @@ from apps.integrations.contracts import (
     GmailSyncBatch,
     LLMProvider,
     SearchRequest,
+    ValidationProviderError,
+    WebsiteEmailCandidate,
     WebsiteFetcher,
     WebsitePage,
     WebsiteRequest,
@@ -36,48 +39,73 @@ FAKE_GMAIL_SCOPES = (
 class MockExtractorProvider:
     """Deterministic fixture provider; it never opens a socket."""
 
-    def submit(self, request: SearchRequest) -> ExtractionBatch:
-        request_hash = sha256(request.idempotency_key.encode()).hexdigest()[:12]
-        request_id = f"fake-request-{request_hash}"
+    def search(self, request: SearchRequest) -> ExtractionBatch:
+        scope = "|".join(
+            (
+                request.query,
+                request.category,
+                request.zone,
+                request.location,
+                request.dataset_snapshot_id,
+            )
+        )
+        scope_hash = sha256(scope.encode()).hexdigest()[:12]
+        rows: list[dict[str, Any]] = [
+            {
+                "place_id": f"fake-{scope_hash}-1",
+                "name": "Taller Electromecánico Demo",
+                "full_address": "CABA, Argentina",
+                "site": "https://taller-demo.example",
+                "emails": ["ventas@taller-demo.example"],
+                "category": "Taller electromecánico",
+            },
+            {
+                "place_id": f"fake-{scope_hash}-2",
+                "name": "Negocio sin email",
+                "full_address": "CABA, Argentina",
+            },
+        ]
+        start = 0
+        if request.cursor:
+            try:
+                start = next(
+                    index + 1 for index, row in enumerate(rows) if row["place_id"] == request.cursor
+                )
+            except StopIteration as exc:
+                raise ValidationProviderError("El cursor fake no pertenece a la consulta.") from exc
+        selected = rows[start : start + request.limit]
+        has_more = start + len(selected) < len(rows)
+        next_cursor = str(selected[-1]["place_id"]) if selected and has_more else ""
         raw_payload: dict[str, Any] = {
-            "id": request_id,
             "status": "Success",
-            "data": [
-                [
-                    {
-                        "place_id": f"fake-{request_hash}-1",
-                        "name": "Taller Electromecánico Demo",
-                        "full_address": "CABA, Argentina",
-                        "site": "https://taller-demo.example",
-                        "emails": ["ventas@taller-demo.example"],
-                        "category": "Taller electromecánico",
-                    },
-                    {
-                        "place_id": f"fake-{request_hash}-2",
-                        "name": "Negocio sin email",
-                        "full_address": "CABA, Argentina",
-                    },
-                ]
-            ],
+            "data": [selected],
+            "next_cursor": next_cursor,
             "fixture_unknown": {"schema_can_change": True},
         }
         return ExtractionBatch(
             status="SUCCEEDED",
-            request_id=request_id,
             raw_payload=raw_payload,
+            operation="fake_places_query",
+            next_cursor=next_cursor,
+            units=Decimal(len(selected)),
+            estimated_cost=Decimal("0"),
+            actual_cost=Decimal("0"),
+            currency="USD",
+            usage_metadata={
+                "provider": "fake",
+                "next_cursor": next_cursor,
+                "structured_query": {
+                    "category": request.category,
+                    "zone": request.zone,
+                    "location": request.location,
+                },
+            },
             records=self.parse_response(raw_payload),
         )
 
+    # Compatibility alias for fixtures and callers outside the durable campaign path.
     def extract(self, request: SearchRequest) -> ExtractionBatch:
-        return self.submit(request)
-
-    def poll(self, *, request_id: str, timeout_seconds: float = 30.0) -> ExtractionBatch:
-        del timeout_seconds
-        return ExtractionBatch(
-            status="SUCCEEDED",
-            request_id=request_id,
-            raw_payload={"id": request_id, "status": "Success", "data": []},
-        )
+        return self.search(request)
 
     def parse_response(self, raw_payload: dict[str, Any]) -> tuple[ExtractedBusiness, ...]:
         groups = raw_payload.get("data", [])
@@ -115,18 +143,28 @@ class FakeWebsiteFetcher:
     """Returns bounded local fixtures and performs no DNS or HTTP calls."""
 
     def fetch(self, request: WebsiteRequest) -> WebsiteResult:
+        hostname = (urlsplit(request.url).hostname or "example.invalid").casefold()
+        email = f"contacto@{hostname}"
+        body = f"Servicio de reparación de motores eléctricos. Contacto: {email}"
+        content_hash = sha256(body.encode()).hexdigest()
         return WebsiteResult(
             pages=(
                 WebsitePage(
                     requested_url=request.url,
                     final_url=request.url,
                     status_code=200,
-                    text="Servicio de reparación de motores eléctricos.",
+                    text=body,
                     content_type="text/html",
-                    content_hash=sha256(
-                        b"Servicio de reparacion de motores electricos."
-                    ).hexdigest(),
-                    byte_count=48,
+                    content_hash=content_hash,
+                    byte_count=len(body.encode()),
+                    email_candidates=(
+                        WebsiteEmailCandidate(
+                            value=email,
+                            source="visible_text",
+                            page_url=request.url,
+                            page_content_hash=content_hash,
+                        ),
+                    ),
                 ),
             )
         )
@@ -217,7 +255,10 @@ class FakeGmailProvider:
         if self.persist:
             from apps.mailbox.models import FakeGmailMessage
 
-            record = FakeGmailMessage.objects.filter(rfc_message_id=message_id).first()
+            record = FakeGmailMessage.objects.filter(
+                rfc_message_id=message_id,
+                direction=FakeGmailMessage.Direction.OUTBOUND,
+            ).first()
             if record is not None:
                 return GmailSendResult(
                     message_id=record.gmail_message_id,

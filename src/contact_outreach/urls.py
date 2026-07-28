@@ -3,13 +3,34 @@ from __future__ import annotations
 from django.contrib.auth.views import LogoutView
 from django.urls import path
 
-from apps.accounts.views import ThrottledLoginView
+from apps.accounts.views import (
+    ThrottledLoginView,
+    account_security,
+    activate_account,
+    mfa_enroll,
+    mfa_verify,
+    user_list,
+    user_reset_link,
+    user_role,
+    user_status,
+    user_unlock,
+)
 from apps.audit.views import audit_log, job_list, retry_job
+from apps.automation.views import (
+    automation_mode,
+    automation_settings,
+    decision_review,
+    knowledge_approve,
+    knowledge_create,
+)
 from apps.campaigns.views import (
     campaign_action,
+    campaign_approve,
     campaign_create,
     campaign_detail,
     campaign_list,
+    campaign_start_approved,
+    regenerate_outdated_campaign_analyses,
     regenerate_prospect_message,
 )
 from apps.catalogs.views import catalog_download, catalog_list
@@ -19,11 +40,35 @@ from apps.configuration.views import (
     categories,
     delete_item,
     integrations,
+    message_templates,
+    prompts,
     toggle_item,
     zones,
 )
+from apps.contacts.views import (
+    attention_list,
+    contact_create,
+    contact_detail,
+    contact_email_add,
+    contact_email_preferred,
+    contact_email_restrict,
+    contact_email_validate,
+    contact_list,
+    contact_notes,
+    contact_plan_save,
+    contact_plan_snooze,
+    contact_plan_state,
+    contact_restrict,
+    contact_restriction_revoke,
+    human_task_close,
+    scheduled_contact_authorize,
+    scheduled_contact_draft_edit,
+)
 from apps.dashboard.views import (
     dashboard,
+    outbound_approve,
+    outbound_detail,
+    outbound_edit,
     outbound_export,
     outbound_list,
     prospect_export,
@@ -42,17 +87,110 @@ from apps.mailbox.views import (
     response_list,
     response_thread,
 )
+from apps.overture.views import overture_datasets, overture_sync
 
 urlpatterns = [
     path("login/", ThrottledLoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("activar/<str:token>/", activate_account, name="account-activate"),
+    path("seguridad/", account_security, name="account-security"),
+    path("seguridad/verificacion/", mfa_verify, name="mfa-verify"),
+    path("seguridad/activar-verificacion/", mfa_enroll, name="mfa-enroll"),
+    path("usuarios/", user_list, name="account-users"),
+    path("usuarios/desbloquear/", user_unlock, name="account-user-unlock"),
+    path("usuarios/<int:user_id>/rol/", user_role, name="account-user-role"),
+    path("usuarios/<int:user_id>/estado/", user_status, name="account-user-status"),
+    path("usuarios/<int:user_id>/nuevo-enlace/", user_reset_link, name="account-user-reset"),
     path("", dashboard, name="dashboard"),
+    path("contactos/", contact_list, name="contacts"),
+    path("contactos/nuevo/", contact_create, name="contact-create"),
+    path("contactos/<uuid:contact_id>/", contact_detail, name="contact-detail"),
+    path("contactos/<uuid:contact_id>/notas/", contact_notes, name="contact-notes"),
+    path(
+        "contactos/<uuid:contact_id>/proximo-contacto/guardar/",
+        contact_plan_save,
+        name="contact-plan-save",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/proximo-contacto/estado/<str:state>/",
+        contact_plan_state,
+        name="contact-plan-state",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/proximo-contacto/posponer/",
+        contact_plan_snooze,
+        name="contact-plan-snooze",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/proximo-contacto/<uuid:attempt_id>/borrador/",
+        scheduled_contact_draft_edit,
+        name="scheduled-contact-draft-edit",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/proximo-contacto/<uuid:attempt_id>/autorizar/",
+        scheduled_contact_authorize,
+        name="scheduled-contact-authorize",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/emails/agregar/", contact_email_add, name="contact-email-add"
+    ),
+    path(
+        "contactos/<uuid:contact_id>/emails/<uuid:email_address_id>/preferido/",
+        contact_email_preferred,
+        name="contact-email-preferred",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/emails/<uuid:email_address_id>/validar/",
+        contact_email_validate,
+        name="contact-email-validate",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/no-contactar/",
+        contact_restrict,
+        name="contact-restrict",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/emails/<uuid:email_address_id>/no-usar/",
+        contact_email_restrict,
+        name="contact-email-restrict",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/restricciones/<uuid:restriction_id>/habilitar/",
+        contact_restriction_revoke,
+        name="contact-restriction-revoke",
+    ),
+    path(
+        "contactos/<uuid:contact_id>/tareas/<uuid:task_id>/cerrar/",
+        human_task_close,
+        name="human-task-close",
+    ),
+    path("necesita-atencion/", attention_list, name="attention"),
     path("prospectos/", prospect_list, name="prospects"),
     path("prospectos/exportar.csv", prospect_export, name="prospects-export"),
     path("envios/", outbound_list, name="outbound-messages"),
     path("envios/exportar.csv", outbound_export, name="outbound-export"),
+    path("envios/<uuid:message_id>/", outbound_detail, name="outbound-detail"),
+    path("envios/<uuid:message_id>/editar/", outbound_edit, name="outbound-edit"),
+    path("envios/<uuid:message_id>/aprobar/", outbound_approve, name="outbound-approve"),
     path("perfil/", business_profile, name="business-profile"),
+    path("mensajes-fijos/", message_templates, name="message-templates"),
+    path("prompts/", prompts, name="prompts"),
+    path("respuesta-automatica/", automation_settings, name="automation-settings"),
+    path("respuesta-automatica/modo/", automation_mode, name="automation-mode"),
+    path("respuesta-automatica/informacion/nueva/", knowledge_create, name="knowledge-create"),
+    path(
+        "respuesta-automatica/informacion/<uuid:revision_id>/aprobar/",
+        knowledge_approve,
+        name="knowledge-approve",
+    ),
+    path(
+        "respuesta-automatica/decisiones/<uuid:decision_id>/revisar/",
+        decision_review,
+        name="decision-review",
+    ),
     path("integraciones/", integrations, name="integrations"),
+    path("integraciones/overture/", overture_datasets, name="overture-datasets"),
+    path("integraciones/overture/sincronizar/", overture_sync, name="overture-sync"),
     path("rubros/", categories, name="categories"),
     path("zonas/", zones, name="zones"),
     path("configuracion/<str:kind>/<uuid:item_id>/toggle/", toggle_item, name="config-toggle"),
@@ -63,9 +201,24 @@ urlpatterns = [
     path("campanas/nueva/", campaign_create, name="campaign-create"),
     path("campanas/<uuid:campaign_id>/", campaign_detail, name="campaign-detail"),
     path(
+        "campanas/<uuid:campaign_id>/aprobar/",
+        campaign_approve,
+        name="campaign-approve",
+    ),
+    path(
+        "campanas/<uuid:campaign_id>/iniciar-aprobados/",
+        campaign_start_approved,
+        name="campaign-start-approved",
+    ),
+    path(
         "campanas/<uuid:campaign_id>/prospectos/<uuid:prospect_id>/regenerar/",
         regenerate_prospect_message,
         name="prospect-regenerate",
+    ),
+    path(
+        "campanas/<uuid:campaign_id>/reanalizar-contrato-ia/",
+        regenerate_outdated_campaign_analyses,
+        name="campaign-regenerate-outdated-analyses",
     ),
     path("campanas/<uuid:campaign_id>/<str:action>/", campaign_action, name="campaign-action"),
     path("supresiones/", suppression_list, name="suppressions"),

@@ -1,7 +1,1 @@
-{% if page_obj.paginator.num_pages > 1 %}
-<nav class="pagination" aria-label="Paginación">
-    {% if page_obj.has_previous %}<a class="button secondary" href="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
-    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
-    {% if page_obj.has_next %}<a class="button secondary" href="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}
-</nav>
-{% endif %}
+{% if page_obj.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Paginación"><span>{% if page_obj.has_previous %}<a class="button button--secondary button--small" href="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">← Anterior</a>{% endif %}</span><span>Página <strong>{{ page_obj.number }}</strong> de {{ page_obj.paginator.num_pages }}</span><span>{% if page_obj.has_next %}<a class="button button--secondary button--small" href="?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Siguiente →</a>{% endif %}</span></nav>{% endif %}

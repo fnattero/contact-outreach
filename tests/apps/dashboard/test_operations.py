@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 
 import pytest
+from django.apps import apps as django_apps
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, RequestFactory
@@ -20,7 +22,8 @@ from apps.catalogs.services import create_catalog
 from apps.dashboard.csv_export import spreadsheet_safe
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection, InboundMessage
-from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail
+from apps.overture.models import OvertureDatasetSnapshot
+from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail, WebsiteSnapshot
 
 
 def _operational_data(owner: User) -> tuple[Campaign, Prospect, OutboundMessage, InboundMessage]:
@@ -96,6 +99,7 @@ def _operational_data(owner: User) -> tuple[Campaign, Prospect, OutboundMessage,
         prompt_text="fixture",
     )
     outbound = OutboundMessage.objects.create(
+        kind=OutboundMessage.Kind.FIRST_CONTACT,
         campaign=campaign,
         prospect=prospect,
         prospect_email=email,
@@ -137,6 +141,18 @@ def _operational_data(owner: User) -> tuple[Campaign, Prospect, OutboundMessage,
         classification_confidence="0.900",
     )
     return campaign, prospect, outbound, inbound
+
+
+def _reviewable_body() -> str:
+    return (
+        "Te contacto porque trabajamos con carbones para motores eléctricos y queremos "
+        "conversar sobre una posible aplicación en la actividad del negocio. Contamos con "
+        "distintas medidas y alternativas para tareas de reparación y mantenimiento, sin "
+        "asumir qué modelos utilizan actualmente. La idea es que nuestro vendedor pueda "
+        "acercarse, conocer la necesidad concreta y mostrar el catálogo técnico disponible. "
+        "¿Qué día conviene que pase el vendedor?\n\n"
+        "Fran · Carbones SA\nCarbones SA · CABA"
+    )
 
 
 @pytest.mark.django_db
@@ -222,6 +238,21 @@ def test_operational_views_filter_paginate_and_export_safely(
         },
     )
     assert list(sent.context["page_obj"]) == [outbound]
+    assert "Texto de prueba con BAJA." not in sent.content.decode()
+    detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
+    assert detail.status_code == 200
+    assert "Texto de prueba con BAJA." in detail.content.decode()
+    assert "no-store" in detail.headers["Cache-Control"]
+    OutboundMessage.objects.filter(pk=outbound.pk).update(
+        body_text="<script>alert('no ejecutar')</script>"
+    )
+    escaped_detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
+    assert "&lt;script&gt;" in escaped_detail.content.decode()
+    assert "<script>alert('no ejecutar')</script>" not in escaped_detail.content.decode()
+    other = User.objects.create_user(username="other-owner", password="other-password")
+    client.force_login(other)
+    assert client.get(reverse("outbound-detail", args=(outbound.pk,))).status_code == 404
+    client.force_login(owner)
     responses = client.get(
         reverse("responses"),
         {
@@ -258,6 +289,312 @@ def test_operational_views_filter_paginate_and_export_safely(
 
 
 @pytest.mark.django_db
+def test_review_ready_email_is_counted_and_labeled_as_not_sent(
+    client: Client, owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign, _, outbound, _ = _operational_data(owner)
+    Campaign.objects.filter(pk=campaign.pk).update(delivery_mode=Campaign.DeliveryMode.REVIEW_ONLY)
+    OutboundMessage.objects.filter(pk=outbound.pk).update(
+        delivery_mode=Campaign.DeliveryMode.REVIEW_ONLY,
+        state=OutboundMessage.State.REVIEW_READY,
+        error="",
+    )
+    client.force_login(owner)
+
+    dashboard = client.get(reverse("dashboard"), {"campaign": campaign.pk})
+    listing = client.get(
+        reverse("outbound-messages"),
+        {"campaign": campaign.pk, "state": OutboundMessage.State.REVIEW_READY},
+    )
+    detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
+
+    assert dashboard.context["metrics"]["review_ready"] == 1
+    assert dashboard.context["metrics"]["queued"] == 0
+    assert list(listing.context["page_obj"]) == [outbound]
+    assert "Listo para revisar" in listing.content.decode()
+    assert "Este correo no fue enviado" in detail.content.decode()
+    assert "no-store" in detail.headers["Cache-Control"]
+
+
+@pytest.mark.django_db
+def test_live_draft_can_be_edited_then_requires_audited_approval(
+    client: Client, owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign, _, outbound, _ = _operational_data(owner)
+    Campaign.objects.filter(pk=campaign.pk).update(
+        profile_snapshot={
+            "company_name": "Carbones SA",
+            "salesperson_name": "Fran",
+            "address": "CABA",
+            "signature": "Fran · Carbones SA",
+        }
+    )
+    OutboundMessage.objects.filter(pk=outbound.pk).update(
+        subject="Consulta técnica",
+        body_text=_reviewable_body(),
+        state=OutboundMessage.State.REVIEW_READY,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        approved_at=None,
+        approved_by=None,
+        error="",
+    )
+    client.force_login(owner)
+
+    detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
+    assert detail.status_code == 200
+    assert detail.context["can_edit"] is True
+    assert detail.context["can_approve"] is True
+    assert "Aprobar para enviar" in detail.content.decode()
+
+    invalid = client.post(
+        reverse("outbound-edit", args=(outbound.pk,)),
+        {"subject": "Cambio inválido", "body_text": "Sin firma"},
+    )
+    assert invalid.status_code == 400
+    outbound.refresh_from_db()
+    assert outbound.subject == "Consulta técnica"
+
+    edited_body = _reviewable_body().replace("queremos conversar", "preferimos conversar")
+    edited = client.post(
+        reverse("outbound-edit", args=(outbound.pk,)),
+        {"subject": "Consulta para coordinar", "body_text": edited_body},
+        follow=True,
+    )
+    assert edited.status_code == 200
+    outbound.refresh_from_db()
+    assert outbound.subject == "Consulta para coordinar"
+    assert outbound.body_text == edited_body
+    assert outbound.content_revision == 2
+    assert outbound.last_edited_by == owner
+    assert outbound.state == OutboundMessage.State.REVIEW_READY
+    assert outbound.approved_at is None
+
+    approved = client.post(reverse("outbound-approve", args=(outbound.pk,)), follow=True)
+    assert approved.status_code == 200
+    outbound.refresh_from_db()
+    assert outbound.state == OutboundMessage.State.QUEUED
+    assert outbound.approved_by == owner
+    assert outbound.approved_at is not None
+    assert outbound.next_attempt_at is not None
+    assert AuditEvent.objects.filter(
+        entity_id=str(outbound.pk), action="message.draft_edited", actor=owner
+    ).exists()
+    approval_event = AuditEvent.objects.get(
+        entity_id=str(outbound.pk), action="message.approved_for_delivery", actor=owner
+    )
+    assert approval_event.after["content_revision"] == 2
+    assert edited_body not in json.dumps(approval_event.after)
+
+    assert client.post(reverse("outbound-edit", args=(outbound.pk,)), {}).status_code == 400
+    assert client.post(reverse("outbound-approve", args=(outbound.pk,))).status_code == 302
+
+    other = User.objects.create_user(username="review-other", password="password")
+    client.force_login(other)
+    assert client.post(reverse("outbound-edit", args=(outbound.pk,)), {}).status_code == 403
+    assert client.post(reverse("outbound-approve", args=(outbound.pk,))).status_code == 403
+
+
+@pytest.mark.django_db
+def test_draft_editor_normalizes_browser_crlf_and_accepts_migrated_short_copy(
+    client: Client, owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign, _, outbound, _ = _operational_data(owner)
+    Campaign.objects.filter(pk=campaign.pk).update(
+        profile_snapshot={
+            "company_name": "Carbones SA",
+            "salesperson_name": "Fran",
+            "address": "CABA",
+            "signature": "Fran · Carbones SA",
+        }
+    )
+    migrated_body = _reviewable_body().replace(
+        "Contamos con distintas medidas y alternativas para tareas de reparación y mantenimiento",
+        "Presentamos opciones",
+    )
+    OutboundMessage.objects.filter(pk=outbound.pk).update(
+        subject="Consulta técnica",
+        body_text=migrated_body,
+        state=OutboundMessage.State.REVIEW_READY,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        content_revision=2,
+        approved_at=None,
+        approved_by=None,
+        error="",
+    )
+    client.force_login(owner)
+
+    edited = client.post(
+        reverse("outbound-edit", args=(outbound.pk,)),
+        {
+            "subject": "Consulta técnica actualizada",
+            "body_text": migrated_body.replace("\n", "\r\n"),
+        },
+        follow=True,
+    )
+
+    assert edited.status_code == 200
+    outbound.refresh_from_db()
+    assert outbound.subject == "Consulta técnica actualizada"
+    assert outbound.body_text == migrated_body
+    assert "\r" not in outbound.body_text
+    assert outbound.content_revision == 3
+
+
+@pytest.mark.django_db
+def test_manual_approval_migration_updates_existing_unsent_drafts(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    _, _, outbound, _ = _operational_data(owner)
+    OutboundMessage.objects.filter(pk=outbound.pk).update(
+        subject="PUBLICIDAD - Consulta técnica",
+        body_text=(
+            "Contenido conservado.\nFran · Carbones SA\nCarbones SA · CABA\n"
+            "Si no querés recibir más mensajes, respondé BAJA."
+        ),
+        state=OutboundMessage.State.PREPARED,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        next_attempt_at=timezone.now(),
+    )
+
+    migration = import_module("apps.campaigns.migrations.0011_outbound_manual_approval")
+    migration.prepare_existing_drafts(django_apps, None)
+
+    outbound.refresh_from_db()
+    assert outbound.subject == "Consulta técnica"
+    assert outbound.body_text.endswith("Carbones SA · CABA")
+    assert "BAJA" not in outbound.body_text
+    assert outbound.state == OutboundMessage.State.REVIEW_READY
+    assert outbound.next_attempt_at is None
+    assert outbound.content_revision == 2
+
+
+@pytest.mark.django_db
+def test_overture_provenance_is_visible_on_prospect_campaign_and_message_pages(
+    client: Client, owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    snapshot = OvertureDatasetSnapshot.objects.create(
+        release_id="2026-07-22.0",
+        schema_version="places-v2",
+        taxonomy_version="taxonomy-v1",
+        importer_version="contact-outreach-v1",
+        mapping_version="category-map-v2",
+        boundary_version="caba-v1",
+        boundary_manifest_sha256="b" * 64,
+        source_uri=("s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/"),
+        manifest_sha256="a" * 64,
+        status=OvertureDatasetSnapshot.Status.READY,
+        is_active=True,
+        source_licenses=["CDLA Permissive 2.0"],
+        attribution="© Overture Maps Foundation y sus colaboradores",
+    )
+    campaign, prospect, outbound, _ = _operational_data(owner)
+    Campaign.objects.filter(pk=campaign.pk).update(
+        extractor_provider="overture",
+        overture_snapshot=snapshot,
+    )
+    provider_data = {
+        "overture_id": "08f2a1072b1142d003f8",
+        "snapshot": {
+            "id": str(snapshot.pk),
+            "release_id": snapshot.release_id,
+            "schema_version": snapshot.schema_version,
+            "taxonomy_version": snapshot.taxonomy_version,
+            "importer_version": snapshot.importer_version,
+            "attribution": snapshot.attribution,
+            "source_licenses": snapshot.source_licenses,
+        },
+        "zone": {
+            "name": "Palermo",
+            "attribution": "Buenos Aires Data · CC-BY-2.5-AR",
+        },
+        "matched_rule": {
+            "taxonomy_code": "auto_electrical_repair",
+            "name_terms": ["bobinad*"],
+        },
+        "matched_rule_index": 2,
+        "match_quality": 2,
+        "confidence": "0.9130",
+        "provenance": {
+            "field_provenance": {
+                "/names/primary": [
+                    {
+                        "dataset": "meta",
+                        "record_id": "source-record-7",
+                    }
+                ]
+            },
+            "source_licenses": ["CDLA Permissive 2.0"],
+        },
+    }
+    Prospect.objects.filter(pk=prospect.pk).update(
+        provider_data=provider_data,
+        website="https://taller.example/",
+    )
+    ProspectEmail.objects.filter(pk=outbound.prospect_email_id).update(
+        source="website_mailto",
+        source_url="https://taller.example/contacto",
+        source_content_hash="c" * 64,
+    )
+    WebsiteSnapshot.objects.create(
+        prospect=prospect,
+        requested_url="https://taller.example/",
+        final_url="https://taller.example/contacto",
+        fetched_at=timezone.now(),
+        http_status=200,
+        content_type="text/html",
+        content_hash="d" * 64,
+        pages=[],
+        status=WebsiteSnapshot.Status.SUCCESS,
+    )
+    client.force_login(owner)
+
+    responses = (
+        client.get(reverse("prospects"), {"campaign": str(campaign.pk)}),
+        client.get(reverse("campaign-detail", args=(campaign.pk,))),
+        client.get(reverse("outbound-detail", args=(outbound.pk,))),
+    )
+
+    for response in responses:
+        content = response.content.decode()
+        assert response.status_code == 200
+        assert "2026-07-22.0" in content
+        assert str(snapshot.pk) in content
+        assert "08f2a1072b1142d003f8" in content
+        assert "auto_electrical_repair" in content
+        assert "bobinad*" in content
+        assert "/names/primary" in content
+        assert "source-record-7" in content
+        assert "sitio web, enlace directo de correo" in content
+        assert "https://taller.example/contacto" in content
+        assert "CDLA Permissive 2.0" in content
+        assert "© Overture Maps Foundation y sus colaboradores" in content
+        assert "Buenos Aires Data · CC-BY-2.5-AR" in content
+
+
+@pytest.mark.django_db
+def test_fake_and_legacy_prospects_render_without_overture_provenance(
+    client: Client, owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign, _, outbound, _ = _operational_data(owner)
+    client.force_login(owner)
+
+    pages = (
+        client.get(reverse("prospects"), {"campaign": str(campaign.pk)}),
+        client.get(reverse("campaign-detail", args=(campaign.pk,))),
+        client.get(reverse("outbound-detail", args=(outbound.pk,))),
+    )
+
+    assert all(page.status_code == 200 for page in pages)
+    assert all("no contiene procedencia Overture" in page.content.decode() for page in pages)
+
+
+@pytest.mark.django_db
 def test_failed_delivery_retry_is_explicit_same_row_and_audited(
     client: Client, owner: User, private_catalog_dir: Path
 ) -> None:
@@ -287,9 +624,10 @@ def test_failed_delivery_retry_is_explicit_same_row_and_audited(
     assert accepted.status_code == 302
     outbound.refresh_from_db()
     job.refresh_from_db()
-    assert outbound.state == OutboundMessage.State.QUEUED
+    assert outbound.state == OutboundMessage.State.REVIEW_READY
+    assert outbound.approved_at is None
     assert outbound.attempts == 0
-    assert job.state == BackgroundJob.State.RETRY_WAIT
+    assert job.state == BackgroundJob.State.CANCELLED
     assert AuditEvent.objects.filter(action="message.retry_requested").exists()
 
 

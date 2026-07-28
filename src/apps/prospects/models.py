@@ -21,6 +21,20 @@ class Prospect(TimestampedUUIDModel):
         ERROR = "ERROR", "Error"
 
     campaign = models.ForeignKey(Campaign, on_delete=models.PROTECT, related_name="prospects")
+    organization = models.ForeignKey(
+        "contacts.Organization",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="legacy_prospects",
+    )
+    campaign_enrollment = models.ForeignKey(
+        "contacts.CampaignEnrollment",
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="legacy_prospects",
+    )
     source_run = models.ForeignKey(SearchRun, on_delete=models.PROTECT, related_name="prospects")
     name = models.CharField(max_length=300)
     normalized_name = models.CharField(max_length=300)
@@ -84,6 +98,8 @@ class ProspectEmail(TimestampedUUIDModel):
     domain = models.CharField(max_length=253)
     local_part = models.CharField(max_length=64)
     source = models.CharField(max_length=120)
+    source_url = models.URLField(max_length=1000, blank=True)
+    source_content_hash = models.CharField(max_length=64, blank=True)
     provider_order = models.PositiveIntegerField(default=0)
     syntax_valid = models.BooleanField(default=True)
     mx_status = models.CharField(max_length=20, choices=MXStatus.choices)
@@ -121,6 +137,7 @@ class WebsiteSnapshot(TimestampedUUIDModel):
     content_hash = models.CharField(max_length=64)
     excerpt = models.TextField(blank=True)
     pages = models.JSONField(default=list)
+    email_candidates = models.JSONField(default=list, blank=True)
     byte_count = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=20, choices=Status.choices)
     error = models.TextField(blank=True)

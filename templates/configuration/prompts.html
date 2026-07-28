@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Redacción histórica · Contact Outreach{% endblock %}
+{% block breadcrumb %}Configuración / Compatibilidad histórica{% endblock %}
+{% block page_title %}Redacción histórica{% endblock %}
+{% block content %}
+<header class="page-header"><div class="page-header__copy"><h1>Compatibilidad con campañas anteriores</h1><p>Esta configuración se conserva para poder interpretar el historial. Las campañas nuevas usan el mensaje fijo aprobado y no piden a la IA que redacte el contacto inicial.</p></div><div class="page-header__actions"><a class="button button--secondary" href="{% url 'categories' %}">Reglas de búsqueda</a></div></header>
+<div class="alert alert--warning"><div><strong>No afecta campañas nuevas</strong><br>La revisión actual es <strong>{{ revision|default:"predeterminada" }}</strong>. Las barreras de elegibilidad, restricciones y aprobación nunca dependen de este texto.</div></div>
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+<form method="post" class="panel form-card" novalidate>
+    {% csrf_token %}
+    <div class="panel__header"><div><h2>Instrucciones heredadas</h2><p class="muted">Conservalas únicamente si necesitás reproducir un flujo histórico. Las búsquedas se configuran con taxonomía y términos literales en Rubros.</p></div></div>
+    <div class="panel__body">{% include "includes/field.html" with field=form.email_drafting_prompt %}</div>
+    <div class="panel__footer actions"><button class="button" type="submit">Guardar revisión histórica</button><span class="muted">No cambia el mensaje fijo de las campañas nuevas.</span></div>
+</form>
+<p class="muted">Las campañas terminadas conservan siempre la revisión exacta que utilizaron.</p>
+{% endblock %}

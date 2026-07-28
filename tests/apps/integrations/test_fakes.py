@@ -3,13 +3,12 @@ from __future__ import annotations
 import socket
 
 import pytest
-from django.test import override_settings
+from django.core.exceptions import ImproperlyConfigured
 from pytest_socket import SocketBlockedError
 
 from apps.integrations.contracts import (
     AnalysisFact,
     AnalysisRequest,
-    AuthenticationError,
     GmailCursor,
     GmailReplyRequest,
     GmailSendRequest,
@@ -23,6 +22,7 @@ from apps.integrations.factory import (
     get_llm_provider,
     get_website_fetcher,
 )
+from apps.integrations.overture import OverturePlacesProvider
 
 
 def test_network_is_blocked_during_tests() -> None:
@@ -36,8 +36,8 @@ def test_network_is_blocked_during_tests() -> None:
 def test_fake_extractor_and_website_are_deterministic() -> None:
     extractor = get_extractor_provider()
     request = SearchRequest(query="motores", correlation_id="correlation", idempotency_key="key")
-    first = extractor.extract(request)
-    second = extractor.extract(request)
+    first = extractor.search(request)
+    second = extractor.search(request)
     assert first == second
     assert len(first.records) == 2
     assert first.records[1].email_candidates == ()
@@ -99,7 +99,10 @@ def test_fake_gmail_deduplicates_message_id_and_keeps_reply_thread() -> None:
     provider.revoke()
 
 
-@override_settings(EXTRACTOR_PROVIDER="outscraper")
-def test_real_provider_requires_environment_credential() -> None:
-    with pytest.raises(AuthenticationError, match="OUTSCRAPER_API_KEY"):
-        get_extractor_provider()
+def test_unknown_extractor_provider_cannot_be_executed() -> None:
+    with pytest.raises(ImproperlyConfigured, match="not supported"):
+        get_extractor_provider("retired-provider")
+
+
+def test_overture_factory_returns_local_snapshot_provider() -> None:
+    assert isinstance(get_extractor_provider("overture"), OverturePlacesProvider)

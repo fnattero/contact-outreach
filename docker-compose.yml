@@ -10,6 +10,15 @@ x-app: &app
     DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-development-only-change-me}
     DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+    DJANGO_SECURE_COOKIES: ${DJANGO_SECURE_COOKIES:-false}
+    DJANGO_SSL_REDIRECT: ${DJANGO_SSL_REDIRECT:-false}
+    DJANGO_HSTS_SECONDS: ${DJANGO_HSTS_SECONDS:-0}
+    DJANGO_HSTS_INCLUDE_SUBDOMAINS: ${DJANGO_HSTS_INCLUDE_SUBDOMAINS:-false}
+    DJANGO_HSTS_PRELOAD: ${DJANGO_HSTS_PRELOAD:-false}
+    DJANGO_PROXY_HTTPS: ${DJANGO_PROXY_HTTPS:-false}
+    DJANGO_TRUSTED_PROXY_IPS: ${DJANGO_TRUSTED_PROXY_IPS:-}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     POSTGRES_DB: ${POSTGRES_DB:-contact_outreach}
     POSTGRES_USER: ${POSTGRES_USER:-contact_outreach}
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only-change-me}
@@ -18,12 +27,10 @@ x-app: &app
     REDIS_URL: redis://redis:6379/0
     SEND_MODE: ${SEND_MODE:-dry-run}
     SEND_KILL_SWITCH: ${SEND_KILL_SWITCH:-true}
-    EXTRACTOR_PROVIDER: ${EXTRACTOR_PROVIDER:-fake}
-    OUTSCRAPER_API_KEY: ${OUTSCRAPER_API_KEY:-}
-    OUTSCRAPER_BASE_URL: ${OUTSCRAPER_BASE_URL:-https://api.outscraper.cloud}
-    OUTSCRAPER_MAX_COST_PER_RESULT: ${OUTSCRAPER_MAX_COST_PER_RESULT:-0.010000}
-    OUTSCRAPER_BATCH_SIZE: ${OUTSCRAPER_BATCH_SIZE:-20}
-    OUTSCRAPER_POLL_SECONDS: ${OUTSCRAPER_POLL_SECONDS:-30}
+    AUTO_REPLY_KILL_SWITCH: ${AUTO_REPLY_KILL_SWITCH:-true}
+    RELATIONSHIP_KILL_SWITCH: ${RELATIONSHIP_KILL_SWITCH:-true}
+    AUTOMATIC_REPLY_CONVERSATION_DAILY_LIMIT: ${AUTOMATIC_REPLY_CONVERSATION_DAILY_LIMIT:-3}
+    AUTOMATIC_REPLY_WORKSPACE_DAILY_LIMIT: ${AUTOMATIC_REPLY_WORKSPACE_DAILY_LIMIT:-20}
     WEBSITE_FETCHER: ${WEBSITE_FETCHER:-fake}
     LLM_PROVIDER: ${LLM_PROVIDER:-fake}
     LLM_MODEL: ${LLM_MODEL:-fake-deterministic}
@@ -73,6 +80,8 @@ services:
   worker:
     <<: *app
     command: ["worker"]
+    volumes:
+      - private_catalogs:/app/private:ro
     depends_on:
       web:
         condition: service_healthy
@@ -85,6 +94,29 @@ services:
         [
           "CMD-SHELL",
           "celery -A contact_outreach inspect ping --destination worker@$$HOSTNAME --timeout 5 | grep -q pong",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 15s
+
+  maintenance:
+    <<: *app
+    command: ["maintenance-worker"]
+    volumes:
+      - private_catalogs:/app/private:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A contact_outreach inspect ping --destination maintenance@$$HOSTNAME --timeout 5 | grep -q pong",
         ]
       interval: 15s
       timeout: 10s

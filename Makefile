@@ -12,7 +12,7 @@ down:
 	$(COMPOSE) down
 
 logs:
-	$(COMPOSE) logs --follow web worker beat
+	$(COMPOSE) logs --follow web worker maintenance beat
 
 lint:
 	ruff check .

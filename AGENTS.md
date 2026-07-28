@@ -8,16 +8,19 @@ Do not silently change architectural decisions or product invariants. When a cha
 
 ## Project Structure & Module Organization
 
-The repository currently contains planning documents under `docs/`; application code has not been implemented. Follow `docs/IMPLEMENTATION_PLAN.md` in order. The planned Django layout places project configuration in `src/contact_outreach/`, modular apps in `src/apps/`, templates in `templates/`, and tests in `tests/` with paths mirroring source modules. Keep domain logic in services, HTTP handling in views/forms, and external SDKs behind the provider interfaces documented in `docs/INTEGRATIONS.md`.
+The Django modular monolith is implemented under `src/contact_outreach/` and `src/apps/`; templates live in `templates/`, static assets in `static/`, and tests in `tests/` with paths mirroring source modules. Follow `docs/IMPLEMENTATION_PLAN.md` in order. Keep domain logic in services, HTTP handling in views/forms, and external SDKs behind the provider interfaces documented in `docs/INTEGRATIONS.md`.
 
 ## Build, Test, and Development Commands
 
-Until Phase 0 lands, only documentation and Git checks are available:
-
+- `make lint` runs Ruff lint and formatting checks.
+- `make typecheck` runs mypy with `django-stubs`.
+- `make test` runs the network-blocked pytest suite.
+- `make test-e2e` runs fake-provider end-to-end tests.
+- `make check` runs the full gate plus migration and Django checks.
 - `git diff --check` detects whitespace errors.
 - `rg "FR-[0-9]+|DM-[0-9]+|SEC|OPS|QA" docs/` audits requirement references.
 
-Phase 0 must add `make lint`, `make typecheck`, `make test`, `make test-e2e`, and `make check`. Use Docker Compose for Django, PostgreSQL, Redis, Celery Worker, and Beat; do not install a Node build unless a documented need appears.
+Use Docker Compose for Django, PostgreSQL, Redis, Celery Worker, and Beat; do not install a Node build unless a documented need appears.
 
 ## Coding Style & Naming Conventions
 
@@ -28,15 +31,15 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 ## Product Invariants
 
 - Never implement direct Google Maps scraping.
-- Never send to a prospect without one selected, validated email.
-- Never send another initial message to a normalized email unless an explicit, audited `ContactOverride` permits it.
+- Never send a campaign message without one selected, validated `EmailAddress` and an eligible `CampaignEnrollment`.
+- Never contact an Organization that is already a Contact, and never send two campaign initial/reminder messages to the same normalized email on the same Buenos Aires local date.
 - Never contact a suppressed or invalidated address; unsubscribe cannot be overridden.
-- Never generate or send automatic replies to inbound messages.
+- Never authorize an automatic reply outside the documented allowlist, approved facts, bounded context, qualified `LIVE` mode, rate limits, conversation state and independent kill switch. Risky, ambiguous or unsupported requests always create a human task.
 - Never invent prospect facts, products, people, or claims in generated copy.
-- Never call Gmail send unless effective `SEND_MODE=live`, the kill switch is disabled, and the campaign permits live delivery.
+- Never call Gmail send/reply unless effective `SEND_MODE=live`, the relevant independent kill switch is disabled, and the durable campaign/reply/contact policy permits live delivery.
 - Never log credentials, OAuth tokens, API keys, or unredacted sensitive payloads.
 - Never bypass Gmail quotas, limits, or anti-abuse controls.
-- Never make live HTTP, DNS, Gmail, Outscraper, or LLM calls from automated tests.
+- Never make live HTTP, DNS, Gmail, Overture dataset, or LLM calls from automated tests.
 
 ## Architecture Rules
 
@@ -49,7 +52,7 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 
 ## Testing Guidelines
 
-Use pytest and pytest-django. Tests must not make real HTTP, DNS, Gmail, Outscraper, or LLM calls; use fakes and block network access. Add focused regression tests for state transitions, idempotency, suppression, SSRF, MIME, quotas, and CSRF. Run `make check` before review once available.
+Use pytest and pytest-django. Tests must not make real HTTP, DNS, Gmail, Overture dataset, or LLM calls; use fakes and block network access. Add focused regression tests for state transitions, idempotency, suppression, SSRF, MIME, quotas, and CSRF. Run `make check` before review once available.
 
 ## Quality Gates
 
@@ -63,7 +66,7 @@ History currently has only `Initial commit`; use short imperative subjects such 
 
 ## Security & Live Sending
 
-Defaults remain dry-run with the kill switch enabled. Never commit credentials, tokens, contact exports, catalogs, or personal data. Preserve permanent suppressions, private catalog storage, token redaction, and the provider boundaries in `docs/SECURITY.md`. No change may introduce direct Google Maps scraping, SMTP passwords, tracking, automated replies, account rotation, or anti-abuse evasion.
+Defaults remain dry-run with send, automatic-reply and relationship kill switches enabled; reply decisions default to `SHADOW`. Never commit credentials, tokens, contact exports, catalogs, or personal data. Preserve permanent suppressions, private catalog storage, token redaction, and the provider boundaries in `docs/SECURITY.md`. No change may introduce direct Google Maps scraping, SMTP passwords, tracking, account rotation, anti-abuse evasion, or an automatic effect that bypasses the documented deterministic policy engine.
 
 ## Definition of Done
 

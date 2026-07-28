@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Necesita atención · Contact Outreach{% endblock %}
+{% block breadcrumb %}Necesita atención{% endblock %}
+{% block page_title %}Necesita atención{% endblock %}
+{% block content %}
+<header class="page-header"><div class="page-header__copy"><h1>Conversaciones que necesitan atención</h1><p>Acá aparecen los casos que la respuesta automática dejó en manos de una persona.</p></div></header>
+{% if not can_manage_contacts %}<div class="alert"><div><strong>Vista de consulta.</strong><br>Podés leer el motivo y la conversación. Un administrador se ocupa de las acciones.</div></div>{% endif %}
+{% if attention_rows %}
+<div class="attention-list" aria-label="Tareas abiertas">
+  {% for row in attention_rows %}<article class="panel attention-card">
+    <div class="panel__body">
+      <div class="attention-card__copy"><span class="badge badge--warning">Necesita que lo revises</span><h2>{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</h2><p>{{ row.reason_label }}</p><p class="muted">{{ row.task.conversation.subject|default:"Conversación sin asunto" }} · Desde {{ row.task.opened_at|date:"d M Y · H:i" }}</p></div>
+      <div class="actions"><a class="button button--secondary" href="{% url 'contact-detail' row.task.contact_id %}#attention">Ver contacto y conversación</a></div>
+    </div>
+  </article>{% endfor %}
+</div>
+{% else %}
+<section class="panel empty-state"><div class="empty-state__icon" aria-hidden="true">✓</div><h2>No hay conversaciones pendientes</h2><p>Cuando una respuesta necesite una decisión humana, aparecerá en esta lista.</p><a class="button button--secondary" href="{% url 'contacts' %}">Ver Contactos</a></section>
+{% endif %}
+{% include "includes/pagination.html" %}
+{% endblock %}

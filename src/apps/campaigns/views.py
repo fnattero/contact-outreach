@@ -1,33 +1,50 @@
 from __future__ import annotations
 
+from typing import cast
+
+from django import forms
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET, require_POST
 
+from apps.accounts.permissions import (
+    Capability,
+    has_capability,
+    require_capability,
+    workspace_for_user,
+)
+from apps.campaigns.approval import approve_campaign, start_per_message_campaign
 from apps.campaigns.forms import CampaignForm
-from apps.campaigns.models import Campaign
+from apps.campaigns.models import Campaign, OutboundMessage
 from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.configuration.integrations import runtime_integration_configuration
-from apps.configuration.models import BusinessProfile
+from apps.configuration.models import BusinessProfile, SearchZone
+from apps.contacts.models import CampaignEnrollment
+from apps.mailbox.tasks import deliver_message_task
 from apps.prospects.models import Prospect
-from apps.prospects.pipeline import request_manual_regeneration
+from apps.prospects.pipeline import (
+    request_manual_regeneration,
+    request_outdated_analysis_regenerations,
+)
 from apps.prospects.tasks import process_prospect_pipeline
 
 CAMPAIGN_VALUE_FIELDS = (
     "name",
     "delivery_mode",
+    "approval_mode",
+    "reminder_enabled",
+    "reminder_delay_days",
     "location_text",
     "objective",
     "max_raw_records",
-    "cost_limit",
-    "cost_currency",
+    "overture_min_confidence",
     "daily_limit",
     "message_interval_minutes",
     "weekdays",
@@ -36,6 +53,7 @@ CAMPAIGN_VALUE_FIELDS = (
     "timezone_name",
     "relevance_threshold",
     "extractor_provider",
+    "website_fetcher",
     "llm_provider",
     "llm_base_url",
     "llm_model",
@@ -43,17 +61,24 @@ CAMPAIGN_VALUE_FIELDS = (
 )
 INTEGRATION_SNAPSHOT_FIELDS = (
     "extractor_provider",
+    "website_fetcher",
     "llm_provider",
     "llm_base_url",
     "llm_model",
 )
 
 
-@login_required
+@require_capability(Capability.VIEW_CAMPAIGNS)
+@require_GET
+@never_cache
 def campaign_list(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
-    campaigns = Campaign.objects.select_related("catalog", "created_by").filter(created_by=owner)
+    workspace = workspace_for_user(owner, Capability.VIEW_CAMPAIGNS)
+    is_admin = has_capability(owner, Capability.MANAGE_CAMPAIGNS)
+    campaigns = Campaign.objects.select_related("catalog", "created_by").filter(workspace=workspace)
+    if not is_admin:
+        campaigns = campaigns.exclude(state=Campaign.State.DRAFT)
     if query := request.GET.get("q", "").strip():
         campaigns = campaigns.filter(Q(name__icontains=query) | Q(location_text__icontains=query))
     if state := request.GET.get("state", ""):
@@ -68,31 +93,40 @@ def campaign_list(request: HttpRequest) -> HttpResponse:
             "campaigns": page,
             "page_obj": page,
             "query_string": query_params.urlencode(),
-            "states": Campaign.State.choices,
+            "states": Campaign.State.choices
+            if is_admin
+            else tuple(
+                choice for choice in Campaign.State.choices if choice[0] != Campaign.State.DRAFT
+            ),
+            "is_admin": is_admin,
         },
     )
 
 
-@login_required
+@require_capability(Capability.MANAGE_CAMPAIGNS)
 def campaign_create(request: HttpRequest) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
+    workspace = workspace_for_user(owner, Capability.MANAGE_CAMPAIGNS)
     initial: dict[str, object] = {}
     integration_runtime = runtime_integration_configuration(owner.pk)
     initial.update(
         {
             "extractor_provider": integration_runtime.extractor_provider,
+            "overture_min_confidence": integration_runtime.overture_min_confidence,
+            "website_fetcher": integration_runtime.website_fetcher,
             "llm_provider": integration_runtime.llm_provider,
             "llm_model": integration_runtime.llm_model,
             "llm_base_url": integration_runtime.llm_base_url(),
         }
     )
-    profile = BusinessProfile.objects.filter(owner=owner).first()
+    profile = BusinessProfile.objects.filter(workspace=workspace).first()
     if profile is not None:
         initial["relevance_threshold"] = profile.relevance_threshold
     form = CampaignForm(
         request.POST if request.method == "POST" else None,
         initial=initial,
+        workspace=workspace,
     )
     for field_name in INTEGRATION_SNAPSHOT_FIELDS:
         form.fields[field_name].disabled = True
@@ -109,19 +143,80 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
                     values={field: form.cleaned_data[field] for field in CAMPAIGN_VALUE_FIELDS},
                     category_ids=[category.pk for category in form.cleaned_data["categories"]],
                     zone_ids=[zone.pk for zone in form.cleaned_data["zones"]],
+                    catalog_ids=[catalog.pk for catalog in form.cleaned_data["catalogs"]],
                 )
             except ValidationError as exc:
                 form.add_error(None, exc)
             else:
                 messages.success(request, "Campaña creada en borrador.")
                 return redirect("campaign-detail", campaign_id=campaign.pk)
-    return render(request, "campaigns/form.html", {"form": form})
+    selected_category_count = len(form["categories"].value() or [])
+    selected_zone_count = len(form["zones"].value() or [])
+    selected_catalog_count = len(form["catalogs"].value() or [])
+    selected_zone_ids = {str(value) for value in (form["zones"].value() or [])}
+    selected_province_ids = {str(value) for value in (form["provinces"].value() or [])}
+    district_queryset = cast(
+        "forms.ModelMultipleChoiceField[SearchZone]",
+        form.fields["zones"],
+    ).queryset
+    province_queryset = cast(
+        "forms.ModelMultipleChoiceField[SearchZone]",
+        form.fields["provinces"],
+    ).queryset
+    assert district_queryset is not None
+    assert province_queryset is not None
+    district_rows = list(district_queryset)
+    if not selected_province_ids:
+        selected_province_ids = {
+            str(zone.parent_id)
+            for zone in district_rows
+            if str(zone.pk) in selected_zone_ids and zone.parent_id is not None
+        }
+    districts_by_province: dict[object, list[dict[str, object]]] = {}
+    custom_zones: list[dict[str, object]] = []
+    for zone in district_rows:
+        row = {"zone": zone, "selected": str(zone.pk) in selected_zone_ids}
+        if zone.parent_id is None:
+            custom_zones.append(row)
+        else:
+            districts_by_province.setdefault(zone.parent_id, []).append(row)
+    province_groups = [
+        {
+            "province": province,
+            "districts": districts_by_province.get(province.pk, []),
+            "selected": str(province.pk) in selected_province_ids,
+        }
+        for province in province_queryset
+        if districts_by_province.get(province.pk)
+    ]
+    return render(
+        request,
+        "campaigns/form.html",
+        {
+            "form": form,
+            "selected_category_count": selected_category_count,
+            "selected_zone_count": selected_zone_count,
+            "selected_catalog_count": selected_catalog_count,
+            "query_count": selected_category_count * selected_zone_count,
+            "province_groups": province_groups,
+            "custom_zones": custom_zones,
+            "selected_zone_ids": selected_zone_ids,
+        },
+    )
 
 
-@login_required
+@require_capability(Capability.VIEW_CAMPAIGNS)
+@require_GET
+@never_cache
 def campaign_detail(request: HttpRequest, campaign_id: str) -> HttpResponse:
-    campaign = get_object_or_404(
-        Campaign.objects.select_related("catalog", "created_by").prefetch_related(
+    owner = request.user
+    assert isinstance(owner, User)
+    workspace = workspace_for_user(owner, Capability.VIEW_CAMPAIGNS)
+    is_admin = has_capability(owner, Capability.MANAGE_CAMPAIGNS)
+    campaign_queryset = Campaign.objects.select_related("catalog", "created_by")
+    if is_admin:
+        campaign_queryset = campaign_queryset.prefetch_related(
+            "attachments__catalog",
             "category_selections",
             "zone_selections",
             "search_queries",
@@ -130,18 +225,104 @@ def campaign_detail(request: HttpRequest, campaign_id: str) -> HttpResponse:
             "prospects__analyses",
             "prospects__outbound_messages",
             "prospects__web_snapshots",
-        ),
+        )
+    else:
+        campaign_queryset = campaign_queryset.exclude(state=Campaign.State.DRAFT)
+    campaign = get_object_or_404(
+        campaign_queryset,
         pk=campaign_id,
-        created_by=request.user,
+        workspace=workspace,
     )
-    return render(request, "campaigns/detail.html", {"campaign": campaign})
+    first_contacts = campaign.messages.filter(
+        kind__in=(OutboundMessage.Kind.FIRST_CONTACT, OutboundMessage.Kind.INITIAL)
+    )
+    metrics: dict[str, int] = {
+        "raw": 0,
+        "with_email": 0,
+        "duplicates": 0,
+        "irrelevant": 0,
+        "qualified": 0,
+        "review_ready": 0,
+        "queued": 0,
+        "sent": first_contacts.filter(state=OutboundMessage.State.SENT).count(),
+        "simulated": 0,
+        "errors": 0,
+    }
+    if is_admin:
+        prospects = campaign.prospects.all()
+        enrollment_count = campaign.enrollments.count()
+        eligible_enrollments = campaign.enrollments.exclude(
+            state__in=(
+                CampaignEnrollment.State.DISCOVERED,
+                CampaignEnrollment.State.INELIGIBLE,
+                CampaignEnrollment.State.CANCELLED,
+            )
+        )
+        metrics.update(
+            {
+                "raw": campaign.search_runs.aggregate(value=Sum("raw_count"))["value"] or 0,
+                "with_email": (
+                    campaign.enrollments.exclude(selected_email=None).count()
+                    if enrollment_count
+                    else prospects.exclude(
+                        pipeline_state__in=(
+                            Prospect.PipelineState.DISCOVERED,
+                            Prospect.PipelineState.SKIPPED_NO_EMAIL,
+                        )
+                    ).count()
+                ),
+                "duplicates": campaign.search_runs.aggregate(value=Sum("duplicate_count"))["value"]
+                or 0,
+                "irrelevant": prospects.filter(
+                    pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT
+                ).count(),
+                "qualified": (
+                    eligible_enrollments.count()
+                    if enrollment_count
+                    else prospects.filter(pipeline_state=Prospect.PipelineState.QUEUED).count()
+                ),
+                "review_ready": first_contacts.filter(
+                    state=OutboundMessage.State.REVIEW_READY
+                ).count(),
+                "queued": first_contacts.filter(
+                    state__in=(
+                        OutboundMessage.State.PREPARED,
+                        OutboundMessage.State.QUEUED,
+                        OutboundMessage.State.SENDING,
+                        OutboundMessage.State.RECONCILING,
+                    )
+                ).count(),
+                "simulated": first_contacts.filter(
+                    state=OutboundMessage.State.DRY_RUN_COMPLETED
+                ).count(),
+                "errors": prospects.filter(pipeline_state=Prospect.PipelineState.ERROR).count()
+                + first_contacts.filter(state=OutboundMessage.State.SEND_FAILED).count(),
+            }
+        )
+    progress_percent = min(100, round(metrics["qualified"] * 100 / campaign.objective))
+    return render(
+        request,
+        "campaigns/detail.html",
+        {
+            "campaign": campaign,
+            "metrics": metrics,
+            "progress_percent": progress_percent,
+            "is_admin": is_admin,
+            "individually_approved_count": first_contacts.filter(
+                approved_at__isnull=False,
+                state=OutboundMessage.State.PREPARED,
+            ).count()
+            if is_admin
+            else 0,
+        },
+    )
 
 
-@login_required
+@require_capability(Capability.MANAGE_CAMPAIGNS)
 @require_POST
 def campaign_action(request: HttpRequest, campaign_id: str, action: str) -> HttpResponse:
     targets = {
-        "start": Campaign.State.RUNNING,
+        "start": Campaign.State.DISCOVERING,
         "pause": Campaign.State.PAUSED,
         "resume": Campaign.State.RUNNING,
         "cancel": Campaign.State.CANCELLED,
@@ -164,12 +345,61 @@ def campaign_action(request: HttpRequest, campaign_id: str, action: str) -> Http
         )
     else:
         messages.success(request, "Estado de campaña actualizado.")
-        if targets[action] == Campaign.State.RUNNING:
+        if campaign.discovery_state == Campaign.DiscoveryState.RUNNING and targets[action] in {
+            Campaign.State.DISCOVERING,
+            Campaign.State.RUNNING,
+        }:
             orchestrate_extraction.delay(str(campaign.pk))
     return redirect("campaign-detail", campaign_id=campaign_id)
 
 
-@login_required
+@require_capability(Capability.APPROVE_CAMPAIGNS)
+@require_POST
+def campaign_approve(request: HttpRequest, campaign_id: str) -> HttpResponse:
+    actor = request.user
+    assert isinstance(actor, User)
+    try:
+        campaign = approve_campaign(campaign_id, actor=actor)
+    except (Campaign.DoesNotExist, ValidationError) as exc:
+        messages.error(
+            request,
+            "; ".join(exc.messages) if isinstance(exc, ValidationError) else "Campaña inexistente.",
+        )
+    else:
+        if campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY:
+            for message_id in campaign.messages.filter(
+                kind=OutboundMessage.Kind.INITIAL,
+                state=OutboundMessage.State.QUEUED,
+            ).values_list("pk", flat=True):
+                deliver_message_task.delay(str(message_id))
+        messages.success(
+            request,
+            "Campaña aprobada. Volvimos a comprobar cada destinatario antes de encolarlo.",
+        )
+    return redirect("campaign-detail", campaign_id=campaign_id)
+
+
+@require_capability(Capability.APPROVE_CAMPAIGNS)
+@require_POST
+def campaign_start_approved(request: HttpRequest, campaign_id: str) -> HttpResponse:
+    actor = request.user
+    assert isinstance(actor, User)
+    try:
+        start_per_message_campaign(campaign_id, actor=actor)
+    except (Campaign.DoesNotExist, ValidationError) as exc:
+        messages.error(
+            request,
+            "; ".join(exc.messages) if isinstance(exc, ValidationError) else "Campaña inexistente.",
+        )
+    else:
+        messages.success(
+            request,
+            "Se inició la entrega de los mensajes aprobados. Los demás quedaron fuera.",
+        )
+    return redirect("campaign-detail", campaign_id=campaign_id)
+
+
+@require_capability(Capability.MANAGE_CAMPAIGNS)
 @require_POST
 def regenerate_prospect_message(
     request: HttpRequest, campaign_id: str, prospect_id: str
@@ -180,7 +410,7 @@ def regenerate_prospect_message(
         Prospect.objects.select_related("campaign"),
         pk=prospect_id,
         campaign_id=campaign_id,
-        campaign__created_by=owner,
+        campaign__workspace=workspace_for_user(owner, Capability.MANAGE_CAMPAIGNS),
     )
     try:
         reservation = request_manual_regeneration(prospect_id=prospect.pk, actor=owner)
@@ -198,4 +428,38 @@ def regenerate_prospect_message(
             request,
             "Regeneración solicitada. Esto no aprueba ni envía el mensaje.",
         )
+    return redirect("campaign-detail", campaign_id=campaign_id)
+
+
+@require_capability(Capability.MANAGE_CAMPAIGNS)
+@require_POST
+def regenerate_outdated_campaign_analyses(request: HttpRequest, campaign_id: str) -> HttpResponse:
+    owner = request.user
+    assert isinstance(owner, User)
+    try:
+        reservations = request_outdated_analysis_regenerations(
+            campaign_id=campaign_id,
+            actor=owner,
+        )
+    except (Campaign.DoesNotExist, ValidationError) as exc:
+        messages.error(
+            request,
+            "; ".join(exc.messages) if isinstance(exc, ValidationError) else "Campaña inexistente.",
+        )
+    else:
+        for reservation in reservations:
+            process_prospect_pipeline.delay(
+                str(reservation.prospect_id),
+                regeneration_nonce=reservation.regeneration_nonce,
+                actor_id=owner.pk,
+                reservation_token=reservation.token,
+                analysis_generation=reservation.generation,
+            )
+        if reservations:
+            messages.success(
+                request,
+                f"Se solicitaron {len(reservations)} reanálisis con el contrato IA vigente.",
+            )
+        else:
+            messages.info(request, "No quedan análisis del contrato anterior para regenerar.")
     return redirect("campaign-detail", campaign_id=campaign_id)

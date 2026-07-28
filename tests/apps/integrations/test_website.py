@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from apps.integrations.contracts import WebsiteRequest
 from apps.integrations.website import (
+    MAX_EMAIL_CANDIDATES_PER_PAGE,
     HttpWebsiteFetcher,
     PinnedHTTPResponse,
 )
@@ -207,3 +208,88 @@ def test_public_suffix_boundary_blocks_unrelated_multilabel_domain() -> None:
 
     assert len(result.pages) == 2
     assert all("attacker.com.br" not in url for url, _ in transport.calls)
+
+
+def test_extracts_bounded_visible_and_mailto_emails_with_page_provenance() -> None:
+    body = """
+    <main>
+      Escribinos a ventas@public.example.
+      <a href="mailto:contacto%40public.example?subject=Consulta">Contacto</a>
+      ventas@public.example
+    </main>
+    <footer>
+      <a href="mailto:soporte@public.example">Soporte</a>
+      administracion@public.example
+    </footer>
+    <script>secret@attacker.example</script>
+    """
+    fetcher = HttpWebsiteFetcher(
+        resolver=StaticResolver({"public.example": ("93.184.216.34",)}),
+        transport=StaticTransport({"https://public.example/": _html(body)}),
+    )
+
+    result = fetcher.fetch(
+        WebsiteRequest(url="https://public.example", correlation_id="email-provenance")
+    )
+
+    page = result.pages[0]
+    assert [candidate.value for candidate in page.email_candidates] == [
+        "contacto@public.example",
+        "soporte@public.example",
+        "ventas@public.example",
+        "administracion@public.example",
+    ]
+    assert [candidate.source for candidate in page.email_candidates] == [
+        "mailto",
+        "mailto",
+        "visible_text",
+        "visible_text",
+    ]
+    assert all(candidate.page_url == page.final_url for candidate in page.email_candidates)
+    assert all(
+        candidate.page_content_hash == page.content_hash for candidate in page.email_candidates
+    )
+    assert "<main>" not in page.text
+    assert "secret@attacker.example" not in page.text
+
+
+def test_ignores_mailto_values_nested_inside_non_visible_markup() -> None:
+    body = """
+    <main><a href="mailto:visible@public.example">Contacto visible</a></main>
+    <svg><a href="mailto:hidden-svg@attacker.example">hidden</a></svg>
+    <noscript><a href="mailto:hidden-noscript@attacker.example">hidden</a></noscript>
+    """
+    fetcher = HttpWebsiteFetcher(
+        resolver=StaticResolver({"public.example": ("93.184.216.34",)}),
+        transport=StaticTransport({"https://public.example/": _html(body)}),
+    )
+
+    result = fetcher.fetch(
+        WebsiteRequest(url="https://public.example", correlation_id="hidden-email")
+    )
+
+    assert [candidate.value for candidate in result.pages[0].email_candidates] == [
+        "visible@public.example"
+    ]
+
+
+def test_visible_email_candidates_are_capped_per_page() -> None:
+    body = " ".join(f"contacto{index}@public.example" for index in range(60))
+    fetcher = HttpWebsiteFetcher(
+        resolver=StaticResolver({"public.example": ("93.184.216.34",)}),
+        transport=StaticTransport(
+            {
+                "https://public.example/": PinnedHTTPResponse(
+                    status_code=200,
+                    headers={"content-type": "text/plain; charset=utf-8"},
+                    body=body.encode(),
+                )
+            }
+        ),
+    )
+
+    result = fetcher.fetch(
+        WebsiteRequest(url="https://public.example", correlation_id="email-bound")
+    )
+
+    assert len(result.pages[0].email_candidates) == MAX_EMAIL_CANDIDATES_PER_PAGE

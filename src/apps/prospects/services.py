@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from urllib.parse import urlsplit
@@ -9,15 +11,25 @@ from django.core.exceptions import ValidationError
 from django.db import connection, transaction
 from django.utils import timezone
 
-from apps.campaigns.models import SearchRun
+from apps.audit.services import record_event
+from apps.campaigns.models import Campaign, SearchRun
+from apps.compliance.services import is_email_suppressed
 from apps.configuration.models import normalize_name
-from apps.integrations.contracts import ExtractedBusiness
+from apps.contacts.models import CampaignEnrollment
+from apps.contacts.services import ensure_prospect_enrollment, refresh_enrollment_eligibility
+from apps.integrations.contracts import ExtractedBusiness, ExtractedEmail
+from apps.integrations.domains import registrable_domain_from_hostname
 from apps.prospects.email_validation import (
+    DNSMXResolver,
+    MockMXResolver,
     MXResolver,
+    TransientMXError,
     ValidatedEmail,
+    select_validated_email,
     validate_and_select_email,
 )
-from apps.prospects.models import Prospect, ProspectEmail, ProspectIdentity
+from apps.prospects.exceptions import ProspectPipelineInactive
+from apps.prospects.models import Prospect, ProspectEmail, ProspectIdentity, WebsiteSnapshot
 
 FREE_OR_SHARED_DOMAINS = frozenset(
     {
@@ -33,7 +45,11 @@ FREE_OR_SHARED_DOMAINS = frozenset(
         "wixsite.com",
     }
 )
-ARGENTINA_SECOND_LEVEL = frozenset({"com.ar", "net.ar", "org.ar"})
+MAX_WEBSITE_EMAIL_CANDIDATES = 40
+WEBSITE_EMAIL_SOURCES = frozenset({"mailto", "visible_text"})
+CONTACT_CENTRIC_EXCLUSION_CODES = frozenset(
+    {"EXISTING_CONTACT", "RESTRICTED", "LEGACY_RESTRICTION", "EMAIL_OWNERSHIP"}
+)
 
 
 class IngestOutcome(StrEnum):
@@ -56,8 +72,45 @@ class DeduplicationConflict(RuntimeError):
 class PreparedBusiness:
     business: ExtractedBusiness
     business_domain: str
-    selected_email: ValidatedEmail
+    selected_email: ValidatedEmail | None
     valid_emails: tuple[ValidatedEmail, ...]
+
+
+@transaction.atomic
+def mark_fixed_campaign_prospect_ready(prospect_id: uuid.UUID | str) -> Prospect:
+    """Finish a new-campaign prospect without relevance scoring or LLM copy."""
+
+    prospect = (
+        Prospect.objects.select_for_update()
+        .select_related("campaign", "campaign_enrollment")
+        .get(pk=prospect_id)
+    )
+    if prospect.campaign.state != Campaign.State.DISCOVERING:
+        return prospect
+    enrollment = ensure_prospect_enrollment(prospect, campaign=prospect.campaign)
+    eligibility = refresh_enrollment_eligibility(enrollment)
+    before = {"pipeline_state": prospect.pipeline_state}
+    if eligibility.eligible:
+        prospect.pipeline_state = Prospect.PipelineState.QUEUED
+        prospect.error_stage = ""
+        prospect.last_error = ""
+    else:
+        prospect.pipeline_state = Prospect.PipelineState.SKIPPED_DUPLICATE
+        prospect.error_stage = "ELIGIBILITY"
+        prospect.last_error = eligibility.message
+    prospect.save(update_fields=("pipeline_state", "error_stage", "last_error", "updated_at"))
+    record_event(
+        action="prospect.fixed_campaign_ready",
+        entity=prospect,
+        actor=None,
+        before=before,
+        after={
+            "pipeline_state": prospect.pipeline_state,
+            "enrollment_id": str(enrollment.pk),
+            "llm_calls": 0,
+        },
+    )
+    return prospect
 
 
 def registrable_domain(url: str | None) -> str:
@@ -68,13 +121,7 @@ def registrable_domain(url: str | None) -> str:
         hostname = (parsed.hostname or "").encode("idna").decode("ascii").casefold()
     except UnicodeError:
         return ""
-    labels = hostname.rstrip(".").split(".")
-    if len(labels) < 2:
-        return hostname
-    suffix_two = ".".join(labels[-2:])
-    if suffix_two in ARGENTINA_SECOND_LEVEL and len(labels) >= 3:
-        return ".".join(labels[-3:])
-    return suffix_two
+    return registrable_domain_from_hostname(hostname)
 
 
 def _hash(kind: str, value: str) -> tuple[str, str]:
@@ -126,8 +173,9 @@ def prepare_business(
             business_domain=business_domain,
             resolver=resolver,
         )
-    except ValidationError:
-        return None
+    except (ValidationError, TransientMXError):
+        selected = None
+        valid_emails = ()
     return PreparedBusiness(
         business=business,
         business_domain=business_domain,
@@ -143,13 +191,30 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
     selected = prepared.selected_email
     valid_emails = prepared.valid_emails
 
+    eligibility_keys = _identity_keys(
+        business,
+        provider=run.provider,
+        normalized_emails=tuple(email.normalized for email in valid_emails),
+        business_domain=business_domain,
+    )
+    _lock_keys(eligibility_keys)
+    # Email validation occurs before the write transaction so MX lookups never
+    # hold database locks. Re-check suppression after taking the same advisory
+    # eligibility locks used by suppression writes to close that race.
+    valid_emails = tuple(
+        email for email in valid_emails if not is_email_suppressed(email.normalized)
+    )
+    selected = (
+        select_validated_email(valid_emails, business_domain=business_domain)
+        if valid_emails
+        else None
+    )
     keys = _identity_keys(
         business,
         provider=run.provider,
         normalized_emails=tuple(email.normalized for email in valid_emails),
         business_domain=business_domain,
     )
-    _lock_keys(keys)
     identity_matches = list(
         ProspectIdentity.objects.select_related("prospect").filter(
             kind__in=[kind for kind, _ in keys], value_hash__in=[value for _, value in keys]
@@ -173,6 +238,7 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
     if existing is None and existing_email is not None:
         existing = existing_email.prospect
     if existing is not None:
+        existing = Prospect.objects.select_for_update().get(pk=existing.pk)
         existing_keys = set(existing.identities.values_list("kind", "value_hash"))
         ProspectIdentity.objects.bulk_create(
             [
@@ -183,6 +249,13 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
             ignore_conflicts=True,
         )
         existing_email_values = set(existing.emails.values_list("normalized_email", flat=True))
+        has_primary_email = existing.emails.filter(is_primary=True).exists()
+        selected_normalized = selected.normalized if selected is not None else ""
+        promote_direct_email = (
+            bool(selected_normalized)
+            and not has_primary_email
+            and existing.pipeline_state == Prospect.PipelineState.DISCOVERED
+        )
         checked_at = timezone.now()
         ProspectEmail.objects.bulk_create(
             [
@@ -193,16 +266,58 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
                     domain=email.domain,
                     local_part=email.local_part,
                     source=email.source,
+                    source_url=email.source_url,
+                    source_content_hash=email.source_content_hash,
                     provider_order=email.provider_order,
                     mx_status=ProspectEmail.MXStatus.VALID,
                     mx_checked_at=checked_at,
-                    is_primary=False,
+                    is_primary=(promote_direct_email and email.normalized == selected_normalized),
                 )
                 for email in valid_emails
                 if email.normalized not in existing_email_values
             ],
             ignore_conflicts=True,
         )
+        if promote_direct_email:
+            ProspectEmail.objects.filter(
+                prospect=existing,
+                normalized_email=selected_normalized,
+            ).update(is_primary=True)
+            before = {"pipeline_state": existing.pipeline_state}
+            existing.pipeline_state = Prospect.PipelineState.EMAIL_FOUND
+            existing.error_stage = ""
+            existing.last_error = ""
+            existing.save(
+                update_fields=("pipeline_state", "error_stage", "last_error", "updated_at")
+            )
+            record_event(
+                action="prospect.email_found",
+                entity=existing,
+                actor=None,
+                before=before,
+                after={"pipeline_state": existing.pipeline_state, "source": "provider"},
+            )
+        enrollment = ensure_prospect_enrollment(
+            existing,
+            campaign=run.campaign,
+            provider=run.provider,
+        )
+        if (
+            enrollment.state == CampaignEnrollment.State.INELIGIBLE
+            and enrollment.exclusion_reason in CONTACT_CENTRIC_EXCLUSION_CODES
+            and existing.campaign_id == run.campaign_id
+            and existing.pipeline_state
+            not in {
+                Prospect.PipelineState.SKIPPED_DUPLICATE,
+                Prospect.PipelineState.SKIPPED_NO_EMAIL,
+            }
+        ):
+            existing.pipeline_state = Prospect.PipelineState.SKIPPED_DUPLICATE
+            existing.error_stage = "ELIGIBILITY"
+            existing.last_error = enrollment.exclusion_reason
+            existing.save(
+                update_fields=("pipeline_state", "error_stage", "last_error", "updated_at")
+            )
         return IngestResult(IngestOutcome.DUPLICATE, existing)
 
     prospect = Prospect.objects.create(
@@ -220,7 +335,11 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
         latitude=business.latitude,
         longitude=business.longitude,
         provider_data=business.provider_data or {},
-        pipeline_state=Prospect.PipelineState.EMAIL_FOUND,
+        pipeline_state=(
+            Prospect.PipelineState.EMAIL_FOUND
+            if selected is not None
+            else Prospect.PipelineState.DISCOVERED
+        ),
     )
     ProspectIdentity.objects.bulk_create(
         ProspectIdentity(prospect=prospect, kind=kind, value_hash=value_hash)
@@ -235,14 +354,33 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
             domain=email.domain,
             local_part=email.local_part,
             source=email.source,
+            source_url=email.source_url,
+            source_content_hash=email.source_content_hash,
             provider_order=email.provider_order,
             mx_status=ProspectEmail.MXStatus.VALID,
             mx_checked_at=checked_at,
-            is_primary=email.normalized == selected.normalized,
+            is_primary=selected is not None and email.normalized == selected.normalized,
         )
         for email in valid_emails
     )
-    return IngestResult(IngestOutcome.CREATED, prospect)
+    enrollment = ensure_prospect_enrollment(
+        prospect,
+        campaign=run.campaign,
+        provider=run.provider,
+    )
+    if (
+        enrollment.state == CampaignEnrollment.State.INELIGIBLE
+        and enrollment.exclusion_reason in CONTACT_CENTRIC_EXCLUSION_CODES
+    ):
+        prospect.pipeline_state = Prospect.PipelineState.SKIPPED_DUPLICATE
+        prospect.error_stage = "ELIGIBILITY"
+        prospect.last_error = enrollment.exclusion_reason
+        prospect.save(update_fields=("pipeline_state", "error_stage", "last_error", "updated_at"))
+        return IngestResult(IngestOutcome.DUPLICATE, prospect)
+    return IngestResult(
+        IngestOutcome.CREATED if selected is not None else IngestOutcome.NO_EMAIL,
+        prospect,
+    )
 
 
 def ingest_business(
@@ -252,3 +390,254 @@ def ingest_business(
     if prepared is None:
         return IngestResult(IngestOutcome.NO_EMAIL)
     return ingest_prepared_business(run=run, prepared=prepared)
+
+
+def _website_candidates(snapshot: WebsiteSnapshot) -> tuple[ExtractedEmail, ...]:
+    pages = snapshot.pages if isinstance(snapshot.pages, list) else []
+    allowed_sources = {
+        (str(page.get("final_url", "")), str(page.get("content_hash", "")))
+        for page in pages
+        if isinstance(page, Mapping)
+    }
+    rows = snapshot.email_candidates if isinstance(snapshot.email_candidates, list) else []
+    candidates: list[ExtractedEmail] = []
+    for row in rows[:MAX_WEBSITE_EMAIL_CANDIDATES]:
+        if not isinstance(row, Mapping):
+            continue
+        value = str(row.get("value", "")).strip()
+        source = str(row.get("source", ""))
+        source_url = str(row.get("page_url", ""))
+        source_hash = str(row.get("page_content_hash", ""))
+        if (
+            not value
+            or len(value) > 320
+            or source not in WEBSITE_EMAIL_SOURCES
+            or (source_url, source_hash) not in allowed_sources
+            or len(source_url) > 1000
+            or len(source_hash) != 64
+        ):
+            continue
+        candidates.append(
+            ExtractedEmail(
+                value=value,
+                source=f"website_{source}",
+                order=len(candidates),
+                source_url=source_url,
+                source_content_hash=source_hash,
+            )
+        )
+    return tuple(candidates)
+
+
+def _set_contact_terminal_locked(
+    *,
+    prospect: Prospect,
+    state: str,
+    snapshot: WebsiteSnapshot,
+    candidate_count: int,
+    reason: str = "",
+) -> Prospect:
+    before = {"pipeline_state": prospect.pipeline_state}
+    prospect.pipeline_state = state
+    prospect.error_stage = ""
+    prospect.last_error = ""
+    prospect.save(update_fields=("pipeline_state", "error_stage", "last_error", "updated_at"))
+    after = {
+        "pipeline_state": state,
+        "source": "website",
+        "snapshot_id": str(snapshot.pk),
+        "candidate_count": candidate_count,
+    }
+    if reason:
+        after["reason"] = reason
+    record_event(
+        action=(
+            "prospect.email_found"
+            if state == Prospect.PipelineState.EMAIL_FOUND
+            else "prospect.skipped_no_email"
+            if state == Prospect.PipelineState.SKIPPED_NO_EMAIL
+            else "prospect.skipped_duplicate"
+        ),
+        entity=prospect,
+        actor=None,
+        before=before,
+        after=after,
+    )
+    ensure_prospect_enrollment(
+        prospect,
+        campaign=prospect.campaign,
+        provider=prospect.source_run.provider,
+    )
+    return prospect
+
+
+@transaction.atomic
+def _skip_website_contact(
+    *,
+    prospect_id: uuid.UUID | str,
+    snapshot_id: uuid.UUID | str,
+    candidate_count: int,
+    reason: str = "",
+) -> Prospect:
+    prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
+    snapshot = WebsiteSnapshot.objects.get(pk=snapshot_id, prospect=prospect)
+    if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
+        raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.pipeline_state != Prospect.PipelineState.DISCOVERED:
+        return prospect
+    return _set_contact_terminal_locked(
+        prospect=prospect,
+        state=Prospect.PipelineState.SKIPPED_NO_EMAIL,
+        snapshot=snapshot,
+        candidate_count=candidate_count,
+        reason=reason,
+    )
+
+
+def skip_website_email_after_mx_retries(
+    prospect_id: uuid.UUID | str,
+    *,
+    snapshot: WebsiteSnapshot,
+) -> Prospect:
+    """Finish contact discovery after the bounded transient-MX retry budget."""
+
+    return _skip_website_contact(
+        prospect_id=prospect_id,
+        snapshot_id=snapshot.pk,
+        candidate_count=len(_website_candidates(snapshot)),
+        reason="mx_retry_exhausted",
+    )
+
+
+@transaction.atomic
+def _persist_website_emails(
+    *,
+    prospect_id: uuid.UUID | str,
+    snapshot_id: uuid.UUID | str,
+    selected: ValidatedEmail,
+    valid_emails: tuple[ValidatedEmail, ...],
+) -> Prospect:
+    prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
+    snapshot = WebsiteSnapshot.objects.get(pk=snapshot_id, prospect=prospect)
+    if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
+        raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.pipeline_state != Prospect.PipelineState.DISCOVERED:
+        return prospect
+
+    email_keys = [_hash(ProspectIdentity.Kind.EMAIL, email.normalized) for email in valid_emails]
+    _lock_keys(email_keys)
+    eligible = tuple(email for email in valid_emails if not is_email_suppressed(email.normalized))
+    if not eligible:
+        return _set_contact_terminal_locked(
+            prospect=prospect,
+            state=Prospect.PipelineState.SKIPPED_NO_EMAIL,
+            snapshot=snapshot,
+            candidate_count=len(valid_emails),
+        )
+    selected_email = (
+        selected
+        if selected in eligible
+        else select_validated_email(
+            eligible,
+            business_domain=prospect.business_domain or registrable_domain(prospect.website),
+        )
+    )
+    eligible_keys = [_hash(ProspectIdentity.Kind.EMAIL, email.normalized) for email in eligible]
+
+    normalized_values = [email.normalized for email in eligible]
+    conflicting_email = (
+        ProspectEmail.objects.select_for_update()
+        .filter(normalized_email__in=normalized_values)
+        .exclude(prospect=prospect)
+        .first()
+    )
+    conflicting_identity = (
+        ProspectIdentity.objects.select_for_update()
+        .filter(
+            kind=ProspectIdentity.Kind.EMAIL,
+            value_hash__in=[item[1] for item in eligible_keys],
+        )
+        .exclude(prospect=prospect)
+        .first()
+    )
+    if conflicting_email is not None or conflicting_identity is not None:
+        return _set_contact_terminal_locked(
+            prospect=prospect,
+            state=Prospect.PipelineState.SKIPPED_DUPLICATE,
+            snapshot=snapshot,
+            candidate_count=len(eligible),
+        )
+
+    existing_values = set(prospect.emails.values_list("normalized_email", flat=True))
+    checked_at = timezone.now()
+    ProspectEmail.objects.bulk_create(
+        ProspectEmail(
+            prospect=prospect,
+            original_email=email.original,
+            normalized_email=email.normalized,
+            domain=email.domain,
+            local_part=email.local_part,
+            source=email.source,
+            source_url=email.source_url,
+            source_content_hash=email.source_content_hash,
+            provider_order=email.provider_order,
+            mx_status=ProspectEmail.MXStatus.VALID,
+            mx_checked_at=checked_at,
+            is_primary=email.normalized == selected_email.normalized,
+        )
+        for email in eligible
+        if email.normalized not in existing_values
+    )
+    existing_identity_keys = set(prospect.identities.values_list("kind", "value_hash"))
+    ProspectIdentity.objects.bulk_create(
+        ProspectIdentity(prospect=prospect, kind=kind, value_hash=value_hash)
+        for kind, value_hash in eligible_keys
+        if (kind, value_hash) not in existing_identity_keys
+    )
+    return _set_contact_terminal_locked(
+        prospect=prospect,
+        state=Prospect.PipelineState.EMAIL_FOUND,
+        snapshot=snapshot,
+        candidate_count=len(eligible),
+    )
+
+
+def discover_website_email(
+    prospect_id: uuid.UUID | str,
+    *,
+    snapshot: WebsiteSnapshot,
+    resolver: MXResolver | None = None,
+) -> Prospect:
+    prospect = Prospect.objects.select_related("campaign", "source_run").get(pk=prospect_id)
+    if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
+        raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.pipeline_state != Prospect.PipelineState.DISCOVERED:
+        return prospect
+    candidates = _website_candidates(snapshot)
+    if not candidates:
+        return _skip_website_contact(
+            prospect_id=prospect.pk,
+            snapshot_id=snapshot.pk,
+            candidate_count=0,
+        )
+    active_resolver = resolver or (
+        MockMXResolver() if prospect.source_run.provider == "fake" else DNSMXResolver()
+    )
+    try:
+        selected, valid_emails = validate_and_select_email(
+            candidates,
+            business_domain=prospect.business_domain or registrable_domain(prospect.website),
+            resolver=active_resolver,
+        )
+    except ValidationError:
+        return _skip_website_contact(
+            prospect_id=prospect.pk,
+            snapshot_id=snapshot.pk,
+            candidate_count=len(candidates),
+        )
+    return _persist_website_emails(
+        prospect_id=prospect.pk,
+        snapshot_id=snapshot.pk,
+        selected=selected,
+        valid_emails=valid_emails,
+    )

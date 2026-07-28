@@ -14,7 +14,7 @@ class ManualReplyForm(forms.Form):
 
 
 class FakeInboundForm(forms.Form):
-    outbound_id = forms.UUIDField(label="Envío fake confirmado")
+    outbound_id = forms.UUIDField(label="Envío simulado confirmado")
     scenario = forms.ChoiceField(
         label="Escenario",
         choices=(
