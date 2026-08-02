@@ -48,7 +48,6 @@ from apps.configuration.views import (
     message_templates,
     prompts,
     toggle_item,
-    zones,
 )
 from apps.contacts.views import (
     attention_list,
@@ -229,7 +228,6 @@ urlpatterns = [
     path("integraciones/overture/", overture_datasets, name="overture-datasets"),
     path("integraciones/overture/sincronizar/", overture_sync, name="overture-sync"),
     path("rubros/", categories, name="categories"),
-    path("zonas/", zones, name="zones"),
     path("configuracion/<str:kind>/<uuid:item_id>/toggle/", toggle_item, name="config-toggle"),
     path("configuracion/<str:kind>/<uuid:item_id>/delete/", delete_item, name="config-delete"),
     path("catalogos/", catalog_list, name="catalogs"),

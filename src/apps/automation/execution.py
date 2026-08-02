@@ -572,9 +572,10 @@ def _reply_thread_fields(decision: ReplyDecision) -> tuple[str, tuple[str, ...],
     inbound = decision.inbound
     root = inbound.related_outbound
     in_reply_to = normalize_message_id(inbound.message_id)
-    references = normalize_references(
-        (root.message_id, *(str(value) for value in inbound.references), inbound.message_id)
-    )
+    reference_values = [*(str(value) for value in inbound.references), inbound.message_id]
+    if root is not None and root.message_id:
+        reference_values.insert(0, root.message_id)
+    references = normalize_references(tuple(reference_values))
     if not inbound.gmail_thread_id or not in_reply_to:
         raise ValidationError(
             "La conversación no conserva los identificadores necesarios para responder."
@@ -594,12 +595,12 @@ def _base_outbound_values(
     root = decision.inbound.related_outbound
     return {
         "kind": kind,
-        "campaign": root.campaign,
+        "campaign": root.campaign if root is not None else None,
         "organization": decision.contact.organization,
-        "campaign_enrollment": root.campaign_enrollment,
+        "campaign_enrollment": root.campaign_enrollment if root is not None else None,
         "contact": decision.contact,
-        "prospect": root.prospect,
-        "prospect_email": root.prospect_email,
+        "prospect": root.prospect if root is not None else None,
+        "prospect_email": root.prospect_email if root is not None else None,
         "email_address": email,
         "analysis": None,
         "parent_inbound": decision.inbound,
@@ -684,14 +685,21 @@ def authorize_reply_decision(decision_id: uuid.UUID | str) -> OutboundMessage | 
             summary=error,
         )
     root = decision.inbound.related_outbound
-    campaign = root.campaign
-    if root.delivery_mode != Campaign.DeliveryMode.LIVE or (
-        campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE
-    ):
+    campaign = root.campaign if root is not None else None
+    if root is not None:
+        if root.delivery_mode != Campaign.DeliveryMode.LIVE or (
+            campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE
+        ):
+            return _reject_decision_locked(
+                decision,
+                reason="NOT_LIVE_ORIGIN",
+                summary="La conversación no se originó en un envío en vivo.",
+            )
+    elif decision.action == "REDIRECT_PROPOSAL":
         return _reject_decision_locked(
             decision,
-            reason="NOT_LIVE_ORIGIN",
-            summary="La conversación no se originó en un envío en vivo.",
+            reason="MISSING_APPROVED_CAMPAIGN",
+            summary="Las redirecciones de propuesta necesitan una campaña aprobada como origen.",
         )
     connection = (
         GmailConnection.objects.select_for_update()
@@ -748,7 +756,7 @@ def authorize_reply_decision(decision_id: uuid.UUID | str) -> OutboundMessage | 
             decision,
             kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
             email=email,
-            subject=root.subject,
+            subject=root.subject if root is not None else decision.inbound.subject,
             body_text=_grounded_reply_body(decision),
             semantic_key=semantic_key,
         )
@@ -964,6 +972,8 @@ def _redirect_email_locked(decision: ReplyDecision) -> EmailAddress | str:
 
 def _origin_attachments(decision: ReplyDecision) -> tuple[OutboundAttachment, ...]:
     root = decision.inbound.related_outbound
+    if root is None:
+        return ()
     source = root
     if root.campaign_enrollment_id is not None:
         original = (
@@ -1001,14 +1011,16 @@ def _automatic_outbound_integrity_error(
     decision: ReplyDecision,
 ) -> str:
     root = decision.inbound.related_outbound
-    if root.state != OutboundMessage.State.SENT or root.sent_at is None:
+    expected_campaign_id = root.campaign_id if root is not None else None
+    expected_enrollment_id = root.campaign_enrollment_id if root is not None else None
+    if root is not None and (root.state != OutboundMessage.State.SENT or root.sent_at is None):
         return "El mensaje que originó la conversación ya no figura como enviado."
     if (
         message.parent_inbound_id != decision.inbound_id
         or message.contact_id != decision.contact_id
         or message.organization_id != decision.contact.organization_id
-        or message.campaign_id != root.campaign_id
-        or message.campaign_enrollment_id != root.campaign_enrollment_id
+        or message.campaign_id != expected_campaign_id
+        or message.campaign_enrollment_id != expected_enrollment_id
         or message.delivery_mode != Campaign.DeliveryMode.LIVE
     ):
         return "El mensaje automático ya no coincide con la conversación que lo autorizó."
@@ -1057,13 +1069,15 @@ def _automatic_outbound_integrity_error(
 
     if message.kind == OutboundMessage.Kind.AUTOMATIC_REPLY:
         if (
-            message.subject != root.subject
+            message.subject != (root.subject if root is not None else decision.inbound.subject)
             or message.body_text != _grounded_reply_body(decision)
             or message.signature_snapshot
             or message.content_hash
         ):
             return "Cambió el contenido de la respuesta automática autorizada."
     elif message.kind == OutboundMessage.Kind.REDIRECT_ACK:
+        if root is None:
+            return "El aviso de redirección necesita una campaña aprobada como origen."
         proposal_sent = OutboundMessage.objects.filter(
             parent_inbound_id=decision.inbound_id,
             kind=OutboundMessage.Kind.REFERRED_PROPOSAL,
@@ -1080,6 +1094,8 @@ def _automatic_outbound_integrity_error(
         ):
             return "Cambió el texto fijo de confirmación del reenvío."
     else:
+        if root is None:
+            return "La propuesta automática necesita una campaña aprobada como origen."
         campaign = root.campaign
         if campaign is None or campaign.approved_at is None or campaign.approved_by_id is None:
             return "La propuesta ya no conserva una campaña aprobada."
@@ -1116,6 +1132,12 @@ def _automatic_outbound_integrity_error(
 
 def _authorize_redirect_proposal_locked(decision: ReplyDecision) -> OutboundMessage | str:
     root = decision.inbound.related_outbound
+    if root is None:
+        return _reject_decision_locked(
+            decision,
+            reason="MISSING_APPROVED_CAMPAIGN",
+            summary="Las redirecciones de propuesta necesitan una campaña aprobada como origen.",
+        )
     campaign = root.campaign
     if campaign is None or campaign.approved_at is None or campaign.approved_by_id is None:
         return _reject_decision_locked(
@@ -1261,6 +1283,13 @@ def authorize_redirect_ack(decision_id: uuid.UUID | str) -> OutboundMessage | st
             failed=True,
         )
     root = decision.inbound.related_outbound
+    if root is None:
+        return _reject_decision_locked(
+            decision,
+            reason="MISSING_APPROVED_CAMPAIGN",
+            summary="El aviso de redirección necesita una campaña aprobada como origen.",
+            failed=True,
+        )
     semantic_key = f"redirect-ack:{decision.inbound.gmail_message_id}"
     values = _base_outbound_values(
         decision,

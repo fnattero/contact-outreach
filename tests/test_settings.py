@@ -32,6 +32,8 @@ def test_safe_runtime_defaults_use_fake_providers() -> None:
     assert settings.GMAIL_PROVIDER == "fake"
     assert settings.AUTO_REPLY_KILL_SWITCH is True
     assert settings.RELATIONSHIP_KILL_SWITCH is True
+    assert settings.SESSION_COOKIE_AGE == 60 * 60 * 24 * 7
+    assert settings.SESSION_EXPIRE_AT_BROWSER_CLOSE is False
 
 
 def test_static_files_are_configured_for_gunicorn() -> None:

@@ -126,6 +126,8 @@ class InboundMessage(TimestampedUUIDModel):
     )
     related_outbound = models.ForeignKey(
         "campaigns.OutboundMessage",
+        blank=True,
+        null=True,
         on_delete=models.PROTECT,
         related_name="inbound_messages",
     )

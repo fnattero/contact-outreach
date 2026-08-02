@@ -99,8 +99,9 @@ orden y contenido.
 NEIGHBORHOOD|CUSTOM`, `parent`, `province_code/name`, `selectable`, `label_plural`, GeoJSON WGS84,
 bbox, boundary revision/hash, source/attribution, active/sort/archive. Unicidad por
 `(workspace, source, parent, official_code)`; nombres repetidos en distintas provincias son válidos.
-CABA conserva barrios como nivel seleccionable. Editar geometría crea revisión para futuro sin
-mutar snapshots.
+CABA conserva barrios como nivel seleccionable. `CUSTOM` se conserva para compatibilidad de datos
+legacy, pero no se ofrece como sección de configuración ni como selección de campañas nuevas.
+Editar geometría crea revisión para futuro sin mutar snapshots.
 
 ## 4. Overture particionado
 
@@ -251,10 +252,12 @@ token version, sync timestamps/errors. Una conexión por Workspace; jamás contr
 
 ### InboundMessage
 
-Gmail/RFC IDs, thread, Conversation, linked outbound, headers permitidos, From/To snapshots,
-subject, external/received dates, plain text, HTML sanitizado, authored text extraction,
-classification, human/auto/bounce flags, read and processing state/error. Gmail ID único por
-conexión; Message-ID único cuando existe. Persistencia precede a análisis.
+Gmail/RFC IDs, thread, Conversation, linked outbound nullable, Organization/Contact directos,
+headers permitidos, From/To snapshots, subject, external/received dates, plain text, HTML
+sanitizado, authored text extraction, classification, human/auto/bounce flags, read and processing
+state/error. `related_outbound=NULL` sólo representa un mail nuevo desde un remitente que coincide
+con un EmailAddress válido de un Contacto existente. Gmail ID único por conexión; Message-ID único
+cuando existe. Persistencia precede a análisis.
 
 ### EmailCandidate
 

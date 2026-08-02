@@ -93,6 +93,8 @@ def _original_outbound(inbound: InboundMessage) -> OutboundMessage:
     if inbound.contact_id is None or inbound.conversation_id is None:
         raise ValidationError("La respuesta todavía no está vinculada a un Contacto.")
     parent = inbound.related_outbound
+    if parent is None:
+        raise ValidationError("La respuesta no conserva un mensaje enviado de origen.")
     if parent.state != OutboundMessage.State.SENT:
         raise ValidationError(
             "No se pudo verificar el mensaje enviado al que responde este correo."
@@ -127,7 +129,33 @@ def _mandatory_blocks(inbound: InboundMessage) -> list[ReplyContextBlock]:
         )
     ]
     parent = inbound.related_outbound
-    original = _original_outbound(inbound)
+    if parent is not None:
+        original = _original_outbound(inbound)
+    else:
+        contact = inbound.contact
+        if contact is None:
+            return blocks
+        profile_parts = []
+        if contact.name:
+            profile_parts.append(f"Nombre del contacto: {contact.name}")
+        if contact.organization.name:
+            profile_parts.append(f"Empresa: {contact.organization.name}")
+        if contact.preferred_email is not None:
+            profile_parts.append(f"Email preferido: {contact.preferred_email.normalized_email}")
+        profile_parts.append(
+            "Origen: mensaje entrante directo de un contacto existente, sin correo previo "
+            "enviado por la app."
+        )
+        blocks.append(
+            _message_block(
+                source_id=contact.pk,
+                role="CONTACT_PROFILE",
+                provenance="CONTACT_RECORD",
+                text="\n".join(profile_parts),
+                mandatory=True,
+            )
+        )
+        return blocks
     if original.pk == parent.pk:
         blocks.append(
             _message_block(

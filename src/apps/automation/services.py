@@ -707,7 +707,8 @@ def process_inbound_decision(
         contact_organization_id=contact.organization_id,
         resolver=resolver or DNSMXResolver(),
     )
-    campaign = inbound.related_outbound.campaign
+    root = inbound.related_outbound
+    campaign = root.campaign if root is not None else None
     owner_id: int | None
     if campaign is not None:
         provider_name = campaign.llm_provider

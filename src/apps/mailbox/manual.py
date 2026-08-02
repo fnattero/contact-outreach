@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parseaddr
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -17,7 +18,7 @@ from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
 from apps.configuration.integrations import redact_provider_error
-from apps.contacts.models import CommunicationRestriction, EmailAddress
+from apps.contacts.models import CommunicationRestriction, Contact, EmailAddress, Organization
 from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
@@ -55,9 +56,14 @@ class ManualReplyEffect:
     idempotency_key: str
 
 
-def _reply_references(inbound: InboundMessage, root: OutboundMessage) -> tuple[str, ...]:
-    values = tuple(str(value) for value in inbound.references)
-    return normalize_references((root.message_id, *values, inbound.message_id))
+def _reply_references(
+    inbound: InboundMessage,
+    root: OutboundMessage | None,
+) -> tuple[str, ...]:
+    values = [*(str(value) for value in inbound.references), inbound.message_id]
+    if root is not None and root.message_id:
+        values.insert(0, root.message_id)
+    return normalize_references(tuple(values))
 
 
 def _contact_email(message: OutboundMessage) -> EmailAddress | None:
@@ -68,19 +74,19 @@ def _contact_email(message: OutboundMessage) -> EmailAddress | None:
 
 
 def _active_contact_restriction(
-    message: OutboundMessage,
     *,
     workspace_id: uuid.UUID | str,
     contact_id: object | None,
     email_address: EmailAddress | None,
+    organization_id: object | None,
 ) -> bool:
     targets = Q()
     if email_address is not None:
         targets |= Q(email_address_id=email_address.pk)
     if contact_id is not None:
         targets |= Q(contact_id=contact_id)
-    if message.organization_id is not None:
-        targets |= Q(contact__organization_id=message.organization_id)
+    if organization_id is not None:
+        targets |= Q(contact__organization_id=organization_id)
     if not targets:
         return False
     return (
@@ -135,10 +141,10 @@ def _channel_eligibility_error(
         return "La conversación no tiene un email validado para responder."
 
     if _active_contact_restriction(
-        message,
         workspace_id=workspace_id,
         contact_id=contact_id,
         email_address=email_address,
+        organization_id=message.organization_id,
     ):
         return "Este contacto o email tiene una restricción activa."
     if SuppressionEntry.objects.filter(normalized_email=normalized).exists():
@@ -146,13 +152,35 @@ def _channel_eligibility_error(
     return ""
 
 
+def _sender_email(sender: str) -> str:
+    _, parsed = parseaddr(sender)
+    return parsed.strip() if parsed else sender.strip()
+
+
+def _direct_contact_email(inbound: InboundMessage) -> EmailAddress | None:
+    try:
+        normalized = normalize_email(_sender_email(inbound.sender))
+    except ValidationError:
+        return None
+    return (
+        EmailAddress.objects.select_related("organization", "organization__contact")
+        .filter(
+            workspace_id=inbound.connection.workspace_id,
+            normalized_email=normalized,
+            validity=EmailAddress.Validity.VALID,
+            invalid_reason="",
+            organization__contact__isnull=False,
+        )
+        .first()
+    )
+
+
 def _validate_authorization(
     *,
     inbound: InboundMessage,
     body_text: str,
-) -> tuple[OutboundMessage, str, str]:
+) -> tuple[OutboundMessage | None, EmailAddress | None, str, str]:
     root = inbound.related_outbound
-    campaign = root.campaign
     connection = inbound.connection
     cleaned_body = body_text.strip()
     if not cleaned_body:
@@ -163,29 +191,52 @@ def _validate_authorization(
         raise ValidationError(
             "No se puede responder manualmente a un rebote o respuesta automática."
         )
-    if root.delivery_mode != Campaign.DeliveryMode.LIVE or (
-        campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE
-    ):
-        raise ValidationError("Las respuestas manuales requieren una campaña con envío en vivo.")
     if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
         raise ValidationError(
             "La configuración global de envío o el bloqueo general impiden la respuesta manual."
         )
     if not connection.is_ready or set(connection.scopes) != set(GMAIL_SCOPES):
         raise ValidationError("Gmail debe estar conectado y probado.")
-    normalized = normalize_email(root.recipient)
-    if channel_error := _channel_eligibility_error(
-        root,
-        workspace_id=connection.workspace_id,
-        contact_id=inbound.contact_id or root.contact_id,
-    ):
-        raise ValidationError(channel_error)
     if not inbound.gmail_thread_id or not normalize_message_id(inbound.message_id):
         raise ValidationError(
             "La conversación no tiene los identificadores de Gmail y del correo necesarios "
             "para responder."
         )
-    return root, cleaned_body, normalized
+    if root is not None:
+        campaign = root.campaign
+        if root.delivery_mode != Campaign.DeliveryMode.LIVE or (
+            campaign is not None and campaign.delivery_mode != Campaign.DeliveryMode.LIVE
+        ):
+            raise ValidationError("Las respuestas manuales requieren un origen con envío en vivo.")
+        normalized = normalize_email(root.recipient)
+        if channel_error := _channel_eligibility_error(
+            root,
+            workspace_id=connection.workspace_id,
+            contact_id=inbound.contact_id or root.contact_id,
+        ):
+            raise ValidationError(channel_error)
+        return root, _contact_email(root), cleaned_body, normalized
+
+    email = _direct_contact_email(inbound)
+    if email is None:
+        raise ValidationError(
+            "Solo se puede responder un mail directo si el remitente coincide con un "
+            "email válido de un contacto existente."
+        )
+    contact = email.organization.contact
+    if inbound.contact_id is not None and inbound.contact_id != contact.pk:
+        raise ValidationError("El remitente ya no coincide con el contacto de esta conversación.")
+    normalized = email.normalized_email
+    if _active_contact_restriction(
+        workspace_id=connection.workspace_id,
+        contact_id=contact.pk,
+        email_address=email,
+        organization_id=email.organization_id,
+    ):
+        raise ValidationError("Este contacto o email tiene una restricción activa.")
+    if SuppressionEntry.objects.filter(normalized_email=normalized).exists():
+        raise ValidationError("El destinatario está suprimido.")
+    return None, email, cleaned_body, normalized
 
 
 def _automatic_reply_conflict(inbound: InboundMessage) -> bool:
@@ -233,10 +284,16 @@ def authorize_manual_reply(
 ) -> tuple[OutboundMessage, bool]:
     membership = require_user_capability(actor, Capability.SEND_REPLIES)
     key = f"manual-reply:{inbound_id}:{request_key}"
-    existing = OutboundMessage.objects.filter(
-        idempotency_key=key,
-        campaign__workspace=membership.workspace,
-    ).first()
+    existing = (
+        OutboundMessage.objects.filter(
+            idempotency_key=key,
+        )
+        .filter(
+            Q(campaign__workspace=membership.workspace)
+            | Q(parent_inbound__connection__workspace=membership.workspace)
+        )
+        .first()
+    )
     if existing is not None:
         return existing, False
     inbound = (
@@ -252,6 +309,7 @@ def authorize_manual_reply(
             "related_outbound__campaign_enrollment__selected_email",
             "related_outbound__contact",
             "related_outbound__conversation",
+            "organization",
             "contact",
             "conversation",
         )
@@ -268,36 +326,66 @@ def authorize_manual_reply(
             "Esta respuesta ya tiene una contestación automática autorizada o enviada. "
             "Revisá el historial antes de continuar."
         )
-    root, cleaned_body, normalized = _validate_authorization(
+    root, email_address, cleaned_body, normalized = _validate_authorization(
         inbound=inbound,
         body_text=body_text,
     )
     now = timezone.now()
     references = _reply_references(inbound, root)
-    email_address = _contact_email(root)
+    organization: Organization | None
+    fallback_contact: Contact | None
+    delivery_mode: str
+    if root is None:
+        assert email_address is not None
+        organization = email_address.organization
+        fallback_contact = email_address.organization.contact
+        recipient = email_address.original_email
+        subject = inbound.subject
+        campaign = None
+        campaign_enrollment = None
+        conversation = inbound.conversation
+        prospect = None
+        prospect_email = None
+        catalog = None
+        catalog_version = None
+        delivery_mode = Campaign.DeliveryMode.LIVE
+    else:
+        organization = root.organization
+        fallback_contact = root.contact
+        recipient = root.recipient
+        subject = root.subject
+        campaign = root.campaign
+        campaign_enrollment = root.campaign_enrollment
+        conversation = inbound.conversation or root.conversation
+        prospect = root.prospect
+        prospect_email = root.prospect_email
+        catalog = root.catalog
+        catalog_version = root.catalog_version
+        delivery_mode = root.delivery_mode
+    contact = inbound.contact or fallback_contact
     try:
         with transaction.atomic():
             message = OutboundMessage.objects.create(
                 kind=OutboundMessage.Kind.MANUAL_REPLY,
-                campaign=root.campaign,
-                organization=root.organization,
-                campaign_enrollment=root.campaign_enrollment,
-                contact=inbound.contact or root.contact,
-                conversation=inbound.conversation or root.conversation,
-                prospect=root.prospect,
-                prospect_email=root.prospect_email,
+                campaign=campaign,
+                organization=organization,
+                campaign_enrollment=campaign_enrollment,
+                contact=contact,
+                conversation=conversation,
+                prospect=prospect,
+                prospect_email=prospect_email,
                 email_address=email_address,
                 analysis=None,
                 parent_inbound=inbound,
                 sent_by=actor,
-                recipient=root.recipient,
+                recipient=recipient,
                 recipient_normalized=normalized,
-                subject=root.subject,
+                subject=subject,
                 body_text=cleaned_body,
-                catalog=root.catalog,
-                catalog_version=root.catalog_version,
+                catalog=catalog,
+                catalog_version=catalog_version,
                 state=OutboundMessage.State.QUEUED,
-                delivery_mode=root.delivery_mode,
+                delivery_mode=delivery_mode,
                 idempotency_key=key,
                 message_id=deterministic_message_id(key),
                 in_reply_to=normalize_message_id(inbound.message_id),

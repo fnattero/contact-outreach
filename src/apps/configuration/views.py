@@ -48,9 +48,8 @@ from apps.configuration.services import (
 )
 from apps.overture.services import get_active_snapshot, get_latest_snapshot
 
-CONFIG_MODELS: dict[str, type[SearchCategory] | type[SearchZone]] = {
+CONFIG_MODELS: dict[str, type[SearchCategory]] = {
     "searchcategory": SearchCategory,
-    "searchzone": SearchZone,
 }
 INTEGRATION_REAUTH_MAX_ATTEMPTS = 5
 INTEGRATION_REAUTH_WINDOW_SECONDS = 300
@@ -416,17 +415,6 @@ def categories(request: HttpRequest) -> HttpResponse:
 
 
 @require_capability(Capability.MANAGE_CONFIGURATION)
-def zones(request: HttpRequest) -> HttpResponse:
-    return _config_list(
-        request,
-        model=SearchZone,
-        form_class=SearchZoneForm,
-        title="Zonas personalizadas",
-        route_name="zones",
-    )
-
-
-@require_capability(Capability.MANAGE_CONFIGURATION)
 @require_POST
 def toggle_item(request: HttpRequest, kind: str, item_id: str) -> HttpResponse:
     try:
@@ -436,7 +424,7 @@ def toggle_item(request: HttpRequest, kind: str, item_id: str) -> HttpResponse:
     owner = request.user
     assert isinstance(owner, User)
     toggle_config_item(model=model, item_id=item_id, actor=owner)
-    return redirect("categories" if model is SearchCategory else "zones")
+    return redirect("categories")
 
 
 @require_capability(Capability.MANAGE_CONFIGURATION)
@@ -455,4 +443,4 @@ def delete_item(request: HttpRequest, kind: str, item_id: str) -> HttpResponse:
         if result == "archived"
         else "La configuración fue eliminada.",
     )
-    return redirect("categories" if model is SearchCategory else "zones")
+    return redirect("categories")

@@ -263,6 +263,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             else (),
             "recent_activity": AuditEvent.objects.select_related("actor")[:6] if is_admin else (),
             "recent_responses": InboundMessage.objects.select_related(
+                "organization",
                 "contact__organization",
                 "related_outbound__campaign",
                 "related_outbound__organization",

@@ -15,6 +15,7 @@ from apps.audit.services import record_event
 from apps.campaigns.models import OutboundMessage
 from apps.compliance.services import normalize_email
 from apps.configuration.integrations import redact_provider_error
+from apps.contacts.models import EmailAddress
 from apps.contacts.services import apply_inbound_contact_effect
 from apps.integrations.contracts import (
     AuthenticationError,
@@ -98,6 +99,30 @@ def _related_outbound(
     )
 
 
+def _direct_contact_sender(
+    connection: GmailConnection,
+    sender: str,
+) -> EmailAddress | None:
+    literal = _sender_email(sender)
+    if not literal:
+        return None
+    try:
+        normalized = normalize_email(literal)
+    except ValidationError:
+        return None
+    return (
+        EmailAddress.objects.select_related("organization", "organization__contact")
+        .filter(
+            workspace=connection.workspace,
+            normalized_email=normalized,
+            validity=EmailAddress.Validity.VALID,
+            invalid_reason="",
+            organization__contact__isnull=False,
+        )
+        .first()
+    )
+
+
 def _enqueue_inbound_processing(message_id: uuid.UUID) -> None:
     from apps.mailbox.tasks import process_inbound_reply_task
 
@@ -121,7 +146,8 @@ def _persist_candidate(
         except ValidationError:
             pass
     related = _related_outbound(connection, candidate)
-    if related is None:
+    direct_sender = None if related is not None else _direct_contact_sender(connection, sender)
+    if related is None and direct_sender is None:
         return None
     body_text, body_html = sanitize_email_bodies(
         body_text=candidate.body_text,
@@ -137,6 +163,16 @@ def _persist_candidate(
             message = InboundMessage.objects.create(
                 connection=connection,
                 related_outbound=related,
+                organization=(
+                    direct_sender.organization
+                    if direct_sender is not None and related is None
+                    else None
+                ),
+                contact=(
+                    direct_sender.organization.contact
+                    if direct_sender is not None and related is None
+                    else None
+                ),
                 gmail_message_id=candidate.message_id[:255],
                 gmail_thread_id=candidate.thread_id[:255],
                 message_id=message_id,
@@ -193,9 +229,13 @@ def _persist_candidate(
         actor=None,
         after={
             "classification": message.classification,
-            "campaign_id": str(related.campaign_id),
-            "prospect_id": str(related.prospect_id),
-            "organization_id": str(related.organization_id or ""),
+            "campaign_id": str(related.campaign_id) if related is not None else "",
+            "prospect_id": str(related.prospect_id) if related is not None else "",
+            "organization_id": str(effect.contact.organization_id)
+            if effect.contact is not None
+            else str(related.organization_id or "")
+            if related is not None
+            else "",
             "contact_id": str(effect.contact.pk) if effect.contact is not None else "",
         },
     )

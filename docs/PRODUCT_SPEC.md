@@ -88,8 +88,9 @@ direcciones; una propuesta redirigida abre un hilo nuevo y ambos aparecen en una
 `SearchZone` forma una jerarquía con código oficial, nivel, padre, provincia, fuente, atribución y
 flag seleccionable. Los nombres sólo son únicos bajo el mismo padre/código, porque pueden repetirse
 entre provincias. Se cargan geometrías oficiales versionadas para todas las provincias y sus
-partidos, departamentos o comunas. En CABA el nivel elegible sigue siendo Barrio. Las zonas custom
-se conservan.
+partidos, departamentos o comunas. En CABA el nivel elegible sigue siendo Barrio. La UI de campañas
+usa sólo zonas oficiales; las zonas custom quedan como datos legacy no seleccionables para nuevas
+campañas.
 
 Al crear campaña el admin puede elegir una o más provincias y seleccionar distritos desde un mapa
 clickeable con respaldo de búsqueda/lista, selección total o limpieza por provincia. La UI usa las
@@ -222,6 +223,12 @@ baja humana crea el Contacto con estado “Baja solicitada”. Bounce y auto-rep
 eventos pero no crean Contacto por sí solos. El hilo conserva mensaje original, padres, Gmail/RFC
 IDs y relación con campaña sin modificar historia.
 
+Gmail también importa mensajes nuevos que no responden a un envío de la app cuando el remitente
+coincide exactamente con un `EmailAddress` válido de un Contacto existente en el Workspace. En ese
+caso el inbound queda ligado a ese Contacto/Organization y a una Conversation nueva o existente,
+pero sin campaña ni outbound padre. Remitentes desconocidos o emails inválidos se descartan y no
+crean Contactos automáticamente.
+
 ### FR-11 Conocimiento, candidatos y contexto acotado
 
 El admin gestiona dos tipos de información desde “Información para responder consultas”:
@@ -239,14 +246,17 @@ normalizan/validan y marcan `NEW_CONTENT`, `SIGNATURE` o `QUOTED`; no se reconst
 ofuscadas. El modelo sólo puede seleccionar IDs entregados en esa solicitud.
 
 Cada solicitud tiene máximo 24.000 caracteres de entrada. Siempre incluye completo: nuevo texto
-escrito por el remitente, mensaje inicial/referido original, padre directo y contexto general
-aprobado vigente. Después agrega hasta seis mensajes recientes relevantes del Contacto entre hilos,
-memoria estructurada con fuentes para historia antigua y hasta tres revisiones aprobadas elegidas
-por búsqueda semántica con embeddings. Si la similitud es baja o varias tarjetas compiten de forma
-ambigua, no se agregan datos puntuales y la decisión debe escalar a humano cuando necesita esos
-datos para responder. Nunca incluye PDFs completos, HTML crudo ni un historial ilimitado. Si lo
-obligatorio no entra, se crea tarea humana. Sólo se persiste el manifiesto con IDs/versiones/hash,
-estado de recuperación y hashes de consulta, no una copia gigante del prompt.
+escrito por el remitente y contexto general aprobado vigente. Si el mail responde a un envío de la
+app, también incluye mensaje inicial/referido original y padre directo. Si es un mail directo de un
+Contacto preexistente, incluye en su lugar un bloque obligatorio de perfil del Contacto y marca que
+no hubo correo previo enviado por la app. Después agrega hasta seis mensajes recientes relevantes
+del Contacto entre hilos, memoria estructurada con fuentes para historia antigua y hasta tres
+revisiones aprobadas elegidas por búsqueda semántica con embeddings. Si la similitud es baja o
+varias tarjetas compiten de forma ambigua, no se agregan datos puntuales y la decisión debe escalar
+a humano cuando necesita esos datos para responder. Nunca incluye PDFs completos, HTML crudo ni un
+historial ilimitado. Si lo obligatorio no entra, se crea tarea humana. Sólo se persiste el
+manifiesto con IDs/versiones/hash, estado de recuperación y hashes de consulta, no una copia gigante
+del prompt.
 
 ### FR-12 Decisiones IA, SHADOW y habilitación live
 
@@ -281,8 +291,10 @@ conflicto de organización, contexto insuficiente o fallo de proveedor/schema. U
 suspende automatización de la Conversation hasta que un admin resuelva o descarte; vendedores sólo
 leen.
 
-Una respuesta segura usa el hilo original y recibe siempre inbound actual, original y padre
-directo. Para redirección:
+Una respuesta segura usa el hilo original y recibe inbound actual más contexto obligatorio. En
+mails directos de Contactos preexistentes puede autorizar una respuesta normal si supera policy,
+kill switches y límites. La redirección de propuesta exige campaña/outbound padre porque reutiliza
+el contenido y PDFs aprobados de esa campaña. Para redirección:
 
 1. El LLM elige un único candidate ID `NEW_CONTENT` de un pedido explícito.
 2. El dominio valida sintaxis, MX y restricciones y bloquea Contacto/candidato.

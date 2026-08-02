@@ -102,6 +102,37 @@ def campaign_values(catalog: Catalog, **overrides: object) -> dict[str, object]:
     return values
 
 
+@pytest.mark.django_db
+def test_campaign_form_excludes_legacy_custom_zones(owner: User) -> None:
+    custom_zone = SearchZone.objects.create(
+        workspace=owner.membership.workspace,
+        name="Corredor custom",
+        normalized_name="corredor custom",
+        kind=SearchZone.Kind.CUSTOM,
+        level=SearchZone.Level.CUSTOM,
+        source=SearchZone.Source.CUSTOM,
+        selectable=True,
+        active=True,
+        boundary_geojson={
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [-58.6, -34.7],
+                    [-58.5, -34.7],
+                    [-58.5, -34.6],
+                    [-58.6, -34.6],
+                    [-58.6, -34.7],
+                ]
+            ],
+        },
+        boundary_hash="custom-hash",
+    )
+    form = CampaignForm(workspace=owner.membership.workspace)
+
+    assert custom_zone not in form.fields["zones"].queryset
+    assert not form.fields["zones"].queryset.filter(level=SearchZone.Level.CUSTOM).exists()
+
+
 def make_campaign(owner: User, catalog: Catalog, **overrides: object) -> Campaign:
     category = SearchCategory.objects.get(name="Bobinados de motores")
     zone = SearchZone.objects.get(name="Palermo")

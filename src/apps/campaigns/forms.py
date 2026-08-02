@@ -221,6 +221,7 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
                 workspace=workspace,
                 active=True,
                 selectable=True,
+                level__in=(SearchZone.Level.DISTRICT, SearchZone.Level.NEIGHBORHOOD),
                 archived_at__isnull=True,
             )
             .select_related("parent")

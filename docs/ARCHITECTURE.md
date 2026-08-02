@@ -127,10 +127,12 @@ marca `VALID`, `INVALID` o `TRANSIENT`; ninguna vista espera DNS.
 
 ### 4.4 Sincronización y promoción de Contacto
 
-Un lock por conexión serializa sync. La transacción importa únicamente threads/cabeceras propias,
+Un lock por conexión serializa sync. La transacción importa únicamente threads/cabeceras propias o
+mails directos cuyo remitente coincide con un EmailAddress válido de un Contacto existente,
 actualiza cursor y ejecuta primero baja, bounce y auto-reply determinísticos. Una respuesta humana
-promueve Organization a Contact, crea/vincula Conversation y cancela recordatorios. Al commit se
-publica una task de decisión. El lock ya está liberado antes de LLM.
+de campaña promueve Organization a Contact, crea/vincula Conversation y cancela recordatorios. Un
+mail directo vincula el Contacto existente y queda sin campaña/outbound padre. Al commit se publica
+una task de decisión. El lock ya está liberado antes de LLM.
 
 El análisis trabaja sobre un snapshot de contexto acotado. Extrae emails literales antes del LLM,
 inyecta el contexto general aprobado, usa `EmbeddingProvider` para elegir hasta tres facts

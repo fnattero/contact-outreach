@@ -241,6 +241,72 @@ def test_reply_context_keeps_mandatory_messages_and_bounds_optional_history(owne
 
 
 @pytest.mark.django_db
+def test_reply_context_for_direct_inbound_uses_contact_profile(owner: User) -> None:
+    workspace = owner.membership.workspace
+    organization = Organization.objects.create(workspace=workspace, name="Cliente Directo")
+    email = EmailAddress.objects.create(
+        workspace=workspace,
+        organization=organization,
+        original_email="directo@example.com",
+        normalized_email="directo@example.com",
+        domain="example.com",
+        validity=EmailAddress.Validity.VALID,
+        is_preferred=True,
+    )
+    contact = Contact.objects.create(
+        workspace=workspace,
+        organization=organization,
+        preferred_email=email,
+        name="Contacto Directo",
+        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
+    )
+    connection = GmailConnection.objects.create(
+        workspace=workspace,
+        owner=owner,
+        email="equipo@example.com",
+        status=GmailConnection.Status.CONNECTED,
+    )
+    conversation = Conversation.objects.create(
+        workspace=workspace,
+        contact=contact,
+        connection=connection,
+        gmail_thread_id="direct-context-thread",
+        subject="Consulta directa",
+    )
+    inbound = InboundMessage.objects.create(
+        connection=connection,
+        organization=organization,
+        contact=contact,
+        conversation=conversation,
+        related_outbound=None,
+        gmail_message_id="gmail-direct-context",
+        gmail_thread_id=conversation.gmail_thread_id,
+        message_id="<direct-context@example.invalid>",
+        sender=email.original_email,
+        recipients=[connection.email],
+        subject="Consulta directa",
+        external_at=timezone.now(),
+        received_at=timezone.now(),
+        body_text="TEXTO NUEVO DIRECTO sobre precios.",
+        is_human=True,
+    )
+
+    context = build_bounded_reply_context(
+        inbound,
+        embedding_provider=LowSimilarityEmbeddingProvider(),
+    )
+
+    mandatory = [block for block in context.blocks if block.mandatory]
+    assert [(block.provenance, block.role) for block in mandatory] == [
+        ("NEW_INBOUND", "CLIENT"),
+        ("CONTACT_RECORD", "CONTACT_PROFILE"),
+    ]
+    assert "TEXTO NUEVO DIRECTO" in mandatory[0].text
+    assert "mensaje entrante directo" in mandatory[1].text
+    assert "Cliente Directo" in mandatory[1].text
+
+
+@pytest.mark.django_db
 def test_reply_context_includes_approved_global_context(owner: User) -> None:
     inbound, _, _ = _reply_context_fixture(owner)
     assert inbound.contact is not None

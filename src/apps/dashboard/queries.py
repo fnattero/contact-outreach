@@ -133,6 +133,8 @@ def response_queryset(
         "related_outbound__prospect",
         "related_outbound__organization",
         "related_outbound__contact",
+        "organization",
+        "contact",
     )
     query = params.get("q", "").strip()
     if query:

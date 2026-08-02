@@ -3,9 +3,8 @@ from __future__ import annotations
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 
 from apps.audit.models import AuditEvent
 from apps.configuration.forms import SearchCategoryForm
@@ -270,64 +269,21 @@ def test_category_crud_views_create_toggle_and_delete(client: Client, owner: Use
 
 
 @pytest.mark.django_db
-def test_zone_crud_manages_custom_zones_without_exposing_official_boundaries(
+def test_custom_zones_section_is_not_routable_or_in_navigation(
     client: Client,
     owner: User,
 ) -> None:
     client.force_login(owner)
-    palermo = SearchZone.objects.get(name="Palermo")
-    page = client.get(reverse("zones"))
-    assert page.status_code == 200
-    assert "Zonas personalizadas" in page.content.decode()
-    assert "Palermo" not in page.content.decode()
-    assert client.get(f"{reverse('zones')}?edit={palermo.pk}").status_code == 404
-    assert client.post(reverse("config-toggle", args=("searchzone", palermo.pk))).status_code == 403
-
-    created = client.post(
-        reverse("zones"),
-        {
-            "name": "Corredor norte",
-            "kind": SearchZone.Kind.CUSTOM,
-            "parent": palermo.parent_id,
-            "location_text": "Buenos Aires, Argentina",
-            "active": "on",
-            "sort_order": 2,
-            "boundary_upload": SimpleUploadedFile(
-                "corredor.geojson",
-                (
-                    b'{"type":"Polygon","coordinates":[[['
-                    b"-58.6,-34.7],[-58.5,-34.7],[-58.5,-34.6],"
-                    b"[-58.6,-34.6],[-58.6,-34.7]]]}"
-                ),
-                content_type="application/geo+json",
-            ),
-        },
-    )
-    assert created.status_code == 302
-    zone = SearchZone.objects.get(name="Corredor norte")
-    response = client.post(
-        reverse("zones"),
-        {
-            "item_id": zone.pk,
-            "name": "Corredor norte actualizado",
-            "kind": SearchZone.Kind.CUSTOM,
-            "parent": palermo.parent_id,
-            "location_text": "Buenos Aires, Argentina",
-            "active": "on",
-            "sort_order": 2,
-        },
-    )
-    assert response.status_code == 302
-    zone.refresh_from_db()
-    assert zone.name == "Corredor norte actualizado"
-    assert zone.kind == SearchZone.Kind.CUSTOM
-    assert zone.parent_id == palermo.parent_id
-    assert zone.province_code == "02"
+    with pytest.raises(NoReverseMatch):
+        reverse("zones")
+    assert client.get("/zonas/").status_code == 404
+    page = client.get(reverse("dashboard"))
+    assert "Zonas personalizadas" not in page.content.decode()
 
 
 @pytest.mark.django_db
 def test_configuration_views_require_authentication(client: Client) -> None:
-    for route in ("business-profile", "prompts", "categories", "zones", "message-templates"):
+    for route in ("business-profile", "prompts", "categories", "message-templates"):
         assert client.get(reverse(route)).status_code == 302
 
 

@@ -158,6 +158,36 @@ def _connection(owner: User, *, history_id: str = "0") -> GmailConnection:
     )
 
 
+def _direct_contact_fixture(
+    owner: User,
+) -> tuple[GmailConnection, Organization, EmailAddress, Contact]:
+    workspace = owner.membership.workspace
+    connection = _connection(owner)
+    organization = Organization.objects.create(
+        workspace=workspace,
+        name="Cliente preexistente",
+        normalized_name="cliente preexistente",
+    )
+    email = EmailAddress.objects.create(
+        workspace=workspace,
+        organization=organization,
+        original_email="cliente-directo@example.com",
+        normalized_email="cliente-directo@example.com",
+        domain="example.com",
+        is_preferred=True,
+        validity=EmailAddress.Validity.VALID,
+    )
+    contact = Contact.objects.create(
+        workspace=workspace,
+        organization=organization,
+        preferred_email=email,
+        name="Cliente preexistente",
+        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
+        created_by=owner,
+    )
+    return connection, organization, email, contact
+
+
 @pytest.mark.django_db
 def test_incremental_sync_imports_only_campaign_threads_and_is_idempotent(
     client: Client,
@@ -226,6 +256,61 @@ def test_incremental_sync_imports_only_campaign_threads_and_is_idempotent(
     rfc_linked = InboundMessage.objects.get(gmail_thread_id="different-gmail-thread")
     rfc_thread = client.get(reverse("response-thread", args=(rfc_linked.pk,)))
     assert "Mensaje inicial con catálogo" in rfc_thread.content.decode()
+
+
+@pytest.mark.django_db
+def test_incremental_sync_imports_direct_email_from_existing_contact(
+    client: Client,
+    owner: User,
+) -> None:
+    connection, organization, email, contact = _direct_contact_fixture(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id="direct-contact-thread",
+        sender=f"Cliente <{email.original_email}>",
+        recipient=connection.email,
+        subject="Consulta directa",
+        body_text="Hola, queria consultar por stock.",
+        rfc_message_id="<direct-contact@example.com>",
+    )
+    fake.inject_inbound(
+        thread_id="unknown-direct-thread",
+        sender="desconocido@example.net",
+        recipient=connection.email,
+        subject="Mensaje externo",
+        body_text="No soy un contacto cargado.",
+        rfc_message_id="<unknown-direct@example.net>",
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+    assert sync_gmail_connection(connection.pk, provider=fake) == 0
+
+    inbound = InboundMessage.objects.get(gmail_thread_id="direct-contact-thread")
+    assert inbound.related_outbound is None
+    assert inbound.organization == organization
+    assert inbound.contact == contact
+    assert inbound.conversation is not None
+    assert inbound.conversation.contact == contact
+    assert inbound.classification == InboundMessage.Classification.OTHER
+    assert InboundMessage.objects.filter(subject="Mensaje externo").exists() is False
+
+    assert process_inbound_reply(inbound.pk, resolver=MockMXResolver()) == (
+        InboundMessage.Classification.OTHER
+    )
+    inbound.refresh_from_db()
+    assert inbound.reply_decision.state == ReplyDecision.State.SHADOW_RECORDED
+
+    client.force_login(owner)
+    responses = client.get(reverse("responses"))
+    thread = client.get(reverse("response-thread", args=(inbound.pk,)))
+    export = client.get(reverse("responses-export"))
+    assert responses.status_code == thread.status_code == export.status_code == 200
+    assert "Cliente preexistente" in responses.content.decode()
+    assert "Sin campaña" in responses.content.decode()
+    assert "Contacto directo" not in responses.content.decode()
+    assert "Consulta directa" in thread.content.decode()
+    assert "Sin campaña" in thread.content.decode()
+    assert "Sin campaña" in export.content.decode()
 
 
 @pytest.mark.django_db
@@ -788,6 +873,48 @@ def test_contact_only_thread_can_authorize_and_deliver_a_manual_reply(
     assert manual.pk in pending_manual_reply_ids()
     fake = FakeGmailProvider(account_email=connection.email, persist=True)
     assert deliver_manual_reply(manual.pk, provider=fake) == OutboundMessage.State.SENT
+
+
+@pytest.mark.django_db
+@override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
+def test_direct_contact_thread_can_authorize_and_deliver_manual_reply(
+    owner: User,
+) -> None:
+    connection, organization, email, contact = _direct_contact_fixture(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id="direct-manual-thread",
+        sender=email.original_email,
+        recipient=connection.email,
+        subject="Pedido directo",
+        body_text="Me pasas precio actualizado?",
+        rfc_message_id="<direct-manual@example.com>",
+    )
+    sync_gmail_connection(connection.pk, provider=fake)
+    inbound = InboundMessage.objects.get(gmail_thread_id="direct-manual-thread")
+
+    manual, created = authorize_manual_reply(
+        actor=owner,
+        inbound_id=inbound.pk,
+        body_text="Si, te paso la lista actualizada.",
+        request_key=uuid.uuid4(),
+    )
+
+    assert created
+    assert manual.campaign is None
+    assert manual.organization == organization
+    assert manual.contact == contact
+    assert manual.conversation == inbound.conversation
+    assert manual.prospect is None
+    assert manual.email_address == email
+    assert manual.recipient_normalized == email.normalized_email
+    assert manual.subject == inbound.subject
+    assert manual.in_reply_to == inbound.message_id
+    assert inbound.message_id in manual.references
+    assert manual.pk in pending_manual_reply_ids()
+    assert deliver_manual_reply(manual.pk, provider=fake) == OutboundMessage.State.SENT
+    manual.refresh_from_db()
+    assert manual.gmail_thread_id == inbound.gmail_thread_id
 
 
 @pytest.mark.django_db

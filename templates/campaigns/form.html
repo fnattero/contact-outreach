@@ -87,14 +87,6 @@
                             </div>
                         </fieldset>
                         {% endfor %}
-                        {% if custom_zones %}
-                        <fieldset class="province-group">
-                            <legend>Zonas personalizadas</legend>
-                            <div class="choice-grid">
-                            {% for item in custom_zones %}<div class="choice-item" data-choice-item><label for="zone-{{ item.zone.pk }}"><input id="zone-{{ item.zone.pk }}" type="checkbox" name="zones" value="{{ item.zone.pk }}"{% if item.selected %} checked{% endif %}><span>{{ item.zone.name }}</span></label></div>{% endfor %}
-                            </div>
-                        </fieldset>
-                        {% endif %}
                     </div>
                     {% if form.provinces.errors %}<div class="field__error" role="alert">{{ form.provinces.errors }}</div>{% endif %}
                     {% if form.zones.errors %}<div class="field__error" role="alert">{{ form.zones.errors }}</div>{% endif %}

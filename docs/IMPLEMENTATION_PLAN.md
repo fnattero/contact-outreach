@@ -86,8 +86,8 @@ legacy sigue legible.
 
 - Extender SearchZone con código/nivel/padre/provincia/selectable/source/attribution y uniqueness
   jerárquica.
-- Agregar seed oficial versionado para todas las provincias y divisiones; CABA barrios y custom
-  zones se conservan.
+- Agregar seed oficial versionado para todas las provincias y divisiones; CABA barrios se conservan
+  y las custom zones quedan sólo como compatibilidad legacy no visible.
 - Implementar selector expandible/buscable por provincia con select all/clear y etiquetas locales.
 - Separar `OvertureRelease` y `OvertureCoveragePartition` READY provincial; agregar ordered
   CampaignCoverageSelection con same-release constraint.

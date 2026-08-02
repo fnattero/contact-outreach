@@ -220,11 +220,14 @@ auth, timeout antes/después de aceptación y reconciliation sin sockets.
 
 Beat encola cada minuto por default. Un lock por GmailConnection rodea history pagination,
 persistencia y cursor, no clasificación/LLM. History 404 captura baseline y aplica fallback
-`newer_than:30d`/1000 candidatos, filtrando por thread IDs o headers propios. Cursor legacy vacío
-inicializa baseline sin importar histórico indiscriminado.
+`newer_than:30d`/1000 candidatos, filtrando por thread IDs o headers propios, o por remitentes que
+coincidan con un `EmailAddress` válido de un Contacto existente. Cursor legacy vacío inicializa
+baseline sin importar histórico indiscriminado.
 
-Se persisten sólo metadata/parts necesarios de hilos asociados. Texto detached se recupera; no se
-importan adjuntos no textuales. Gmail/Message IDs hacen sync repetible. En la transacción:
+Se persisten sólo metadata/parts necesarios de hilos asociados o mails directos de Contactos
+preexistentes. Un mail directo queda sin `related_outbound`, pero se liga al Contacto/Organization
+y a una Conversation; remitentes desconocidos no crean Contactos. Texto detached se recupera; no
+se importan adjuntos no textuales. Gmail/Message IDs hacen sync repetible. En la transacción:
 
 1. upsert inbound y asociación;
 2. sanitizar/separar texto authored;

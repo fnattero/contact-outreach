@@ -18,7 +18,7 @@ seguridad no se relajan desde el dashboard.
 | A-011 | Manual Contact exige email; empresa/nombre son opcionales. Un Contact puede tener varios emails y Conversations. | UX |
 | A-012 | UNSUBSCRIBE es irreversible. Bounce invalida sólo el email. Restricción manual requiere motivo y sólo admin puede revertirla. | Legal / integridad |
 | A-013 | No existe override para contactar una Organization que ya es Contact ni una dirección dada de baja. | Seguridad |
-| A-014 | SearchZone usa jerarquía provincia/distrito; CABA conserva barrios seleccionables y custom zones siguen soportadas. | Geografía |
+| A-014 | SearchZone usa jerarquía provincia/distrito; CABA conserva barrios seleccionables y custom zones quedan sólo como compatibilidad legacy no visible. | Geografía |
 | A-015 | Se seedéan límites oficiales versionados de todas las provincias y sus partidos/departamentos/comunas; fuente/atribución se persisten. | Legal / datos |
 | A-016 | Overture separa Release de particiones provinciales; una campaña usa sólo particiones READY del mismo release. | Integridad |
 | A-017 | El import hace una lectura bbox por provincia y filtro exacto de distritos. La campaña nunca usa un bbox combinado nacional. | Costo / operación |
@@ -35,6 +35,7 @@ seguridad no se relajan desde el dashboard.
 | A-028 | Cada campaña tiene cero o un reminder, default tres días calendario desde sent_at confirmado y siguiente ventana laboral. | Seguimiento |
 | A-029 | Respuesta humana, Contact manual, unsubscribe o bounce cancelan reminder; auto-reply no. | Estado |
 | A-030 | Gmail sync corre cada minuto por default y nunca sostiene su lock durante LLM; publica análisis con transaction.on_commit. | Operación |
+| A-056 | Gmail sync importa mails directos sólo si el remitente coincide con un EmailAddress válido de un Contacto existente; no crea contactos desde desconocidos. | Seguridad / producto |
 | A-031 | Se extraen máximo diez emails literales inbound de plain text/mailto, con NEW_CONTENT/SIGNATURE/QUOTED; no se reconstruyen ofuscados. | Seguridad |
 | A-032 | Contexto LLM máximo 24.000 caracteres; inbound authored, original, padre y contexto general aprobado son obligatorios; luego hasta seis recientes, memoria con fuentes y tres facts aprobados elegidos por embeddings. | Costo / seguridad |
 | A-033 | No entran PDFs ni raw HTML al LLM; sólo se persiste manifest de IDs/versiones/retrieval/hash, no prompts gigantes duplicados. | Privacidad |

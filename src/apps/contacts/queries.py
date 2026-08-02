@@ -212,6 +212,7 @@ def conversation_timelines(
         )
     for inbound in inbound_messages:
         group = group_for(inbound.conversation_id, inbound.gmail_thread_id, inbound.subject)
+        root = inbound.related_outbound
         group["items"].append(
             TimelineItem(
                 direction="inbound",
@@ -226,9 +227,7 @@ def conversation_timelines(
                     else inbound.get_classification_display()
                 ),
                 campaign_name=(
-                    inbound.related_outbound.campaign.name
-                    if inbound.related_outbound.campaign is not None
-                    else ""
+                    root.campaign.name if root is not None and root.campaign is not None else ""
                 ),
                 needs_attention=inbound.pk in task_inbound_ids,
             )

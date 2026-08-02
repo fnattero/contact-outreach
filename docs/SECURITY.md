@@ -55,6 +55,9 @@ de sesión/CSRF `Secure`, `HttpOnly` cuando aplica y `SameSite=Lax`; SSL redirec
 awareness sólo para proxy confiable. HSTS se escala primero con duración corta y sin
 includeSubDomains/preload hasta verificar despliegue.
 
+Las sesiones de usuario duran una semana por defecto y no expiran al cerrar el navegador; cambios de
+rol, desactivación, resets sensibles y logout siguen invalidándolas inmediatamente.
+
 Headers: CSP restrictiva con scripts/styles propios static y nonce sólo si fuera imprescindible,
 `Referrer-Policy`, `X-Content-Type-Options`, frame-ancestors/DENY, permissions policy y no sniff.
 Inline scripts se retiran. Mensajes, contactos, auth, health detallado y configuraciones sensibles
@@ -126,8 +129,10 @@ No hay override de unsubscribe ni Contact exclusion.
 - Un destinatario por efecto; sin CC/BCC en campañas, tracking, HTML, account rotation o evasión.
 - INITIAL/REMINDER reservan email/fecha local para evitar dos campañas el mismo día.
 - Timeout ambiguo pasa a RECONCILING y busca Message-ID antes de retry.
-- Sync sólo persiste mensajes ligados a threads/headers propios. `gmail.readonly` conserva riesgo
-  potencial de acceso amplio y puede exigir verificación Google.
+- Sync sólo persiste mensajes ligados a threads/headers propios o a remitentes que coinciden con
+  EmailAddress válido de un Contacto existente. No importa desconocidos ni crea Contactos desde un
+  remitente nuevo. `gmail.readonly` conserva riesgo potencial de acceso amplio y puede exigir
+  verificación Google.
 - Un email de alerta humana usa asunto genérico y link seguro; nunca inbound body, subject, contact
   name o dirección. Dashboard task persiste aunque notification falle.
 - Unsubscribe se aplica antes de IA, es irreversible y bloquea todo efecto al scope aplicable.

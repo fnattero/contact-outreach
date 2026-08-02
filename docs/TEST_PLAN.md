@@ -77,7 +77,8 @@ nunca sustituye negativos.
 ## 5. Geografía y Overture
 
 - Jerarquía/códigos oficiales, parent required, duplicate district names bajo provincias distintas,
-  labels Partidos/Departamentos/Comunas/Barrios, CABA 48 barrios y custom zones.
+  labels Partidos/Departamentos/Comunas/Barrios, CABA 48 barrios y ausencia de sección visible para
+  zonas custom.
 - UI multiprovincia: mapa clickeable por provincia, expand/search/select all/clear por provincia,
   fieldsets/keyboard, snapshots no cambian si se edita seed.
 - Release/partition constraints: independent READY, mixed-release rejection, missing coverage copy
@@ -133,14 +134,16 @@ nunca sustituye negativos.
 ## 9. Sync, candidates y bounded context
 
 - Gmail baseline, paginated history, cursor after commit, duplicate events, 404 fallback bounded,
-  unrelated inbox ignored, auth degradation and per-connection lock.
+  unrelated inbox ignored, direct inbound from existing Contact imported, unknown sender ignored,
+  auth degradation and per-connection lock.
 - Prove decide_reply starts after commit/lock release; LLM failure preserves inbound/cursor.
 - Deterministic unsubscribe/bounce/auto precedence prevents LLM effect.
 - Candidate extraction: plain/mailto, punctuation, Unicode/IDN, dedupe, maximum ten,
   NEW_CONTENT/SIGNATURE/QUOTED, quoted markers, obfuscated rejected, multiple ambiguous -> human.
-- Context always contains full authored inbound/original/direct parent plus approved global context;
-  up to 6 cross-thread recent, source-linked memory and <=3 approved facts selected by embeddings.
-  No PDF/raw HTML/unapproved facts.
+- Context always contains full authored inbound plus approved global context. Campaign replies add
+  original/direct parent; direct Contact inbound adds Contact profile. It may also include up to 6
+  cross-thread recent, source-linked memory and <=3 approved facts selected by embeddings. No
+  PDF/raw HTML/unapproved facts.
 - RAG retrieval: deterministic fake embeddings, OpenAI-compatible adapter payload validation,
   cached embedding reuse, model/dimension hash invalidation, low similarity -> no facts, ambiguous
   near-tie -> no facts/human path, and provider/schema failure -> HumanTask when facts are needed.

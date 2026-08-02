@@ -264,12 +264,9 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
             if str(zone.pk) in selected_zone_ids and zone.parent_id is not None
         }
     districts_by_province: dict[object, list[dict[str, object]]] = {}
-    custom_zones: list[dict[str, object]] = []
     for zone in district_rows:
         row = {"zone": zone, "selected": str(zone.pk) in selected_zone_ids}
-        if zone.parent_id is None:
-            custom_zones.append(row)
-        else:
+        if zone.parent_id is not None:
             districts_by_province.setdefault(zone.parent_id, []).append(row)
     province_groups = [
         {
@@ -290,7 +287,6 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
             "selected_catalog_count": selected_catalog_count,
             "query_count": selected_category_count * selected_zone_count,
             "province_groups": province_groups,
-            "custom_zones": custom_zones,
             "selected_zone_ids": selected_zone_ids,
         },
     )

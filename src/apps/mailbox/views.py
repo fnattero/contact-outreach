@@ -68,6 +68,17 @@ def _message_party_label(message: OutboundMessage) -> str:
     return message.recipient_normalized
 
 
+def _inbound_party_label(message: InboundMessage) -> str:
+    root = message.related_outbound
+    if root is not None:
+        return _message_party_label(root)
+    if message.contact is not None:
+        return str(message.contact)
+    if message.organization is not None:
+        return message.organization.name or "Organización sin nombre"
+    return "Contacto directo"
+
+
 @require_capability(Capability.MANAGE_INTEGRATIONS)
 @never_cache
 def gmail_settings(request: HttpRequest) -> HttpResponse:
@@ -240,10 +251,11 @@ def response_export(request: HttpRequest) -> HttpResponse:
                 item.external_at,
                 (
                     item.related_outbound.campaign.name
-                    if item.related_outbound.campaign is not None
+                    if item.related_outbound is not None
+                    and item.related_outbound.campaign is not None
                     else "Sin campaña"
                 ),
-                _message_party_label(item.related_outbound),
+                _inbound_party_label(item),
                 item.sender,
                 item.subject,
                 item.get_classification_display(),
@@ -318,17 +330,25 @@ def response_thread(request: HttpRequest, inbound_id: uuid.UUID) -> HttpResponse
             "related_outbound__organization",
             "related_outbound__contact",
             "related_outbound__email_address",
+            "organization",
+            "contact",
         ),
         pk=inbound_id,
         connection__workspace=workspace,
     )
     root = inbound.related_outbound
-    inbound_items = InboundMessage.objects.filter(
-        connection=inbound.connection,
-    ).filter(Q(related_outbound=root) | Q(gmail_thread_id=inbound.gmail_thread_id))
+    inbound_filter = Q(gmail_thread_id=inbound.gmail_thread_id)
+    if root is not None:
+        inbound_filter |= Q(related_outbound=root)
+    inbound_items = InboundMessage.objects.filter(connection=inbound.connection).filter(
+        inbound_filter
+    )
+    outbound_filter = Q(gmail_thread_id=inbound.gmail_thread_id)
+    if root is not None:
+        outbound_filter |= Q(pk=root.pk)
     outbound_items = (
         OutboundMessage.objects.filter(outbound_workspace_filter(workspace.pk))
-        .filter(Q(pk=root.pk) | Q(gmail_thread_id=inbound.gmail_thread_id))
+        .filter(outbound_filter)
         .distinct()
     )
     chronology = [

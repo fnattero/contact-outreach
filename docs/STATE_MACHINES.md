@@ -112,6 +112,7 @@ HUMAN_REQUIRED|FAILED`.
 | Evento | Efecto determinístico |
 | --- | --- |
 | Respuesta humana genuina | Crear/promover Contact, vincular Conversation, cancelar reminders |
+| Mail directo de Contacto existente | Vincular Contact/Organization/Conversation; sin campaña ni outbound padre |
 | UNSUBSCRIBE humano | Lo anterior + restricción irreversible y estado “Baja solicitada” |
 | BOUNCE | Invalidar sólo EmailAddress; cancelar reminder; no crear Contact por sí solo |
 | AUTO_REPLY | Persistir evento; no Contact, no respuesta humana, no cancelar reminder |

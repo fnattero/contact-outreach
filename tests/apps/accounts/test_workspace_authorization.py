@@ -225,7 +225,6 @@ def test_vendedor_route_method_matrix_and_private_timelines(
         reverse("integrations"),
         reverse("overture-datasets"),
         reverse("categories"),
-        reverse("zones"),
         reverse("catalogs"),
         reverse("catalog-download", args=(catalog.pk,)),
         reverse("suppressions"),

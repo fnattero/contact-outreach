@@ -960,9 +960,12 @@ def _apply_established_contact_inbound(
     without passing through prospect promotion or campaign eligibility.
     """
 
+    from apps.campaigns.models import OutboundMessage
     from apps.mailbox.models import InboundMessage
 
     related = message.related_outbound
+    if related is None:
+        raise ValidationError("El mensaje no tiene un envío vinculado.")
     if related.contact_id is None or related.organization_id is None:
         raise ValidationError(
             "El mensaje sin campaña no tiene un contacto y una organización vinculados."
@@ -981,7 +984,7 @@ def _apply_established_contact_inbound(
         conversation_id=conversation.pk if conversation is not None else None,
     )
     if conversation is not None and related.conversation_id != conversation.pk:
-        related.__class__.objects.filter(pk=related.pk).update(conversation_id=conversation.pk)
+        OutboundMessage.objects.filter(pk=related.pk).update(conversation_id=conversation.pk)
 
     if message.classification == InboundMessage.Classification.AUTO_REPLY:
         return InboundContactEffect(contact, conversation, False, 0)
@@ -1075,10 +1078,90 @@ def _apply_established_contact_inbound(
     return InboundContactEffect(contact, conversation, False, 0)
 
 
+def _apply_direct_contact_inbound(message: InboundMessage) -> InboundContactEffect:
+    """Attach a new inbound Gmail thread to an existing Contact by sender email."""
+
+    from apps.mailbox.models import InboundMessage
+
+    sender_literal = parseaddr(message.sender)[1]
+    if not sender_literal:
+        raise ValidationError("El remitente no contiene un email reconocible.")
+    normalized = normalize_email(sender_literal)
+    selected = (
+        EmailAddress.objects.select_for_update()
+        .select_related("organization", "organization__contact")
+        .get(
+            workspace=message.connection.workspace,
+            normalized_email=normalized,
+            validity=EmailAddress.Validity.VALID,
+            invalid_reason="",
+            organization__contact__isnull=False,
+        )
+    )
+    organization = selected.organization
+    contact = organization.contact
+    conversation = _conversation_for_inbound(inbound=message, contact=contact)
+    InboundMessage.objects.filter(pk=message.pk).update(
+        organization_id=organization.pk,
+        contact_id=contact.pk,
+        conversation_id=conversation.pk if conversation is not None else None,
+    )
+
+    if message.classification == InboundMessage.Classification.AUTO_REPLY:
+        return InboundContactEffect(contact, conversation, False, 0)
+    if message.classification == InboundMessage.Classification.BOUNCE:
+        lock_email_eligibility(selected.normalized_email)
+        EmailAddress.objects.filter(pk=selected.pk).update(
+            validity=EmailAddress.Validity.INVALID,
+            invalid_reason="Rebote informado por Gmail",
+            invalidated_at=message.external_at,
+            updated_at=timezone.now(),
+        )
+        _restriction_for_inbound(
+            inbound=message,
+            email_address=selected,
+            kind=CommunicationRestriction.Kind.BOUNCE,
+        )
+        return InboundContactEffect(contact, conversation, False, 0)
+
+    reason = (
+        Contact.CreatedReason.UNSUBSCRIBE
+        if message.classification == InboundMessage.Classification.UNSUBSCRIBE
+        else Contact.CreatedReason.HUMAN_REPLY
+    )
+    contact, _ = _contact_for_organization(
+        organization=organization,
+        preferred_email=selected,
+        reason=reason,
+        inbound=message,
+    )
+    if message.classification == InboundMessage.Classification.UNSUBSCRIBE:
+        _restriction_for_inbound(
+            inbound=message,
+            email_address=selected,
+            kind=CommunicationRestriction.Kind.UNSUBSCRIBE,
+        )
+    record_event(
+        action="contact.direct_inbound_imported",
+        entity=contact,
+        actor=None,
+        after={
+            "organization_id": str(organization.pk),
+            "inbound_message_id": str(message.pk),
+            "classification": message.classification,
+        },
+    )
+    from apps.automation.scheduled import record_genuine_contact_interaction
+
+    record_genuine_contact_interaction(contact.pk, interacted_at=message.external_at)
+    return InboundContactEffect(contact, conversation, False, 0)
+
+
 @transaction.atomic
 def apply_inbound_contact_effect(inbound: InboundMessage) -> InboundContactEffect:
     """Apply only deterministic contact/restriction effects for a persisted inbound."""
 
+    from apps.campaigns.models import OutboundMessage
     from apps.mailbox.models import InboundMessage
 
     message = (
@@ -1091,9 +1174,14 @@ def apply_inbound_contact_effect(inbound: InboundMessage) -> InboundContactEffec
         )
         .get(pk=inbound.pk)
     )
-    if message.related_outbound.campaign_id is None:
+    if message.related_outbound_id is None:
+        return _apply_direct_contact_inbound(message)
+    related = message.related_outbound
+    if related is None:
+        raise ValidationError("El mensaje no tiene un envío vinculado.")
+    if related.campaign_id is None:
         return _apply_established_contact_inbound(message)
-    enrollment = ensure_outbound_contact_links(message.related_outbound)
+    enrollment = ensure_outbound_contact_links(related)
     enrollment = CampaignEnrollment.objects.select_related("organization", "selected_email").get(
         pk=enrollment.pk
     )
@@ -1110,7 +1198,7 @@ def apply_inbound_contact_effect(inbound: InboundMessage) -> InboundContactEffec
     if selected is None:
         selected = EmailAddress.objects.filter(
             organization=organization,
-            normalized_email=message.related_outbound.recipient_normalized,
+            normalized_email=related.recipient_normalized,
         ).first()
     if message.classification == InboundMessage.Classification.BOUNCE:
         if selected is not None:
@@ -1195,7 +1283,7 @@ def apply_inbound_contact_effect(inbound: InboundMessage) -> InboundContactEffec
     outbound_updates = {"contact_id": contact.pk}
     if conversation is not None:
         outbound_updates["conversation_id"] = conversation.pk
-    message.related_outbound.__class__.objects.filter(
+    OutboundMessage.objects.filter(
         organization=organization,
         gmail_thread_id=message.gmail_thread_id,
     ).update(**outbound_updates)
