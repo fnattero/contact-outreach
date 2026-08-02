@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
-from apps.automation.models import WorkspaceKnowledgeContextRevision
+from apps.automation.models import FollowUpTopic, WorkspaceKnowledgeContextRevision
 
 
 @pytest.mark.django_db
@@ -28,6 +30,50 @@ def test_automation_settings_explains_knowledge_fields_for_non_technical_admin(
     assert "Guardar dato puntual" not in content
     assert "Guardar como borrador" in content
     assert "Probar búsqueda" in content
+    assert "Temas de seguimiento" in content
+
+
+@pytest.mark.django_db
+def test_admin_can_create_and_edit_follow_up_topics(client: Client, owner) -> None:
+    client.force_login(owner)
+    due_at = timezone.now() + timedelta(days=14)
+
+    created = client.post(
+        reverse("follow-up-topic-save"),
+        {
+            "name": "Reactivar conversación",
+            "objective": "Retomar una relación que quedó sin respuesta.",
+            "instructions": "No ofrecer descuentos.",
+            "cadence_days": "30",
+            "mode": FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+            "next_due_at": due_at.strftime("%Y-%m-%dT%H:%M"),
+            "active": "on",
+        },
+    )
+
+    assert created.status_code == 302
+    topic = FollowUpTopic.objects.get(name="Reactivar conversación")
+    assert topic.active
+    assert topic.cadence_days == 30
+    page = client.get(f"{reverse('automation-settings')}?edit_topic={topic.pk}")
+    assert "Reactivar conversación" in page.content.decode()
+
+    edited = client.post(
+        reverse("follow-up-topic-save"),
+        {
+            "topic_id": str(topic.pk),
+            "name": "Reactivar conversación",
+            "objective": "Retomar una relación comercial pendiente.",
+            "instructions": "",
+            "cadence_days": "45",
+            "mode": FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+        },
+    )
+
+    assert edited.status_code == 302
+    topic.refresh_from_db()
+    assert topic.cadence_days == 45
+    assert not topic.active
 
 
 @pytest.mark.django_db

@@ -211,9 +211,11 @@ pierde si falla el email de alerta.
 
 **Objetivo:** contacto periódico opt-in separado de campañas.
 
-- Crear ContactCommunicationPlan y ScheduledContactAttempt; disabled default, preferred email,
-  purposes, cadence default 30/min 7, review default, auto optional, pause/snooze/next due.
-- Scheduler decide fecha/idempotency. LLM propone body con mismo bounded context/knowledge.
+- Crear FollowUpTopic global y ContactCommunicationPlan como aprobación por contacto; disabled
+  default, preferred email, cadence global default 30/min 7, review default, auto optional,
+  pause/snooze/next due derivado.
+- Scheduler decide vencimiento/idempotency desde tema global + historial. LLM propone body con mismo
+  bounded context/knowledge.
 - REVIEW crea draft; AUTOMATIC atraviesa gate/policy/executor y relationship kill switch, en hilo
   nuevo.
 - Bloquear con restriction, HumanTask, suspension, context insufficiency o no preferred email.
@@ -265,7 +267,7 @@ Internet go-live. Todas las automatizaciones conservan kill switches independien
 | --- | --- | --- |
 | FR-01 Workspace/roles/auth | 1, 6, 11 | models/capabilities/TOTP/lockout/permission matrix |
 | FR-02 Organizations/Contacts/restrictions | 2, 5, 6 | backfill, eligibility y Contact UI |
-| FR-03 Provincias/distritos | 3 | hierarchy seed y selector multi-provincia |
+| FR-03 Provincias/distritos | 3 | hierarchy seed y selector mapa/lista multi-provincia |
 | FR-04 Overture partitions | 3, 11 | release/partition/import/read tests |
 | FR-05 Discovery/eligibility | 2–5 | Organization enrollment, local search, common rechecks |
 | FR-06 Fixed content/lifecycle/approval | 4 | seed, zero-LLM, hashes y modes |
@@ -277,8 +279,8 @@ Internet go-live. Todas las automatizaciones conservan kill switches independien
 | FR-12 Decisions/SHADOW/LIVE gate | 7, 8 | provider schema, feedback, qualification/policy |
 | FR-13 Auto/redirect/human tasks | 8 | policy, saga, rate limits y suspension |
 | FR-14 Human alerts | 8 | task badge y NotificationDelivery |
-| FR-15 Scheduled Contacts | 9 | plans/attempts/scheduler/executor |
-| FR-16 Contact/conversation UI | 2, 6, 8, 9 | timeline, threads, restrictions/tasks/plan |
+| FR-15 Scheduled Contacts | 9 | follow-up topics, approvals, attempts, scheduler/executor |
+| FR-16 Contact/conversation UI | 2, 6, 8, 9 | timeline, threads, list no-contact checkbox, restrictions/tasks/topics |
 | FR-17 Metrics | 10 | derived query service and dashboard |
 | FR-18 Internet readiness | 1, 11 | auth, settings/headers/proxy tests and deferred TLS gate |
 | FR-19 State/idempotency/audit/interfaces | 1–11 | services, constraints, jobs, fakes and audit |

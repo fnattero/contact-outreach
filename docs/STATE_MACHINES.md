@@ -167,13 +167,14 @@ FAILED`. El task sigue OPEN aunque todas las notificaciones fallen.
 
 ## 9. Plan de comunicación
 
-Plan: `DISABLED|ACTIVE|PAUSED`; snooze conserva ACTIVE pero no es due. Attempt:
+Tema global: `active|inactive`. Aprobación por Contacto: `DISABLED|ACTIVE|PAUSED`; snooze conserva
+ACTIVE pero no es due. Attempt:
 `DUE -> DRAFT_REVIEW|AUTHORIZED|HUMAN_REQUIRED|INELIGIBLE|CANCELLED`; `DRAFT_REVIEW -> AUTHORIZED|
 CANCELLED`; `AUTHORIZED -> SENT|HUMAN_REQUIRED|INELIGIBLE` mediante OutboundMessage.
 
-Interacción genuina recalcula `next_due_at >= interaction_at + cadence`; envío confirmado usa
-`sent_at + cadence`. Restricción, task abierto, suspensión, contexto insuficiente o kill switch
-impiden autorización.
+Interacción genuina recalcula `next_due_at >= interaction_at + cadence` usando la cadencia del tema
+global; envío confirmado usa `sent_at + cadence`. Tema inactivo, restricción, task abierto,
+suspensión, contexto insuficiente o kill switch impiden autorización.
 
 ## 10. Overture y jobs
 

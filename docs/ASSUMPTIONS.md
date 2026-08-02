@@ -51,7 +51,7 @@ seguridad no se relajan desde el dashboard.
 | A-043 | Proposal/ACK tienen keys separadas y sólo hay una semantic action por inbound Gmail ID. | Idempotencia |
 | A-044 | Máximo tres automatic replies por Conversation/24 h y veinte por Workspace/día. | Anti-abuso |
 | A-045 | Alertas: badge durable + email genérico a admins activos con link seguro, sin inbound. PUBLIC_BASE_URL es obligatorio para ese canal. | Privacidad |
-| A-046 | Plan de Contacto es opt-in/off default, cadencia default 30 días/mínimo 7, REVIEW_BEFORE_SEND default y AUTOMATIC opcional. | Relaciones |
+| A-046 | Seguimiento usa temas globales opt-in por contacto: cadencia default 30 días/mínimo 7, REVIEW_BEFORE_SEND default y AUTOMATIC opcional. | Relaciones |
 | A-047 | SEND_MODE dry-run y SEND_KILL_SWITCH true por default; AUTO_REPLY_KILL_SWITCH y RELATIONSHIP_KILL_SWITCH también true por default. | Seguridad |
 | A-048 | Conversational/scheduled replies no usan same-day campaign guard; scheduled Contact nunca vuelve elegible a Contact. | Alcance |
 | A-049 | Métricas se derivan de filas, no counters; cero denominador muestra `—`; global y filtro campaign, sin rango arbitrario inicial. | Analítica |

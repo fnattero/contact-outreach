@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from apps.automation.models import (
     ContactCommunicationPlan,
+    FollowUpTopic,
     HumanTask,
     ReplyAutomationConfiguration,
     ReplyDecision,
@@ -254,12 +255,21 @@ def _history_fixture(
         source="gmail_bounce",
         evidence="InboundMessage:technical-evidence-id",
     )
+    topic = FollowUpTopic.objects.create(
+        workspace=workspace,
+        name="Preguntar cómo está",
+        objective="Retomar el contacto de manera cordial.",
+        cadence_days=30,
+        mode=FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+        next_due_at=timezone.now() + timedelta(days=20),
+        active=True,
+        created_by=owner,
+        updated_by=owner,
+    )
     ContactCommunicationPlan.objects.create(
         contact=contact,
+        topic=topic,
         preferred_email=primary,
-        purpose=ContactCommunicationPlan.Purpose.CHECK_IN,
-        cadence_days=30,
-        mode=ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
         state=ContactCommunicationPlan.State.ACTIVE,
         next_due_at=timezone.now() + timedelta(days=20),
         created_by=owner,
@@ -292,7 +302,8 @@ def test_admin_contactos_navigation_timeline_and_plain_language(
     attention_page = attention.content.decode()
     assert "Ana Pérez" in list_page
     assert "Motores del Sur" in list_page
-    assert "Preguntar cómo está" in list_page
+    assert "No contactar" in list_page
+    assert "1 tema aprobado" in list_page
     assert "Necesita que lo revises" in list_page
     assert "Contactos" in list_page
     assert "Necesita atención" in list_page
@@ -301,6 +312,20 @@ def test_admin_contactos_navigation_timeline_and_plain_language(
     assert ">Respuestas<" not in list_page
     assert ">Supresiones<" not in list_page
 
+    assert 'aria-label="Mapa de relación"' in detail_page
+    assert 'class="contact-overview-grid"' in detail_page
+    assert 'class="conversation-timeline"' in detail_page
+    assert 'class="task-card task-card--open"' in detail_page
+    assert 'class="follow-up-topic-grid section-gap"' in detail_page
+    assert detail_page.index('id="plan-heading"') < detail_page.index(
+        'aria-label="Información y controles del contacto"'
+    )
+    assert detail_page.index('id="restriction-heading"') < detail_page.index(
+        'aria-label="Información y controles del contacto"'
+    )
+    assert "1 canal disponible" in detail_page
+    assert "Preguntar cómo está" in detail_page
+    assert "No contactar este contacto" not in detail_page
     assert "Propuesta comercial" in detail_page
     assert "Propuesta enviada a la dirección indicada" in detail_page
     assert detail_page.index("Primero enviamos la propuesta") < detail_page.index(
@@ -382,6 +407,7 @@ def test_vendedor_reads_contactos_without_controls_simulations_or_technical_deta
             reverse("contact-email-validate", args=(contact.pk, primary.pk)),
             {},
         ),
+        (reverse("contact-no-contact-toggle", args=(contact.pk,)), {"blocked": "1"}),
         (reverse("contact-restrict", args=(contact.pk,)), {"reason": "No autorizado"}),
         (
             reverse("human-task-close", args=(contact.pk, restriction_task.pk)),
@@ -392,6 +418,45 @@ def test_vendedor_reads_contactos_without_controls_simulations_or_technical_deta
         assert client.post(url, payload).status_code == 403
     assert client.get(reverse("contact-create")).status_code == 403
     assert restriction_task.status == HumanTask.Status.OPEN
+
+
+@pytest.mark.django_db
+def test_contact_list_no_contact_checkbox_controls_manual_contact_restriction(
+    client: Client,
+    owner: User,
+) -> None:
+    contact = create_manual_contact(
+        actor=owner,
+        email="bloqueo@cliente.example",
+        organization_name="Cliente Bloqueo",
+        contact_name="Persona Bloqueo",
+    )
+    client.force_login(owner)
+
+    blocked = client.post(
+        reverse("contact-no-contact-toggle", args=(contact.pk,)),
+        {"blocked": "1"},
+    )
+
+    assert blocked.status_code == 302
+    contact.refresh_from_db()
+    assert contact.status == Contact.Status.DO_NOT_CONTACT
+    restriction = CommunicationRestriction.objects.get(contact=contact)
+    assert restriction.kind == CommunicationRestriction.Kind.MANUAL
+    list_page = client.get(reverse("contacts")).content.decode()
+    assert "Cliente Bloqueo" in list_page
+    assert "checked" in list_page
+
+    unblocked = client.post(
+        reverse("contact-no-contact-toggle", args=(contact.pk,)),
+        {"blocked": "0"},
+    )
+
+    assert unblocked.status_code == 302
+    contact.refresh_from_db()
+    restriction.refresh_from_db()
+    assert contact.status == Contact.Status.ACTIVE
+    assert restriction.revoked_at is not None
 
 
 @pytest.mark.django_db

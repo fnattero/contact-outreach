@@ -9,7 +9,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.automation.models import ContactCommunicationPlan, ScheduledContactAttempt
+from apps.automation.models import ContactCommunicationPlan, FollowUpTopic, ScheduledContactAttempt
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.contacts.models import Contact, EmailAddress
 from apps.contacts.services import create_manual_contact
@@ -49,125 +49,96 @@ def _messages(response) -> list[str]:
     return [str(item) for item in get_messages(response.wsgi_request)]
 
 
+def _follow_up_topic(owner: User, *, suffix: str, active: bool = True) -> FollowUpTopic:
+    return FollowUpTopic.objects.create(
+        workspace=owner.membership.workspace,
+        name=f"Tema {suffix}",
+        objective="Retomar el contacto de manera cordial.",
+        cadence_days=30,
+        mode=FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+        next_due_at=timezone.now() + timedelta(days=10),
+        active=active,
+        created_by=owner,
+        updated_by=owner,
+    )
+
+
 @pytest.mark.django_db
 def test_admin_can_save_activate_pause_and_snooze_the_communication_plan(
     client: Client,
     owner: User,
 ) -> None:
     contact, email = _validated_contact(owner, suffix="plan")
-    other_email = EmailAddress.objects.create(
-        workspace=owner.membership.workspace,
-        organization=contact.organization,
-        original_email="otro-canal@cliente.example",
-        normalized_email="otro-canal@cliente.example",
-        domain="cliente.example",
-        validity=EmailAddress.Validity.VALID,
-        validated_at=timezone.now(),
-    )
+    topic = _follow_up_topic(owner, suffix="plan")
     client.force_login(owner)
-    save_url = reverse("contact-plan-save", args=(contact.pk,))
+    save_url = reverse("contact-follow-up-topic-approve", args=(contact.pk, topic.pk))
     future = timezone.now() + timedelta(days=10)
 
-    saved = client.post(
-        save_url,
-        {
-            "enabled": "on",
-            "preferred_email": str(email.pk),
-            "purpose": ContactCommunicationPlan.Purpose.CHECK_IN,
-            "goal_text": "",
-            "cadence_days": "30",
-            "mode": ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
-            "next_due_at": future.strftime("%Y-%m-%dT%H:%M"),
-        },
-    )
+    saved = client.post(save_url)
     assert saved.status_code == 302
-    plan = ContactCommunicationPlan.objects.get(contact=contact)
+    plan = ContactCommunicationPlan.objects.get(contact=contact, topic=topic)
     assert plan.state == ContactCommunicationPlan.State.ACTIVE
     assert plan.preferred_email == email
+    assert plan.topic.cadence_days == 30
 
-    # Invalid form: cadence below the seven day minimum.
+    # Service-level validation error: inactive topics cannot be approved.
+    inactive_topic = _follow_up_topic(owner, suffix="inactivo", active=False)
     invalid = client.post(
-        save_url,
-        {
-            "enabled": "on",
-            "preferred_email": str(email.pk),
-            "purpose": ContactCommunicationPlan.Purpose.CHECK_IN,
-            "cadence_days": "1",
-            "mode": ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
-        },
+        reverse("contact-follow-up-topic-approve", args=(contact.pk, inactive_topic.pk)),
     )
     assert invalid.status_code == 302
-    assert _messages(invalid)
-    plan.refresh_from_db()
-    assert plan.cadence_days == 30
-
-    # Service-level validation error: chosen email is not the contact's preferred email.
-    conflict = client.post(
-        save_url,
-        {
-            "enabled": "on",
-            "preferred_email": str(other_email.pk),
-            "purpose": ContactCommunicationPlan.Purpose.CHECK_IN,
-            "cadence_days": "30",
-            "mode": ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
-        },
-    )
-    assert conflict.status_code == 302
-    assert any("Elegí primero este email" in m for m in _messages(conflict))
-    plan.refresh_from_db()
-    assert plan.preferred_email == email
+    assert any("inactivo" in m for m in _messages(invalid))
+    assert not ContactCommunicationPlan.objects.filter(
+        contact=contact,
+        topic=inactive_topic,
+    ).exists()
 
     # Plan state transitions.
-    no_plan_contact, _ = _validated_contact(owner, suffix="sinplan")
-    missing_plan = client.post(
-        reverse("contact-plan-state", args=(no_plan_contact.pk, "activar")),
-    )
-    assert missing_plan.status_code == 302
-    assert any("Primero configurá" in m for m in _messages(missing_plan))
-
     invalid_state = client.post(
-        reverse("contact-plan-state", args=(contact.pk, "no-existe")),
+        reverse("contact-plan-state", args=(contact.pk, plan.pk, "no-existe")),
     )
     assert invalid_state.status_code == 302
     assert any("no es válida" in m for m in _messages(invalid_state))
 
-    paused = client.post(reverse("contact-plan-state", args=(contact.pk, "pausar")))
+    paused = client.post(reverse("contact-plan-state", args=(contact.pk, plan.pk, "pausar")))
     assert paused.status_code == 302
     plan.refresh_from_db()
     assert plan.state == ContactCommunicationPlan.State.PAUSED
 
-    reactivated = client.post(reverse("contact-plan-state", args=(contact.pk, "activar")))
+    reactivated = client.post(reverse("contact-plan-state", args=(contact.pk, plan.pk, "activar")))
     assert reactivated.status_code == 302
     plan.refresh_from_db()
     assert plan.state == ContactCommunicationPlan.State.ACTIVE
 
-    disabled = client.post(reverse("contact-plan-state", args=(contact.pk, "desactivar")))
+    disabled = client.post(reverse("contact-plan-state", args=(contact.pk, plan.pk, "desactivar")))
     assert disabled.status_code == 302
     plan.refresh_from_db()
     assert plan.state == ContactCommunicationPlan.State.DISABLED
 
-    # Snooze: missing plan, invalid form, business-rule error, and success.
-    snooze_url_missing_plan = reverse("contact-plan-snooze", args=(no_plan_contact.pk,))
-    missing_plan_snooze = client.post(
-        snooze_url_missing_plan,
-        {"until": future.strftime("%Y-%m-%dT%H:%M")},
-    )
+    # Snooze: missing approval, invalid form, business-rule error, and success.
+    missing_plan_snooze = client.post(reverse("contact-plan-snooze", args=(contact.pk,)))
     assert missing_plan_snooze.status_code == 302
-    assert any("Primero configurá" in m for m in _messages(missing_plan_snooze))
+    assert any("Primero aprobá" in m for m in _messages(missing_plan_snooze))
 
     plan.state = ContactCommunicationPlan.State.ACTIVE
     plan.save(update_fields=("state", "updated_at"))
     snooze_url = reverse("contact-plan-snooze", args=(contact.pk,))
-    invalid_snooze = client.post(snooze_url, {})
+    invalid_snooze = client.post(snooze_url, {"plan_id": str(plan.pk)})
     assert invalid_snooze.status_code == 302
     assert any("Elegí una fecha futura" in m for m in _messages(invalid_snooze))
 
     past = timezone.now() - timedelta(days=1)
-    past_snooze = client.post(snooze_url, {"until": past.strftime("%Y-%m-%dT%H:%M")})
+    past_snooze = client.post(
+        snooze_url,
+        {"plan_id": str(plan.pk), "until": past.strftime("%Y-%m-%dT%H:%M")},
+    )
     assert past_snooze.status_code == 302
     assert any("fecha futura" in m for m in _messages(past_snooze))
 
-    good_snooze = client.post(snooze_url, {"until": future.strftime("%Y-%m-%dT%H:%M")})
+    good_snooze = client.post(
+        snooze_url,
+        {"plan_id": str(plan.pk), "until": future.strftime("%Y-%m-%dT%H:%M")},
+    )
     assert good_snooze.status_code == 302
     assert any("pospuesto" in m for m in _messages(good_snooze))
     plan.refresh_from_db()
@@ -183,16 +154,17 @@ def _draft_attempt(
     with_outbound: bool = True,
     idempotency_suffix: str = "one",
 ) -> tuple[ContactCommunicationPlan, ScheduledContactAttempt]:
+    actor = contact.created_by
+    assert isinstance(actor, User)
+    topic = _follow_up_topic(actor, suffix=idempotency_suffix)
     plan = ContactCommunicationPlan.objects.create(
         contact=contact,
+        topic=topic,
         preferred_email=email,
-        purpose=ContactCommunicationPlan.Purpose.CHECK_IN,
-        cadence_days=30,
-        mode=ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
         state=plan_state,
         next_due_at=timezone.now(),
-        created_by=contact.created_by,
-        updated_by=contact.created_by,
+        created_by=actor,
+        updated_by=actor,
     )
     outbound = None
     if with_outbound:
@@ -367,14 +339,14 @@ def test_vendedor_cannot_manage_communication_plans_scheduled_drafts_or_preferre
     owner: User,
 ) -> None:
     contact, email = _validated_contact(owner, suffix="vendedor")
-    _plan, attempt = _draft_attempt(contact, email, idempotency_suffix="vendedor")
+    plan, attempt = _draft_attempt(contact, email, idempotency_suffix="vendedor")
     seller = User.objects.create_user(username="seller-plan", password="password")
     client.force_login(seller)
 
     forbidden = (
-        (reverse("contact-plan-save", args=(contact.pk,)), {}),
-        (reverse("contact-plan-state", args=(contact.pk, "activar")), {}),
-        (reverse("contact-plan-snooze", args=(contact.pk,)), {}),
+        (reverse("contact-follow-up-topic-approve", args=(contact.pk, plan.topic_id)), {}),
+        (reverse("contact-plan-state", args=(contact.pk, plan.pk, "activar")), {}),
+        (reverse("contact-plan-snooze", args=(contact.pk,)), {"plan_id": str(plan.pk)}),
         (
             reverse("scheduled-contact-draft-edit", args=(contact.pk, attempt.pk)),
             {"subject": "x", "body_text": "y"},

@@ -669,6 +669,72 @@ class AutomaticActionReservation(TimestampedUUIDModel):
         ]
 
 
+class FollowUpTopic(TimestampedUUIDModel):
+    objects: models.Manager[FollowUpTopic] = models.Manager()
+
+    class Mode(models.TextChoices):
+        REVIEW_BEFORE_SEND = "REVIEW_BEFORE_SEND", "Revisar antes de enviar"
+        AUTOMATIC = "AUTOMATIC", "Enviar automáticamente"
+
+    workspace = models.ForeignKey(
+        "accounts.Workspace",
+        on_delete=models.PROTECT,
+        related_name="follow_up_topics",
+    )
+    name = models.CharField(max_length=160)
+    objective = models.TextField(max_length=1000)
+    instructions = models.TextField(blank=True, max_length=2000)
+    cadence_days = models.PositiveSmallIntegerField(
+        default=30,
+        validators=(MinValueValidator(7),),
+    )
+    mode = models.CharField(
+        max_length=30,
+        choices=Mode.choices,
+        default=Mode.REVIEW_BEFORE_SEND,
+    )
+    next_due_at = models.DateTimeField(blank=True, null=True)
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_follow_up_topics",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_follow_up_topics",
+    )
+
+    class Meta:
+        ordering = ("name", "created_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("workspace", "name"),
+                name="follow_up_topic_workspace_name_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(cadence_days__gte=7), name="follow_up_topic_cadence_minimum"
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("workspace", "active", "next_due_at"),
+                name="auto_topic_due_idx",
+            )
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if not self.name.strip():
+            raise ValidationError({"name": "Escribí un nombre para el tema."})
+        if not self.objective.strip():
+            raise ValidationError({"objective": "Escribí el objetivo del seguimiento."})
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class ContactCommunicationPlan(TimestampedUUIDModel):
     objects: models.Manager[ContactCommunicationPlan] = models.Manager()
 
@@ -686,26 +752,20 @@ class ContactCommunicationPlan(TimestampedUUIDModel):
         ACTIVE = "ACTIVE", "Activo"
         PAUSED = "PAUSED", "Pausado"
 
-    contact = models.OneToOneField(
+    contact = models.ForeignKey(
         "contacts.Contact",
         on_delete=models.PROTECT,
-        related_name="communication_plan",
+        related_name="communication_plans",
+    )
+    topic = models.ForeignKey(
+        FollowUpTopic,
+        on_delete=models.PROTECT,
+        related_name="contact_approvals",
     )
     preferred_email = models.ForeignKey(
         "contacts.EmailAddress",
         on_delete=models.PROTECT,
-        related_name="communication_plans",
-    )
-    purpose = models.CharField(max_length=40, choices=Purpose.choices)
-    goal_text = models.TextField(blank=True, max_length=1000)
-    cadence_days = models.PositiveSmallIntegerField(
-        default=30,
-        validators=(MinValueValidator(7),),
-    )
-    mode = models.CharField(
-        max_length=30,
-        choices=Mode.choices,
-        default=Mode.REVIEW_BEFORE_SEND,
+        related_name="follow_up_topic_approvals",
     )
     state = models.CharField(max_length=20, choices=State.choices, default=State.DISABLED)
     snoozed_until = models.DateTimeField(blank=True, null=True)
@@ -724,9 +784,16 @@ class ContactCommunicationPlan(TimestampedUUIDModel):
     )
 
     class Meta:
+        indexes = [
+            models.Index(
+                fields=("contact", "state", "next_due_at"),
+                name="auto_plan_due_idx",
+            )
+        ]
         constraints = [
-            models.CheckConstraint(
-                condition=Q(cadence_days__gte=7), name="contact_plan_cadence_minimum"
+            models.UniqueConstraint(
+                fields=("contact", "topic"),
+                name="contact_follow_up_topic_unique",
             )
         ]
 
@@ -737,8 +804,13 @@ class ContactCommunicationPlan(TimestampedUUIDModel):
                 self.contact, "organization_id", None
             ):
                 raise ValidationError("El email del plan debe pertenecer al contacto.")
-        if self.purpose == self.Purpose.ADMIN_GOAL and not self.goal_text.strip():
-            raise ValidationError({"goal_text": "Escribí el objetivo de este contacto."})
+        if getattr(self, "contact_id", None) and getattr(self, "topic_id", None):
+            if getattr(self.topic, "workspace_id", None) != getattr(
+                self.contact,
+                "workspace_id",
+                None,
+            ):
+                raise ValidationError("El tema debe pertenecer al mismo espacio que el contacto.")
 
 
 class ScheduledContactAttempt(TimestampedUUIDModel):

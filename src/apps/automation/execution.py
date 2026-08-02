@@ -29,6 +29,7 @@ from apps.automation.models import (
     ContactCommunicationPlan,
     ConversationMemory,
     EmailCandidate,
+    FollowUpTopic,
     HumanTask,
     ReplyAutomationConfiguration,
     ReplyDecision,
@@ -544,7 +545,7 @@ def _final_delivery_rate_error(
             Q(kind__in=AUTOMATIC_KINDS)
             | Q(
                 kind=OutboundMessage.Kind.SCHEDULED_CONTACT,
-                scheduled_contact_attempts__plan__mode=ContactCommunicationPlan.Mode.AUTOMATIC,
+                scheduled_contact_attempts__plan__topic__mode=FollowUpTopic.Mode.AUTOMATIC,
             )
         )
         .exclude(pk=message.pk)
@@ -1330,6 +1331,7 @@ def _scheduled_message_error(message: OutboundMessage) -> str:
         .select_related(
             "plan__contact__workspace",
             "plan__preferred_email",
+            "plan__topic",
         )
         .filter(outbound_message=message)
     )
@@ -1347,12 +1349,12 @@ def _scheduled_message_error(message: OutboundMessage) -> str:
         or message.scheduled_for != attempt.due_at
     ):
         return "La programación o el email preferido cambiaron antes del envío."
-    from apps.automation.scheduled import PURPOSE_GOALS, scheduled_contact_eligibility
+    from apps.automation.scheduled import follow_up_topic_goal, scheduled_contact_eligibility
 
     eligibility = scheduled_contact_eligibility(plan, for_send=True)
     if not eligibility.eligible:
         return eligibility.message
-    if plan.mode == ContactCommunicationPlan.Mode.AUTOMATIC:
+    if plan.topic.mode == FollowUpTopic.Mode.AUTOMATIC:
         if settings.AUTO_REPLY_KILL_SWITCH:
             return "El bloqueo independiente de automatización está activado."
         configuration = ReplyAutomationConfiguration.objects.filter(
@@ -1381,7 +1383,7 @@ def _scheduled_message_error(message: OutboundMessage) -> str:
 
             current_context = build_bounded_scheduled_contact_context(
                 plan,
-                goal=PURPOSE_GOALS.get(plan.purpose, plan.goal_text.strip()),
+                goal=follow_up_topic_goal(plan.topic),
             )
         except ValidationError:
             return "El contexto actual ya no cabe en el límite seguro."
@@ -1394,7 +1396,7 @@ def _scheduled_message_error(message: OutboundMessage) -> str:
         }
         if not set(str(item) for item in attempt.fact_revision_ids).issubset(manifest_fact_ids):
             return "El borrador cita información fuera de su contexto autorizado."
-    elif plan.mode == ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND:
+    elif plan.topic.mode == FollowUpTopic.Mode.REVIEW_BEFORE_SEND:
         if message.approved_at is None or message.approved_by_id is None:
             return "El borrador todavía no fue aprobado por un administrador."
     else:
@@ -1636,7 +1638,7 @@ def _prepare_outbound_effect(message_id: uuid.UUID | str) -> OutboundEffect | st
         and message.kind == OutboundMessage.Kind.SCHEDULED_CONTACT
         and ScheduledContactAttempt.objects.filter(
             outbound_message=message,
-            plan__mode=ContactCommunicationPlan.Mode.AUTOMATIC,
+            plan__topic__mode=FollowUpTopic.Mode.AUTOMATIC,
         ).exists()
     )
     if decision is not None or scheduled_automatic:

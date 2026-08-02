@@ -78,8 +78,8 @@ nunca sustituye negativos.
 
 - Jerarquía/códigos oficiales, parent required, duplicate district names bajo provincias distintas,
   labels Partidos/Departamentos/Comunas/Barrios, CABA 48 barrios y custom zones.
-- UI multiprovincia: expand/search/select all/clear por provincia, fieldsets/keyboard, snapshots no
-  cambian si se edita seed.
+- UI multiprovincia: mapa clickeable por provincia, expand/search/select all/clear por provincia,
+  fieldsets/keyboard, snapshots no cambian si se edita seed.
 - Release/partition constraints: independent READY, mixed-release rejection, missing coverage copy
   incluye provincia y acción Datos de búsqueda.
 - Dos provincias lejanas generan dos `record_batch_reader` con bboxes acotados; luego exact
@@ -187,14 +187,15 @@ failed but task open; duplicate/reconciliation idempotent; vendedor not recipien
 
 ## 12. Comunicación programada
 
-- Disabled default, preferred email required, cadence default 30/min 7, purpose/goal validation,
-  review default, automatic admin-only, pause/snooze/next due.
-- Scheduler clock/idempotency chooses due; LLM uses same context/facts and cannot choose date.
+- Global FollowUpTopic form validates objective, cadence default 30/min 7, mode, active flag and next
+  due date; Contact only approves/pauses/disables topics and requires preferred email.
+- Scheduler clock/idempotency derives due from topic + contact history; LLM uses same context/facts
+  and cannot choose date.
 - REVIEW creates draft/no Gmail; AUTO still needs gate/policy/limits and relationship kill switch.
 - Restriction, open task, suspension, insufficient context, no preferred email and kill switch
   result in no send/task as specified.
-- Genuine interaction pushes due >= cadence; confirmed scheduled send computes from sent_at.
-- New thread and no campaign same-day reservation; plan never changes Contact exclusion.
+- Genuine interaction pushes due >= topic cadence; confirmed scheduled send computes from sent_at.
+- New thread and no campaign same-day reservation; topic approval never changes Contact exclusion.
 
 ## 13. Resumen y UX
 
@@ -205,8 +206,9 @@ failed but task open; duplicate/reconciliation idempotent; vendedor not recipien
   zero shows `—` plus explanation. Workspace all-time and campaign filter agree.
 - Spanish labels/empty/error states, result-first statuses, toggle consequences, progressive
   technical details admin-only, no technical IDs in normal/vendor views.
-- Contact list/timeline grouped by thread, multi-email/provenance/campaign/restriction/task/next due;
-  redirect threads ordered chronologically.
+- Contact list/timeline grouped by thread, multi-email/provenance/campaign/restriction/task/topics;
+  no-contact checkbox creates/revokes manual contact restrictions; redirect threads ordered
+  chronologically.
 - Responsive, semantic fieldsets, keyboard operation/focus, screen-reader status and color not sole
   signal. Cache headers on body endpoints.
 

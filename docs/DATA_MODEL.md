@@ -285,12 +285,17 @@ idempotency/Message-ID, state `PENDING|SENDING|RECONCILING|SENT|FAILED`, provide
 
 ## 8. Comunicación programada
 
+### FollowUpTopic
+
+FK Workspace, name, objective, optional instructions, cadence days default 30 con check >=7, mode
+`REVIEW_BEFORE_SEND|AUTOMATIC`, next_due_at global, active flag and created/updated attribution.
+Es la configuración global de fecha, periodicidad y modo.
+
 ### ContactCommunicationPlan
 
-OneToOne o colección activa acotada por Contact: enabled, purpose
-`CHECK_IN|PRODUCT_FEEDBACK|ADMIN_GOAL`, goal text, preferred EmailAddress, cadence days default 30
-con check >=7, mode `REVIEW_BEFORE_SEND|AUTOMATIC`, state `ACTIVE|PAUSED`, snoozed_until,
-next_due_at, last_interaction/sent timestamps and attribution.
+FK Contact + FK FollowUpTopic única, preferred EmailAddress, state `ACTIVE|PAUSED|DISABLED`,
+snoozed_until, next_due_at derivado/cacheado, last_interaction/sent timestamps and attribution. No
+guarda objetivo, cadencia ni fecha editable por contacto; esos datos vienen del `FollowUpTopic`.
 
 ### ScheduledContactAttempt
 
@@ -325,6 +330,8 @@ contadores en estas filas; se derivan del dominio.
 - No hay initial/reminder elegible sin EmailAddress válida y selected.
 - Contact excluye Organization completa de nuevas CampaignEnrollment elegibles.
 - Toda restricción se comprueba en preparación, aprobación, queue y frontera Gmail.
+- El bloqueo manual completo del contacto se administra desde la lista de Contactos y siempre crea o
+  revoca `CommunicationRestriction` auditada.
 - Unsubscribe es irreversible; no existe override.
 - Sólo un INITIAL/REMINDER por email/día local entre campañas.
 - Un reminder como máximo por initial y se cancela ante evento humano/restricción.

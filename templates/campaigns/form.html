@@ -56,19 +56,34 @@
                         {% for group in province_groups %}
                         <fieldset class="province-group" data-province-panel="{{ group.province.pk }}"{% if not group.selected %} hidden{% endif %}>
                             <legend>{{ group.province.name }} · {{ group.province.label_plural }}</legend>
-                            <div class="selection-toolbar">
-                                <input type="search" placeholder="Buscar en {{ group.province.label_plural|lower }}…" aria-label="Buscar {{ group.province.label_plural|lower }} de {{ group.province.name }}" data-district-filter="province-districts-{{ group.province.pk }}">
-                                <div class="selection-toolbar__actions">
-                                    <button class="button button--quiet button--small" type="button" data-district-select-all="province-districts-{{ group.province.pk }}">Seleccionar todos</button>
-                                    <button class="button button--quiet button--small" type="button" data-district-clear="province-districts-{{ group.province.pk }}">Limpiar</button>
+                            <div class="province-group__body">
+                                <div class="zone-map" data-zone-map data-zone-map-url="{% url 'campaign-zone-map' group.province.pk %}">
+                                    <div class="zone-map__header">
+                                        <div>
+                                            <strong>Mapa de {{ group.province.label_plural|lower }}</strong>
+                                            <p>{{ group.province.name }}</p>
+                                        </div>
+                                        <span class="badge"><span data-zone-map-count>0</span> disponibles</span>
+                                    </div>
+                                    <svg class="zone-map__canvas" data-zone-map-canvas role="group" aria-label="Mapa de {{ group.province.label_plural|lower }} de {{ group.province.name }}" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet"></svg>
+                                    <p class="zone-map__empty" data-zone-map-empty hidden>No hay límites disponibles para dibujar.</p>
                                 </div>
-                            </div>
-                            <div class="choice-grid" id="province-districts-{{ group.province.pk }}">
-                                {% for item in group.districts %}
-                                <div class="choice-item" data-choice-item>
-                                    <label for="zone-{{ item.zone.pk }}"><input id="zone-{{ item.zone.pk }}" type="checkbox" name="zones" value="{{ item.zone.pk }}"{% if item.selected %} checked{% endif %}><span>{{ item.zone.name }}</span></label>
+                                <div class="province-group__list">
+                                    <div class="selection-toolbar">
+                                        <input type="search" placeholder="Buscar en {{ group.province.label_plural|lower }}…" aria-label="Buscar {{ group.province.label_plural|lower }} de {{ group.province.name }}" data-district-filter="province-districts-{{ group.province.pk }}">
+                                        <div class="selection-toolbar__actions">
+                                            <button class="button button--quiet button--small" type="button" data-district-select-all="province-districts-{{ group.province.pk }}">Seleccionar todos</button>
+                                            <button class="button button--quiet button--small" type="button" data-district-clear="province-districts-{{ group.province.pk }}">Limpiar</button>
+                                        </div>
+                                    </div>
+                                    <div class="choice-grid" id="province-districts-{{ group.province.pk }}">
+                                        {% for item in group.districts %}
+                                        <div class="choice-item" data-choice-item>
+                                            <label for="zone-{{ item.zone.pk }}"><input id="zone-{{ item.zone.pk }}" type="checkbox" name="zones" value="{{ item.zone.pk }}"{% if item.selected %} checked{% endif %}><span>{{ item.zone.name }}</span></label>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
                                 </div>
-                                {% endfor %}
                             </div>
                         </fieldset>
                         {% endfor %}

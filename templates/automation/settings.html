@@ -23,6 +23,61 @@
     </div>
 </section>
 
+<section class="panel" id="follow-up-topics">
+    <div class="panel__header">
+        <div>
+            <h2>Temas de seguimiento</h2>
+            <p class="muted">La fecha, periodicidad y modo se configuran acá. En cada contacto sólo se aprueban los temas aplicables.</p>
+        </div>
+        <span class="badge">{{ follow_up_topics|length }} tema{{ follow_up_topics|length|pluralize }}</span>
+    </div>
+    <div class="panel__body section-stack">
+        <form method="post" action="{% url 'follow-up-topic-save' %}" class="section-stack" novalidate>
+            {% csrf_token %}
+            {% if selected_follow_up_topic %}<input type="hidden" name="topic_id" value="{{ selected_follow_up_topic.pk }}">{% endif %}
+            <div class="filters__grid">
+                {% include "includes/field.html" with field=follow_up_topic_form.name %}
+                {% include "includes/field.html" with field=follow_up_topic_form.cadence_days %}
+                {% include "includes/field.html" with field=follow_up_topic_form.mode %}
+                {% include "includes/field.html" with field=follow_up_topic_form.next_due_at %}
+            </div>
+            {% include "includes/field.html" with field=follow_up_topic_form.objective %}
+            {% include "includes/field.html" with field=follow_up_topic_form.instructions %}
+            <div class="checkbox-line">{{ follow_up_topic_form.active }} <label for="{{ follow_up_topic_form.active.id_for_label }}">{{ follow_up_topic_form.active.label }}</label></div>
+            <p class="field__help">{{ follow_up_topic_form.active.help_text }}</p>
+            <div class="actions">
+                <button class="button" type="submit">{% if selected_follow_up_topic %}Guardar tema{% else %}Crear tema{% endif %}</button>
+                {% if selected_follow_up_topic %}<a class="button button--secondary" href="{% url 'automation-settings' %}#follow-up-topics">Cancelar edición</a>{% endif %}
+            </div>
+        </form>
+
+        {% if follow_up_topics %}
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Tema</th><th>Periodicidad</th><th>Próxima fecha global</th><th>Modo</th><th>Estado</th><th></th></tr></thead>
+                    <tbody>
+                        {% for topic in follow_up_topics %}
+                            <tr>
+                                <td><strong>{{ topic.name }}</strong><span class="table-meta">{{ topic.objective }}</span></td>
+                                <td>Cada {{ topic.cadence_days }} días</td>
+                                <td>{% if topic.next_due_at %}{{ topic.next_due_at|date:"d M Y · H:i" }}{% else %}Según la periodicidad{% endif %}</td>
+                                <td>{{ topic.get_mode_display }}</td>
+                                <td><span class="badge{% if topic.active %} badge--success{% else %} badge--paused{% endif %}">{% if topic.active %}Activo{% else %}Inactivo{% endif %}</span></td>
+                                <td><a class="button button--secondary button--small" href="?edit_topic={{ topic.pk }}#follow-up-topics">Editar</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state empty-state--compact">
+                <h3>No hay temas de seguimiento</h3>
+                <p>Creá un tema global y después aprobalo en los contactos que correspondan.</p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
     <section class="panel automation-knowledge">
     <div class="panel__header">
         <div>

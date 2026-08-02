@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import cast
+import uuid
+from collections.abc import Callable, Iterable
+from typing import Any, cast
 
 from django import forms
 from django.contrib import messages
@@ -8,7 +10,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q, Sum
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
@@ -66,6 +68,95 @@ INTEGRATION_SNAPSHOT_FIELDS = (
     "llm_base_url",
     "llm_model",
 )
+MAP_WIDTH = 1000
+MAP_HEIGHT = 560
+MAP_PADDING = 24
+
+
+def _numeric_bbox(value: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    numbers = []
+    for item in value:
+        if not isinstance(item, int | float):
+            return None
+        numbers.append(float(item))
+    return numbers[0], numbers[1], numbers[2], numbers[3]
+
+
+def _geometry_rings(geometry: object) -> Iterable[list[Any]]:
+    if not isinstance(geometry, dict):
+        return ()
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Polygon" and isinstance(coordinates, list):
+        return (ring for ring in coordinates if isinstance(ring, list))
+    if geometry_type == "MultiPolygon" and isinstance(coordinates, list):
+        return (
+            ring
+            for polygon in coordinates
+            if isinstance(polygon, list)
+            for ring in polygon
+            if isinstance(ring, list)
+        )
+    return ()
+
+
+def _svg_path_for_geometry(
+    geometry: object,
+    project: Callable[[float, float], tuple[float, float]],
+) -> str:
+    commands: list[str] = []
+    for ring in _geometry_rings(geometry):
+        first_point = True
+        for coordinate in ring:
+            if not isinstance(coordinate, list) or len(coordinate) < 2:
+                continue
+            lon, lat = coordinate[0], coordinate[1]
+            if not isinstance(lon, int | float) or not isinstance(lat, int | float):
+                continue
+            x, y = project(float(lon), float(lat))
+            commands.append(f"{'M' if first_point else 'L'}{x:.2f} {y:.2f}")
+            first_point = False
+        if not first_point:
+            commands.append("Z")
+    return " ".join(commands)
+
+
+def _zone_map_payload(zones: Iterable[SearchZone]) -> dict[str, object]:
+    drawable_zones = [
+        (zone, bbox)
+        for zone in zones
+        if (bbox := _numeric_bbox(zone.boundary_bbox)) is not None and zone.boundary_geojson
+    ]
+    if not drawable_zones:
+        return {"viewBox": f"0 0 {MAP_WIDTH} {MAP_HEIGHT}", "zones": []}
+    min_x = min(bbox[0] for _, bbox in drawable_zones)
+    min_y = min(bbox[1] for _, bbox in drawable_zones)
+    max_x = max(bbox[2] for _, bbox in drawable_zones)
+    max_y = max(bbox[3] for _, bbox in drawable_zones)
+    x_range = max(max_x - min_x, 0.000001)
+    y_range = max(max_y - min_y, 0.000001)
+    scale = min(
+        (MAP_WIDTH - MAP_PADDING * 2) / x_range,
+        (MAP_HEIGHT - MAP_PADDING * 2) / y_range,
+    )
+    offset_x = (MAP_WIDTH - x_range * scale) / 2
+    offset_y = (MAP_HEIGHT - y_range * scale) / 2
+
+    def project(longitude: float, latitude: float) -> tuple[float, float]:
+        return (
+            offset_x + (longitude - min_x) * scale,
+            offset_y + (max_y - latitude) * scale,
+        )
+
+    map_zones = []
+    for zone, _bbox in drawable_zones:
+        path = _svg_path_for_geometry(zone.boundary_geojson, project)
+        if not path:
+            continue
+        map_zones.append({"id": str(zone.pk), "name": zone.name, "path": path})
+    return {"viewBox": f"0 0 {MAP_WIDTH} {MAP_HEIGHT}", "zones": map_zones}
 
 
 @require_capability(Capability.VIEW_CAMPAIGNS)
@@ -203,6 +294,34 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
             "selected_zone_ids": selected_zone_ids,
         },
     )
+
+
+@require_capability(Capability.MANAGE_CAMPAIGNS)
+@require_GET
+@never_cache
+def campaign_zone_map(request: HttpRequest, province_id: uuid.UUID) -> JsonResponse:
+    owner = request.user
+    assert isinstance(owner, User)
+    workspace = workspace_for_user(owner, Capability.MANAGE_CAMPAIGNS)
+    province = get_object_or_404(
+        SearchZone,
+        pk=province_id,
+        workspace=workspace,
+        level=SearchZone.Level.PROVINCE,
+        active=True,
+        archived_at__isnull=True,
+    )
+    zones = SearchZone.objects.filter(
+        workspace=workspace,
+        parent=province,
+        active=True,
+        selectable=True,
+        archived_at__isnull=True,
+    ).order_by("sort_order", "name")
+    payload = _zone_map_payload(zones)
+    payload["province"] = province.name
+    payload["label"] = province.label_plural
+    return JsonResponse(payload)
 
 
 @require_capability(Capability.VIEW_CAMPAIGNS)

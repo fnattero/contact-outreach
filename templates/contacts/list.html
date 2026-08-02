@@ -24,14 +24,29 @@
 {% if page_obj %}
 <div class="table-scroll">
   <table>
-    <thead><tr><th>Contacto</th><th>Email preferido</th><th>Estado</th><th>Última interacción</th><th>Próximo contacto</th><th>Atención</th></tr></thead>
+	    <thead><tr><th>Contacto</th><th>Email preferido</th><th>No contactar</th><th>Seguimiento</th><th>Última interacción</th><th>Atención</th></tr></thead>
     <tbody>
       {% for contact in page_obj %}<tr>
         <td><a class="table-primary" href="{% url 'contact-detail' contact.pk %}">{{ contact.name|default:contact.organization.name|default:"Contacto sin nombre" }}</a>{% if contact.name and contact.organization.name %}<span class="table-meta">{{ contact.organization.name }}</span>{% endif %}</td>
         <td>{{ contact.preferred_email.original_email|default:"Todavía no definido" }}</td>
-        <td><span class="badge badge--{{ contact.status|lower }}">{{ contact.get_status_display }}</span></td>
-        <td>{% if contact.last_interaction_at %}{{ contact.last_interaction_at|date:"d M Y · H:i" }}{% else %}Sin interacciones registradas{% endif %}</td>
-        <td>{% if contact.communication_plan.next_due_at and contact.communication_plan.state == "ACTIVE" %}{{ contact.communication_plan.next_due_at|date:"d M Y" }}<span class="table-meta">{{ contact.communication_plan.get_purpose_display }}</span>{% elif contact.communication_plan.state == "PAUSED" %}Pausado{% else %}No programado{% endif %}</td>
+	        <td>
+	          {% if can_manage_contacts and contact.status != 'UNSUBSCRIBED' %}
+	            <form method="post" action="{% url 'contact-no-contact-toggle' contact.pk %}" class="inline-form">
+	              {% csrf_token %}
+	              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+	              <input type="hidden" name="blocked" value="0">
+	              <label class="checkbox-line table-toggle">
+	                <input type="checkbox" name="blocked" value="1"{% if contact.status == 'DO_NOT_CONTACT' or contact.active_contact_restriction_count %} checked{% endif %} onchange="this.form.submit()">
+	                <span>No contactar</span>
+	              </label>
+	              <noscript><button class="button button--small button--secondary" type="submit">Guardar</button></noscript>
+	            </form>
+	          {% else %}
+	            <span class="badge badge--{{ contact.status|lower }}">{{ contact.get_status_display }}</span>
+	          {% endif %}
+	        </td>
+	        <td>{% if contact.approved_follow_up_count %}{{ contact.approved_follow_up_count }} tema{{ contact.approved_follow_up_count|pluralize }} aprobado{{ contact.approved_follow_up_count|pluralize }}{% if contact.next_follow_up_at %}<span class="table-meta">Próximo: {{ contact.next_follow_up_at|date:"d M Y" }}</span>{% endif %}{% else %}<span class="muted">Sin temas aprobados</span>{% endif %}</td>
+	        <td>{% if contact.last_interaction_at %}{{ contact.last_interaction_at|date:"d M Y · H:i" }}{% else %}Sin interacciones registradas{% endif %}</td>
         <td>{% if contact.open_task_count %}<a class="badge badge--warning" href="{% url 'contact-detail' contact.pk %}#attention">Necesita que lo revises ({{ contact.open_task_count }})</a>{% else %}<span class="muted">Sin pendientes</span>{% endif %}</td>
       </tr>{% endfor %}
     </tbody>

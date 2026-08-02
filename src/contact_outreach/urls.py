@@ -20,6 +20,7 @@ from apps.automation.views import (
     automation_mode,
     automation_settings,
     decision_review,
+    follow_up_topic_save,
     global_context_approve,
     global_context_create,
     knowledge_approve,
@@ -33,6 +34,7 @@ from apps.campaigns.views import (
     campaign_detail,
     campaign_list,
     campaign_start_approved,
+    campaign_zone_map,
     regenerate_outdated_campaign_analyses,
     regenerate_prospect_message,
 )
@@ -56,7 +58,9 @@ from apps.contacts.views import (
     contact_email_preferred,
     contact_email_restrict,
     contact_email_validate,
+    contact_follow_up_topic_approve,
     contact_list,
+    contact_no_contact_toggle,
     contact_notes,
     contact_plan_save,
     contact_plan_snooze,
@@ -107,15 +111,25 @@ urlpatterns = [
     path("", dashboard, name="dashboard"),
     path("contactos/", contact_list, name="contacts"),
     path("contactos/nuevo/", contact_create, name="contact-create"),
+    path(
+        "contactos/<uuid:contact_id>/no-contactar/toggle/",
+        contact_no_contact_toggle,
+        name="contact-no-contact-toggle",
+    ),
     path("contactos/<uuid:contact_id>/", contact_detail, name="contact-detail"),
     path("contactos/<uuid:contact_id>/notas/", contact_notes, name="contact-notes"),
+    path(
+        "contactos/<uuid:contact_id>/seguimiento/<uuid:topic_id>/aprobar/",
+        contact_follow_up_topic_approve,
+        name="contact-follow-up-topic-approve",
+    ),
     path(
         "contactos/<uuid:contact_id>/proximo-contacto/guardar/",
         contact_plan_save,
         name="contact-plan-save",
     ),
     path(
-        "contactos/<uuid:contact_id>/proximo-contacto/estado/<str:state>/",
+        "contactos/<uuid:contact_id>/seguimiento/<uuid:plan_id>/estado/<str:state>/",
         contact_plan_state,
         name="contact-plan-state",
     ),
@@ -181,6 +195,11 @@ urlpatterns = [
     path("respuesta-automatica/", automation_settings, name="automation-settings"),
     path("respuesta-automatica/modo/", automation_mode, name="automation-mode"),
     path(
+        "respuesta-automatica/temas/guardar/",
+        follow_up_topic_save,
+        name="follow-up-topic-save",
+    ),
+    path(
         "respuesta-automatica/contexto-general/nuevo/",
         global_context_create,
         name="global-context-create",
@@ -217,6 +236,11 @@ urlpatterns = [
     path("catalogos/<uuid:catalog_id>/descargar/", catalog_download, name="catalog-download"),
     path("campanas/", campaign_list, name="campaigns"),
     path("campanas/nueva/", campaign_create, name="campaign-create"),
+    path(
+        "campanas/nueva/provincias/<uuid:province_id>/mapa/",
+        campaign_zone_map,
+        name="campaign-zone-map",
+    ),
     path("campanas/<uuid:campaign_id>/", campaign_detail, name="campaign-detail"),
     path(
         "campanas/<uuid:campaign_id>/aprobar/",

@@ -79,3 +79,27 @@ def test_campaign_form_groups_searchable_districts_by_province(
     assert "Seleccionar todos" in content
     assert "Barrios" in content
     assert "Departamentos" in content
+    assert "data-zone-map-canvas" in content
+    assert "data-zone-map-url" in content
+
+
+@pytest.mark.django_db
+def test_campaign_zone_map_returns_clickable_district_paths(
+    client: Client,
+    owner: User,
+) -> None:
+    client.force_login(owner)
+    caba = SearchZone.objects.get(level=SearchZone.Level.PROVINCE, official_code="02")
+
+    response = client.get(reverse("campaign-zone-map", args=(caba.pk,)))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["province"] == "Ciudad Autónoma de Buenos Aires"
+    assert payload["label"] == "Barrios"
+    assert payload["viewBox"] == "0 0 1000 560"
+    assert payload["zones"]
+    palermo = next(zone for zone in payload["zones"] if zone["name"] == "Palermo")
+    assert palermo["id"]
+    assert palermo["path"].startswith("M")
+    assert "geometry" not in palermo

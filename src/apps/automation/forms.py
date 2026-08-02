@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django import forms
 
-from apps.automation.models import ReplyAutomationConfiguration, ReplyDecision
+from apps.automation.models import FollowUpTopic, ReplyAutomationConfiguration, ReplyDecision
 
 
 class GlobalKnowledgeContextForm(forms.Form):
@@ -136,4 +136,53 @@ class AutomationModeForm(forms.Form):
         label="Tu contraseña actual",
         widget=forms.PasswordInput,
         help_text="Sólo se pide para activar respuestas automáticas reales.",
+    )
+
+
+class FollowUpTopicForm(forms.Form):
+    name = forms.CharField(
+        max_length=160,
+        label="Tema",
+        help_text="Ej.: Reactivar conversación, pedir feedback o presentar una novedad.",
+    )
+    objective = forms.CharField(
+        max_length=1000,
+        label="Objetivo",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Qué debería intentar lograr el mensaje sin inventar datos del cliente.",
+    )
+    instructions = forms.CharField(
+        required=False,
+        max_length=2000,
+        label="Límites e instrucciones",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Reglas internas para este tema. No incluyas precios ni promesas cambiantes.",
+    )
+    cadence_days = forms.IntegerField(
+        label="Periodicidad global",
+        min_value=7,
+        initial=30,
+        help_text="El mínimo es 7 días.",
+    )
+    mode = forms.ChoiceField(
+        label="Cómo se envía",
+        choices=FollowUpTopic.Mode.choices,
+        initial=FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+        help_text="Automático sólo funciona si todos los controles de seguridad están habilitados.",
+    )
+    next_due_at = forms.DateTimeField(
+        required=False,
+        label="Próxima fecha global",
+        input_formats=("%Y-%m-%dT%H:%M",),
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local"},
+        ),
+        help_text="Desde esta fecha se considera el tema para contactos aprobados.",
+    )
+    active = forms.BooleanField(
+        required=False,
+        label="Tema activo",
+        initial=True,
+        help_text="Si está inactivo, no genera próximos contactos aunque esté aprobado.",
     )

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from django.db.models import Count, Q, QuerySet
+from django.db.models import Count, Min, Q, QuerySet
 
 from apps.automation.models import HumanTask, ReplyDecision
 from apps.campaigns.models import OutboundMessage
@@ -45,13 +45,31 @@ def contact_queryset(
 ) -> QuerySet[Contact]:
     queryset = (
         Contact.objects.filter(workspace_id=workspace_id)
-        .select_related("organization", "preferred_email", "communication_plan")
+        .select_related("organization", "preferred_email")
         .annotate(
             open_task_count=Count(
                 "human_tasks",
                 filter=Q(human_tasks__status=HumanTask.Status.OPEN),
                 distinct=True,
-            )
+            ),
+            active_contact_restriction_count=Count(
+                "restrictions",
+                filter=Q(restrictions__revoked_at__isnull=True),
+                distinct=True,
+            ),
+            approved_follow_up_count=Count(
+                "communication_plans",
+                filter=Q(communication_plans__state="ACTIVE"),
+                distinct=True,
+            ),
+            next_follow_up_at=Min(
+                "communication_plans__next_due_at",
+                filter=Q(
+                    communication_plans__state="ACTIVE",
+                    communication_plans__topic__active=True,
+                    communication_plans__next_due_at__isnull=False,
+                ),
+            ),
         )
     )
     query = str(values.get("q", "")).strip()

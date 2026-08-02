@@ -14,17 +14,18 @@ from apps.automation.execution import deliver_authorized_outbound
 from apps.automation.models import (
     AutomaticActionReservation,
     ContactCommunicationPlan,
+    FollowUpTopic,
     HumanTask,
     ReplyAutomationConfiguration,
     ScheduledContactAttempt,
 )
 from apps.automation.scheduled import (
+    approve_contact_follow_up_topic,
     authorize_scheduled_contact_attempt,
     create_due_scheduled_attempts,
     edit_scheduled_contact_draft,
     process_scheduled_contact_attempt,
     record_genuine_contact_interaction,
-    save_contact_communication_plan,
     set_contact_communication_plan_state,
     snooze_contact_communication_plan,
 )
@@ -97,18 +98,24 @@ def _plan(
     email: EmailAddress,
     *,
     due_at: datetime | None = None,
-    mode: str = ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
+    mode: str = FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+    topic_name: str = "Preguntar cómo está",
 ) -> ContactCommunicationPlan:
-    return save_contact_communication_plan(
-        actor=owner,
-        contact_id=contact.pk,
-        preferred_email_id=email.pk,
-        purpose=ContactCommunicationPlan.Purpose.CHECK_IN,
-        goal_text="",
+    topic = FollowUpTopic.objects.create(
+        workspace=owner.membership.workspace,
+        name=f"{topic_name} {str(contact.pk)[:8]}",
+        objective="Preguntar de manera cordial cómo están.",
         cadence_days=30,
         mode=mode,
-        enabled=True,
         next_due_at=due_at or timezone.now() - timedelta(minutes=1),
+        active=True,
+        created_by=owner,
+        updated_by=owner,
+    )
+    return approve_contact_follow_up_topic(
+        actor=owner,
+        contact_id=contact.pk,
+        topic_id=topic.pk,
     )
 
 
@@ -146,7 +153,7 @@ def test_due_review_plan_creates_one_editable_draft_without_gmail_or_pdfs(
     assert attempt.state == ScheduledContactAttempt.State.DRAFT_REVIEW
     assert len(provider.scheduled_contact_requests) == 1
     request = provider.scheduled_contact_requests[0]
-    assert request.purpose == ContactCommunicationPlan.Purpose.CHECK_IN
+    assert request.purpose.startswith("Preguntar cómo está")
     assert scheduled_contact_input_character_count(request) <= 24_000
     assert attempt.context_manifest["request"]["characters"] == (
         scheduled_contact_input_character_count(request)
@@ -176,6 +183,35 @@ def test_due_review_plan_creates_one_editable_draft_without_gmail_or_pdfs(
 
 
 @pytest.mark.django_db
+def test_due_topics_create_one_attempt_per_contact(owner: User) -> None:
+    contact, email = _contact(owner)
+    now = timezone.now()
+    later_plan = _plan(
+        owner,
+        contact,
+        email,
+        due_at=now - timedelta(hours=1),
+        topic_name="Tema menos urgente",
+    )
+    urgent_plan = _plan(
+        owner,
+        contact,
+        email,
+        due_at=now - timedelta(days=2),
+        topic_name="Tema urgente",
+    )
+
+    attempt_ids = create_due_scheduled_attempts(at=now)
+    repeated = create_due_scheduled_attempts(at=now)
+
+    assert repeated == attempt_ids
+    assert len(attempt_ids) == 1
+    attempt = ScheduledContactAttempt.objects.get(pk=attempt_ids[0])
+    assert attempt.plan == urgent_plan
+    assert ScheduledContactAttempt.objects.filter(plan=later_plan).count() == 0
+
+
+@pytest.mark.django_db
 @override_settings(
     SEND_MODE="live",
     SEND_KILL_SWITCH=False,
@@ -198,7 +234,7 @@ def test_automatic_plan_requires_live_qualification_and_queues_new_thread(
         "apps.automation.scheduled.qualification_snapshot",
         lambda workspace: QualificationSnapshot(30, 10, 30, 0),
     )
-    _plan(owner, contact, email, mode=ContactCommunicationPlan.Mode.AUTOMATIC)
+    _plan(owner, contact, email, mode=FollowUpTopic.Mode.AUTOMATIC)
     attempt_id = create_due_scheduled_attempts()[0]
 
     attempt = process_scheduled_contact_attempt(attempt_id, provider=MockLLMProvider())
@@ -238,7 +274,7 @@ def test_relationship_kill_switch_blocks_automatic_attempt_before_llm(
         "apps.automation.scheduled.qualification_snapshot",
         lambda workspace: QualificationSnapshot(30, 10, 30, 0),
     )
-    _plan(owner, contact, email, mode=ContactCommunicationPlan.Mode.AUTOMATIC)
+    _plan(owner, contact, email, mode=FollowUpTopic.Mode.AUTOMATIC)
     provider = MockLLMProvider()
 
     attempt = process_scheduled_contact_attempt(
@@ -297,7 +333,7 @@ def test_pause_snooze_and_genuine_interaction_control_the_next_due_date(
 
     snooze_contact_communication_plan(
         actor=owner,
-        contact_id=contact.pk,
+        plan_id=plan.pk,
         until=snoozed_until,
     )
 
@@ -309,7 +345,7 @@ def test_pause_snooze_and_genuine_interaction_control_the_next_due_date(
 
     set_contact_communication_plan_state(
         actor=owner,
-        contact_id=contact.pk,
+        plan_id=plan.pk,
         state=ContactCommunicationPlan.State.PAUSED,
     )
     assert create_due_scheduled_attempts(at=now + timedelta(days=20)) == ()
@@ -328,36 +364,40 @@ def test_contact_plan_ui_is_plain_language_and_vendedor_is_read_only(
     client: Client,
     owner: User,
 ) -> None:
-    contact, email = _contact(owner)
+    contact, _email = _contact(owner)
+    topic = FollowUpTopic.objects.create(
+        workspace=owner.membership.workspace,
+        name="Pedir feedback",
+        objective="Pedir una opinión general sobre el producto.",
+        cadence_days=30,
+        mode=FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+        next_due_at=timezone.now() + timedelta(days=7),
+        active=True,
+        created_by=owner,
+        updated_by=owner,
+    )
     client.force_login(owner)
     response = client.post(
-        reverse("contact-plan-save", args=(contact.pk,)),
-        {
-            "enabled": "on",
-            "preferred_email": str(email.pk),
-            "purpose": ContactCommunicationPlan.Purpose.PRODUCT_FEEDBACK,
-            "goal_text": "",
-            "cadence_days": "30",
-            "mode": ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
-            "next_due_at": (timezone.now() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M"),
-        },
+        reverse("contact-follow-up-topic-approve", args=(contact.pk, topic.pk)),
     )
     assert response.status_code == 302
     page = client.get(reverse("contact-detail", args=(contact.pk,))).content.decode()
-    assert "Próximo contacto" in page
-    assert "Nada se envía sin tu autorización" in page
-    assert "Posponer hasta otra fecha" in page
+    assert "Temas de seguimiento" in page
+    assert "Pedir feedback" in page
+    assert "Revisar antes de enviar" in page
+    assert "Posponer" in page
+    assert "Próxima fecha" not in page
     assert "No incluye PDFs" not in page
 
     seller = User.objects.create_user(username="seller-scheduled", password="password")
     client.force_login(seller)
     seller_page = client.get(reverse("contact-detail", args=(contact.pk,))).content.decode()
-    assert "Próximo contacto" in seller_page
-    assert "Cambiar programación" not in seller_page
+    assert "Temas de seguimiento" in seller_page
+    assert "Aprobar tema" not in seller_page
     assert "Detalles técnicos" not in seller_page
     assert (
         client.post(
-            reverse("contact-plan-save", args=(contact.pk,)),
+            reverse("contact-follow-up-topic-approve", args=(contact.pk, topic.pk)),
             {"enabled": "on"},
         ).status_code
         == 403
@@ -560,7 +600,7 @@ def test_scheduled_failure_opens_one_contact_level_task_without_prior_conversati
     owner: User,
 ) -> None:
     contact, email = _contact(owner)
-    _plan(owner, contact, email)
+    plan = _plan(owner, contact, email)
     attempt_id = create_due_scheduled_attempts()[0]
 
     attempt = process_scheduled_contact_attempt(
@@ -591,16 +631,12 @@ def test_scheduled_failure_opens_one_contact_level_task_without_prior_conversati
     contact.refresh_from_db()
     assert not contact.automation_suspended
 
-    save_contact_communication_plan(
+    plan.topic.next_due_at = timezone.now() + timedelta(days=30)
+    plan.topic.save(update_fields=("next_due_at", "updated_at"))
+    approve_contact_follow_up_topic(
         actor=owner,
         contact_id=contact.pk,
-        preferred_email_id=email.pk,
-        purpose=ContactCommunicationPlan.Purpose.CHECK_IN,
-        goal_text="",
-        cadence_days=30,
-        mode=ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
-        enabled=True,
-        next_due_at=timezone.now() + timedelta(days=30),
+        topic_id=plan.topic_id,
     )
     attempt.refresh_from_db()
     assert attempt.state == ScheduledContactAttempt.State.CANCELLED

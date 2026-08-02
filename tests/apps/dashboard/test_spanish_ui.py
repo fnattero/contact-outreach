@@ -49,7 +49,8 @@ def test_campaign_form_renders_keyboard_accessible_spanish_help(
     assert "data-province-toggle=" in content
     assert "data-district-select-all=" in content
     assert "Primero elegí una o más provincias" in content
-    assert "data-zone-map-canvas" not in content
+    assert "data-zone-map-canvas" in content
+    assert "data-zone-map-url" in content
     assert 'id="campaign-zone-map-data"' not in content
     assert 'class="choice-item"' in content
     assert 'class="radio-card"' in content

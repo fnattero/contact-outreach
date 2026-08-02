@@ -3,97 +3,493 @@
 {% block breadcrumb %}Contactos / Detalle{% endblock %}
 {% block page_title %}Detalle del contacto{% endblock %}
 {% block content %}
-<header class="page-header contact-hero">
-  <div class="page-header__copy"><p><a href="{% url 'contacts' %}">← Volver a Contactos</a></p><h1>{{ contact.name|default:contact.organization.name|default:"Contacto sin nombre" }}</h1>{% if contact.name and contact.organization.name %}<p>{{ contact.organization.name }}</p>{% endif %}</div>
-  <div class="page-header__actions"><span class="badge badge--{{ contact.status|lower }}">{{ contact.get_status_display }}</span>{% if open_task_count %}<a class="badge badge--warning" href="#attention">Necesita que lo revises ({{ open_task_count }})</a>{% endif %}</div>
+<header class="contact-detail-hero">
+  <div class="contact-detail-hero__identity">
+    <a class="back-link" href="{% url 'contacts' %}">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      <span>Volver a Contactos</span>
+    </a>
+    <div class="contact-profile">
+      <span class="contact-avatar" aria-hidden="true">{{ contact.name|default:contact.organization.name|default:"C"|slice:":1" }}</span>
+      <div class="contact-profile__copy">
+        <h1>{{ contact.name|default:contact.organization.name|default:"Contacto sin nombre" }}</h1>
+        {% if contact.name and contact.organization.name %}<p>{{ contact.organization.name }}</p>{% endif %}
+        <div class="contact-profile__meta" aria-label="Estado del contacto">
+          <span class="badge badge--{{ contact.status|lower }}">{{ contact.get_status_display }}</span>
+          <span class="badge">Origen: {{ contact.get_created_reason_display }}</span>
+          {% if open_task_count %}<a class="badge badge--warning" href="#attention">Necesita que lo revises ({{ open_task_count }})</a>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="contact-detail-hero__signal" aria-label="Resumen rápido">
+    <strong>{{ contact_overview.message_count }}</strong>
+    <span>mensaje{{ contact_overview.message_count|pluralize }} en {{ contact_overview.conversation_count }} hilo{{ contact_overview.conversation_count|pluralize }}</span>
+  </div>
 </header>
 
-{% if open_task_count %}<div class="alert alert--warning" role="status"><div><strong>Hay una conversación esperando una decisión.</strong><br>Leé el motivo y el intercambio antes de continuar.</div></div>{% endif %}
-
-<section class="panel contact-summary" aria-label="Resumen del contacto">
-  <div class="panel__body definition-grid">
-    <dt>Email preferido</dt><dd>{{ contact.preferred_email.original_email|default:"Todavía no definido" }}</dd>
-    <dt>Última interacción</dt><dd>{% if contact.last_interaction_at %}{{ contact.last_interaction_at|date:"d M Y · H:i" }}{% else %}Sin interacciones registradas{% endif %}</dd>
-    <dt>Respuesta automática</dt><dd>{{ automation_summary }}</dd>
-    <dt>Próximo contacto</dt><dd>{% if plan.next_due_at and plan.state == "ACTIVE" %}{{ plan.next_due_at|date:"d M Y · H:i" }}{% elif plan.state == "PAUSED" %}Pausado{% else %}No hay un próximo contacto programado{% endif %}</dd>
+{% if open_task_count %}
+  <div class="alert alert--warning" role="status">
+    <div><strong>Hay una conversación esperando una decisión.</strong><br>Leé el motivo y el intercambio antes de continuar.</div>
   </div>
+{% endif %}
+
+<section class="contact-map" aria-label="Mapa de relación">
+  <article class="contact-map__step contact-map__step--done">
+    <span class="contact-map__marker" aria-hidden="true">1</span>
+    <div>
+      <span class="contact-map__label">Relación</span>
+      <strong>{{ contact.get_status_display }}</strong>
+      <p>Fuera de nuevas campañas</p>
+    </div>
+  </article>
+  <article class="contact-map__step{% if contact_overview.available_email_count %} contact-map__step--done{% elif contact_overview.pending_email_count %} contact-map__step--waiting{% endif %}">
+    <span class="contact-map__marker" aria-hidden="true">2</span>
+    <div>
+      <span class="contact-map__label">Canales</span>
+      <strong>{{ contact_overview.available_email_count }} disponible{{ contact_overview.available_email_count|pluralize }}</strong>
+      <p>{{ contact_overview.email_count }} email{{ contact_overview.email_count|pluralize }} registrado{{ contact_overview.email_count|pluralize }}</p>
+    </div>
+  </article>
+  <article class="contact-map__step{% if open_task_count %} contact-map__step--warning{% elif contact_overview.conversation_count %} contact-map__step--done{% endif %}">
+    <span class="contact-map__marker" aria-hidden="true">3</span>
+    <div>
+      <span class="contact-map__label">Conversación</span>
+      <strong>{% if open_task_count %}Revisar{% elif contact_overview.conversation_count %}Al día{% else %}Sin hilo{% endif %}</strong>
+      <p>{% if open_task_count %}{{ open_task_count }} pendiente{{ open_task_count|pluralize }}{% else %}{{ contact_overview.message_count }} mensaje{{ contact_overview.message_count|pluralize }}{% endif %}</p>
+    </div>
+  </article>
+  <article class="contact-map__step{% if plan.state == "ACTIVE" %} contact-map__step--done{% elif plan.state == "PAUSED" %} contact-map__step--waiting{% endif %}">
+    <span class="contact-map__marker" aria-hidden="true">4</span>
+    <div>
+      <span class="contact-map__label">Seguimiento</span>
+      <strong>{% if contact_overview.approved_follow_up_count %}{{ contact_overview.approved_follow_up_count }} tema{{ contact_overview.approved_follow_up_count|pluralize }}{% else %}Sin temas{% endif %}</strong>
+      <p>{% if plan.next_due_at and plan.state == "ACTIVE" %}{{ plan.next_due_at|date:"d M Y · H:i" }}{% else %}La fecha sale de los temas globales{% endif %}</p>
+    </div>
+  </article>
 </section>
 
-<div class="contact-layout">
-  <main class="contact-layout__main">
-    <section aria-labelledby="conversation-heading">
-      <div class="section-heading"><div><h2 id="conversation-heading">Conversaciones</h2><p class="muted">Los mensajes se muestran en orden dentro de cada hilo de Gmail.</p></div></div>
-      {% for timeline in timelines %}<article class="panel conversation-group">
-        <div class="panel__header"><div><h3>{{ timeline.subject }}</h3><p class="muted">{{ timeline.first_at|date:"d M Y" }} — {{ timeline.last_at|date:"d M Y" }}</p></div><div><span class="badge{% if timeline.open_task_count %} badge--warning{% endif %}">{{ timeline.automation_label }}</span></div></div>
-        <div class="panel__body thread" aria-label="Hilo: {{ timeline.subject }}">
-          {% for item in timeline.items %}<article class="thread-message thread-message--{{ item.direction }}{% if item.needs_attention %} thread-message--attention{% endif %}">
-            <div class="thread-message__meta"><strong>{{ item.sender }}</strong><time datetime="{{ item.happened_at|date:'c' }}">{{ item.happened_at|date:"d M Y · H:i" }}</time></div>
-            <p class="thread-message__route">{% if item.direction == "outbound" %}Para {{ item.recipient }}{% else %}Para tu equipo{% endif %}{% if item.campaign_name %} · {{ item.campaign_name }}{% endif %}</p>
-            <p class="email-body">{{ item.body }}</p>
-            <span class="badge{% if item.needs_attention %} badge--warning{% elif item.simulated %} badge--simulation{% endif %}">{{ item.outcome }}</span>
-          </article>{% endfor %}
+<section class="contact-overview-grid" aria-label="Datos principales">
+  <article class="contact-overview-card">
+    <span class="contact-overview-card__icon contact-overview-card__icon--email" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18v12H3z"/><path d="m3 7 9 7 9-7"/></svg></span>
+    <span class="contact-overview-card__label">Email preferido</span>
+    <strong>{{ contact.preferred_email.original_email|default:"Todavía no definido" }}</strong>
+    <p>{% if contact_overview.available_email_count %}{{ contact_overview.available_email_count }} canal{{ contact_overview.available_email_count|pluralize:"es" }} disponible{{ contact_overview.available_email_count|pluralize }}{% elif contact_overview.pending_email_count %}Validación pendiente{% else %}Sin canal validado{% endif %}</p>
+  </article>
+  <article class="contact-overview-card">
+    <span class="contact-overview-card__icon contact-overview-card__icon--clock" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span>
+    <span class="contact-overview-card__label">Última interacción</span>
+    <strong>{% if contact.last_interaction_at %}{{ contact.last_interaction_at|date:"d M Y · H:i" }}{% else %}Sin interacciones{% endif %}</strong>
+    <p>{{ contact_overview.conversation_count }} hilo{{ contact_overview.conversation_count|pluralize }} registrado{{ contact_overview.conversation_count|pluralize }}</p>
+  </article>
+  <article class="contact-overview-card">
+    <span class="contact-overview-card__icon contact-overview-card__icon--automation" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg></span>
+    <span class="contact-overview-card__label">Respuesta automática</span>
+    <strong>{{ automation_summary }}</strong>
+    <p>{% if open_task_count %}Hay revisión humana abierta{% else %}Sin pendientes abiertos{% endif %}</p>
+  </article>
+  <article class="contact-overview-card">
+    <span class="contact-overview-card__icon contact-overview-card__icon--calendar" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v15H4zM8 3v4m8-4v4M4 10h16"/></svg></span>
+    <span class="contact-overview-card__label">Seguimiento</span>
+    <strong>{% if contact_overview.approved_follow_up_count %}{{ contact_overview.approved_follow_up_count }} tema{{ contact_overview.approved_follow_up_count|pluralize }} aprobado{{ contact_overview.approved_follow_up_count|pluralize }}{% else %}Sin temas aprobados{% endif %}</strong>
+    <p>{% if plan.next_due_at and plan.state == "ACTIVE" %}Próximo derivado: {{ plan.next_due_at|date:"d M Y · H:i" }}{% else %}Configurado desde temas globales{% endif %}</p>
+  </article>
+</section>
+
+<div class="contact-dashboard-layout">
+  <main class="contact-dashboard-layout__main">
+    <section id="contact-timeline" aria-labelledby="conversation-heading">
+      <div class="section-heading contact-section-heading">
+        <div>
+          <h2 id="conversation-heading">Conversaciones</h2>
+          <p class="muted">Cronología agrupada por hilo de Gmail.</p>
         </div>
-      </article>{% empty %}<section class="panel empty-state"><h3>Todavía no hay conversaciones</h3><p>Este contacto fue agregado manualmente. Sus futuros intercambios aparecerán acá.</p></section>{% endfor %}
+        <div class="contact-section-heading__meta">
+          <span class="badge">{{ contact_overview.conversation_count }} hilo{{ contact_overview.conversation_count|pluralize }}</span>
+          <span class="badge">{{ contact_overview.message_count }} mensaje{{ contact_overview.message_count|pluralize }}</span>
+        </div>
+      </div>
+      {% for timeline in timelines %}
+        <article class="conversation-card">
+          <header class="conversation-card__header">
+            <div class="conversation-card__title">
+              <span class="conversation-card__icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4z"/></svg></span>
+              <div>
+                <h3>{{ timeline.subject }}</h3>
+                <p class="muted">{{ timeline.first_at|date:"d M Y" }} · {{ timeline.last_at|date:"d M Y" }}</p>
+              </div>
+            </div>
+            <span class="badge{% if timeline.open_task_count %} badge--warning{% endif %}">{{ timeline.automation_label }}</span>
+          </header>
+          <div class="conversation-timeline" aria-label="Hilo: {{ timeline.subject }}">
+            {% for item in timeline.items %}
+              <article class="timeline-entry timeline-entry--{{ item.direction }}{% if item.needs_attention %} timeline-entry--attention{% endif %}">
+                <div class="timeline-entry__rail" aria-hidden="true"><span class="timeline-entry__dot"></span></div>
+                <div class="timeline-entry__bubble">
+                  <div class="timeline-entry__meta">
+                    <strong>{{ item.sender }}</strong>
+                    <time datetime="{{ item.happened_at|date:'c' }}">{{ item.happened_at|date:"d M Y · H:i" }}</time>
+                  </div>
+                  <p class="timeline-entry__route">{% if item.direction == "outbound" %}Para {{ item.recipient }}{% else %}Para tu equipo{% endif %}{% if item.campaign_name %} · {{ item.campaign_name }}{% endif %}</p>
+                  <p class="email-body">{{ item.body }}</p>
+                  <span class="badge{% if item.needs_attention %} badge--warning{% elif item.simulated %} badge--simulation{% endif %}">{{ item.outcome }}</span>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        </article>
+      {% empty %}
+        <section class="panel empty-state">
+          <div class="empty-state__icon" aria-hidden="true">◎</div>
+          <h3>Todavía no hay conversaciones</h3>
+          <p>Este contacto fue agregado manualmente. Sus futuros intercambios aparecerán acá.</p>
+        </section>
+      {% endfor %}
     </section>
 
-    <section class="panel" id="attention" aria-labelledby="attention-heading">
-      <div class="panel__header"><div><h2 id="attention-heading">Atención humana</h2><p class="muted">Motivos por los que una conversación quedó para revisión.</p></div></div>
-      {% if task_rows %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Estado</th><th>Motivo</th><th>Conversación</th><th>Fecha</th>{% if can_manage_contacts %}<th>Qué podés hacer</th>{% endif %}</tr></thead><tbody>{% for row in task_rows %}<tr id="tarea-{{ row.task.pk }}"><td><span class="badge{% if row.task.status == 'OPEN' %} badge--warning{% endif %}">{{ row.task.get_status_display }}</span></td><td>{{ row.reason_label }}{% if row.task.resolution_note %}<span class="table-meta">Decisión: {{ row.task.resolution_note }}</span>{% endif %}</td><td>{{ row.task.conversation.subject|default:"Sin asunto" }}</td><td>{{ row.task.opened_at|date:"d M Y · H:i" }}{% if row.task.resolved_at %}<span class="table-meta">Cerrada {{ row.task.resolved_at|date:"d M Y · H:i" }}</span>{% endif %}</td>{% if can_manage_contacts %}<td>{% if row.task.status == 'OPEN' %}{% if row.task.inbound_id %}<p><a class="button button--small" href="{% url 'response-thread' row.task.inbound_id %}">Leer y responder</a></p>{% endif %}<details class="confirm"><summary>Cerrar esta revisión</summary><div class="confirm__body"><p>Usá “Resuelta” cuando ya tomaste la acción necesaria. “Descartar” indica que no hacía falta actuar.</p><form method="post" action="{% url 'human-task-close' contact.pk row.task.pk %}">{% csrf_token %}<label for="task-note-{{ row.task.pk }}">Qué decidiste</label><textarea id="task-note-{{ row.task.pk }}" name="note" rows="3" maxlength="1000" required></textarea><p class="field__help">Dejá una nota breve para que el equipo entienda cómo terminó la revisión.</p><div class="actions"><button class="button button--small" type="submit" name="outcome" value="resolved">Marcar como resuelta</button><button class="button button--secondary button--small" type="submit" name="outcome" value="dismissed">Descartar revisión</button></div></form></div></details>{% else %}<span class="muted">Sin acciones pendientes</span>{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody></table></div>{% else %}<div class="panel__body"><p class="muted flush">No hay pedidos de revisión para este contacto.</p></div>{% endif %}
+    <section class="contact-visual-section" id="attention" aria-labelledby="attention-heading">
+      <div class="section-heading contact-section-heading">
+        <div>
+          <h2 id="attention-heading">Atención humana</h2>
+          <p class="muted">Motivos por los que una conversación quedó para revisión.</p>
+        </div>
+        {% if open_task_count %}<span class="badge badge--warning">{{ open_task_count }} pendiente{{ open_task_count|pluralize }}</span>{% endif %}
+      </div>
+      {% if task_rows %}
+        <div class="task-card-list">
+          {% for row in task_rows %}
+            <article class="task-card{% if row.task.status == 'OPEN' %} task-card--open{% endif %}" id="tarea-{{ row.task.pk }}">
+              <div class="task-card__status">
+                <span class="badge{% if row.task.status == 'OPEN' %} badge--warning{% endif %}">{{ row.task.get_status_display }}</span>
+                <time datetime="{{ row.task.opened_at|date:'c' }}">{{ row.task.opened_at|date:"d M Y · H:i" }}</time>
+              </div>
+              <div class="task-card__body">
+                <h3>{{ row.reason_label }}</h3>
+                <p class="muted">{{ row.task.conversation.subject|default:"Sin asunto" }}</p>
+                {% if row.task.resolution_note %}<p>Decisión: {{ row.task.resolution_note }}</p>{% endif %}
+                {% if row.task.resolved_at %}<p class="muted">Cerrada {{ row.task.resolved_at|date:"d M Y · H:i" }}</p>{% endif %}
+              </div>
+              {% if can_manage_contacts %}
+                <div class="task-card__actions">
+                  {% if row.task.status == 'OPEN' %}
+                    {% if row.task.inbound_id %}<a class="button button--small" href="{% url 'response-thread' row.task.inbound_id %}">Leer y responder</a>{% endif %}
+                    <details class="confirm">
+                      <summary>Cerrar esta revisión</summary>
+                      <div class="confirm__body">
+                        <p>Usá “Resuelta” cuando ya tomaste la acción necesaria. “Descartar” indica que no hacía falta actuar.</p>
+                        <form method="post" action="{% url 'human-task-close' contact.pk row.task.pk %}">
+                          {% csrf_token %}
+                          <label for="task-note-{{ row.task.pk }}">Qué decidiste</label>
+                          <textarea id="task-note-{{ row.task.pk }}" name="note" rows="3" maxlength="1000" required></textarea>
+                          <p class="field__help">Dejá una nota breve para que el equipo entienda cómo terminó la revisión.</p>
+                          <div class="actions">
+                            <button class="button button--small" type="submit" name="outcome" value="resolved">Marcar como resuelta</button>
+                            <button class="button button--secondary button--small" type="submit" name="outcome" value="dismissed">Descartar revisión</button>
+                          </div>
+                        </form>
+                      </div>
+                    </details>
+                  {% else %}
+                    <span class="muted">Sin acciones pendientes</span>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <section class="panel empty-state empty-state--compact">
+          <div class="empty-state__icon" aria-hidden="true">✓</div>
+          <h3>No hay pedidos de revisión</h3>
+          <p>Cuando una conversación necesite una decisión humana, aparecerá acá.</p>
+        </section>
+      {% endif %}
     </section>
 
-    <section class="panel" aria-labelledby="campaign-history-heading">
-      <div class="panel__header"><div><h2 id="campaign-history-heading">Historial de campañas</h2><p class="muted">Propuestas que vincularon a esta empresa con una campaña.</p></div></div>
-      {% if enrollments %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Campaña</th><th>Email usado</th><th>Resultado</th><th>Fechas</th></tr></thead><tbody>{% for enrollment in enrollments %}<tr><td><a class="table-primary" href="{% url 'campaign-detail' enrollment.campaign_id %}">{{ enrollment.campaign.name }}</a></td><td>{{ enrollment.selected_email.original_email|default:"Sin email elegido" }}</td><td>{{ enrollment.get_state_display }}</td><td>{% if enrollment.initial_sent_at %}Propuesta: {{ enrollment.initial_sent_at|date:"d M Y" }}{% endif %}{% if enrollment.replied_at %}<span class="table-meta">Respuesta: {{ enrollment.replied_at|date:"d M Y" }}</span>{% endif %}{% if not enrollment.initial_sent_at and not enrollment.replied_at %}Sin envíos confirmados{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="panel__body"><p class="muted flush">No está asociado a campañas anteriores.</p></div>{% endif %}
+    <section class="panel contact-visual-section contact-main-panel" aria-labelledby="plan-heading">
+      <div class="panel__header">
+        <div>
+          <h2 id="plan-heading">Temas de seguimiento</h2>
+          <p class="muted">La fecha y periodicidad se configuran globalmente. Acá sólo aprobás qué temas aplican a este contacto.</p>
+        </div>
+        <span class="badge">{{ contact_overview.approved_follow_up_count }} aprobado{{ contact_overview.approved_follow_up_count|pluralize }}</span>
+      </div>
+      <div class="panel__body">
+        {% if can_manage_contacts and scheduled_draft_form and latest_attempt.outbound_message %}
+          <div class="alert alert--info" role="status"><div><strong>Hay un borrador listo para revisar.</strong><br>Todavía no se envió. Podés corregirlo y después autorizarlo.</div></div>
+          <form method="post" action="{% url 'scheduled-contact-draft-edit' contact.pk latest_attempt.pk %}" class="section-gap">
+            {% csrf_token %}
+            {% include "includes/field.html" with field=scheduled_draft_form.subject %}
+            {% include "includes/field.html" with field=scheduled_draft_form.body_text %}
+            <button class="button button--secondary button--small" type="submit">Guardar cambios</button>
+          </form>
+          <details class="confirm section-gap">
+            <summary>Autorizar y enviar por Gmail</summary>
+            <div class="confirm__body">
+              <p>Se enviará como un hilo nuevo al email preferido. No incluye PDFs.</p>
+              <form method="post" action="{% url 'scheduled-contact-authorize' contact.pk latest_attempt.pk %}">
+                {% csrf_token %}
+                <button class="button button--small" type="submit">Autorizar este mensaje</button>
+              </form>
+            </div>
+          </details>
+        {% endif %}
+
+        {% if can_manage_contacts and not has_validated_preferred_email %}
+          <div class="alert alert--warning section-gap" role="status"><div><strong>Falta un email preferido validado.</strong><br>Elegí un canal validado como preferido en la sección Emails antes de aprobar temas.</div></div>
+        {% endif %}
+
+        <div class="follow-up-topic-grid section-gap">
+          {% for row in topic_rows %}
+            <article class="follow-up-topic{% if row.plan.state == 'ACTIVE' %} follow-up-topic--active{% elif row.plan.state == 'PAUSED' %} follow-up-topic--paused{% endif %}">
+              <div class="follow-up-topic__main">
+                <div>
+                  <h3>{{ row.topic.name }}</h3>
+                  <p class="muted">{{ row.topic.objective }}</p>
+                  {% if row.topic.instructions %}<p class="table-meta">{{ row.topic.instructions }}</p>{% endif %}
+                </div>
+                <div class="contact-channel__badges">
+                  <span class="badge{% if row.topic.active %} badge--success{% else %} badge--paused{% endif %}">{% if row.topic.active %}Tema activo{% else %}Tema inactivo{% endif %}</span>
+                  {% if row.plan %}<span class="badge{% if row.plan.state == 'ACTIVE' %} badge--success{% elif row.plan.state == 'PAUSED' %} badge--warning{% endif %}">{{ row.plan.get_state_display }}</span>{% endif %}
+                </div>
+              </div>
+              <dl class="mini-definition-grid">
+                <dt>Periodicidad</dt><dd>Cada {{ row.topic.cadence_days }} días</dd>
+                <dt>Fecha global</dt><dd>{% if row.topic.next_due_at %}{{ row.topic.next_due_at|date:"d M Y · H:i" }}{% else %}Según periodicidad{% endif %}</dd>
+                <dt>Modo</dt><dd>{{ row.topic.get_mode_display }}</dd>
+                {% if row.plan %}<dt>Próximo para este contacto</dt><dd>{% if row.plan.next_due_at %}{{ row.plan.next_due_at|date:"d M Y · H:i" }}{% else %}Sin fecha derivada{% endif %}{% if row.plan.snoozed_until %}<span class="table-meta">Pospuesto hasta {{ row.plan.snoozed_until|date:"d M Y · H:i" }}</span>{% endif %}</dd>{% endif %}
+              </dl>
+              {% if can_manage_contacts %}
+                <div class="actions">
+                  {% if row.plan %}
+                    {% if row.plan.state == 'ACTIVE' %}
+                      <form method="post" action="{% url 'contact-plan-state' contact.pk row.plan.pk 'pausar' %}">{% csrf_token %}<button class="button button--secondary button--small" type="submit">Pausar</button></form>
+                    {% else %}
+                      <form method="post" action="{% url 'contact-plan-state' contact.pk row.plan.pk 'activar' %}">{% csrf_token %}<button class="button button--small" type="submit">Activar</button></form>
+                    {% endif %}
+                    {% if row.plan.state != 'DISABLED' %}<form method="post" action="{% url 'contact-plan-state' contact.pk row.plan.pk 'desactivar' %}">{% csrf_token %}<button class="button button--secondary button--small" type="submit">Desactivar</button></form>{% endif %}
+                    <details>
+                      <summary>Posponer</summary>
+                      <form method="post" action="{% url 'contact-plan-snooze' contact.pk %}" class="section-gap">
+                        {% csrf_token %}
+                        <input type="hidden" name="plan_id" value="{{ row.plan.pk }}">
+                        {% include "includes/field.html" with field=plan_snooze_form.until %}
+                        <button class="button button--secondary button--small" type="submit">Posponer</button>
+                      </form>
+                    </details>
+                  {% elif row.topic.active %}
+                    <form method="post" action="{% url 'contact-follow-up-topic-approve' contact.pk row.topic.pk %}">
+                      {% csrf_token %}
+                      <button class="button button--small" type="submit">Aprobar tema</button>
+                    </form>
+                  {% else %}
+                    <span class="muted">Tema inactivo</span>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </article>
+          {% empty %}
+            <section class="empty-state empty-state--compact">
+              <div class="empty-state__icon" aria-hidden="true">○</div>
+              <h3>No hay temas globales</h3>
+              <p>Crealos en Respuesta automática para aprobarlos en contactos.</p>
+            </section>
+          {% endfor %}
+        </div>
+
+        {% if latest_attempt %}
+          <details class="section-gap">
+            <summary>Detalles técnicos</summary>
+            <dl class="definition-grid">
+              <dt>Tema</dt><dd>{{ latest_attempt.plan.topic.name }}</dd>
+              <dt>Proveedor</dt><dd>{{ latest_attempt.provider|default:"Todavía no usado" }}</dd>
+              <dt>Modelo</dt><dd>{{ latest_attempt.model|default:"Todavía no usado" }}</dd>
+              <dt>Contexto</dt><dd>{% if latest_attempt.context_hash %}Verificado y acotado{% else %}Todavía no generado{% endif %}</dd>
+            </dl>
+          </details>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel contact-visual-section contact-main-panel" aria-labelledby="restriction-heading">
+      <div class="panel__header">
+        <div>
+          <h2 id="restriction-heading">Historial de restricciones</h2>
+          <p class="muted">El bloqueo completo se gestiona desde la lista de Contactos. Las bajas quedan registradas y no se pueden revertir.</p>
+        </div>
+        {% if contact_overview.active_restriction_count %}<span class="badge badge--warning">{{ contact_overview.active_restriction_count }} activa{{ contact_overview.active_restriction_count|pluralize }}</span>{% endif %}
+      </div>
+      {% if restriction_rows %}
+        <div class="panel__body restriction-history">
+          {% for row in restriction_rows %}
+            <article class="restriction-item{% if row.restriction.is_active %} restriction-item--active{% endif %}">
+              <div class="restriction-item__marker" aria-hidden="true"></div>
+              <div class="restriction-item__body">
+                <strong>{{ row.restriction.get_kind_display }} · {{ row.restriction.get_scope_display }}</strong>
+                {% if row.restriction.email_address %}<span class="table-meta">{{ row.restriction.email_address.original_email }}</span>{% endif %}
+                <p class="muted flush">{{ row.source_label }} · {{ row.restriction.created_at|date:"d M Y" }}</p>
+                {% if row.reason %}<p class="flush-top">{{ row.reason }}</p>{% endif %}
+                {% if row.restriction.revoked_at %}<p class="text-success flush-top">Habilitada nuevamente el {{ row.restriction.revoked_at|date:"d M Y" }}. {{ row.restriction.revocation_reason }}</p>{% endif %}
+              </div>
+              {% if can_manage_contacts and row.restriction.kind == 'MANUAL' and row.restriction.scope == 'EMAIL' and not row.restriction.revoked_at %}
+                <details class="confirm">
+                  <summary>Volver a habilitar</summary>
+                  <div class="confirm__body">
+                    <form method="post" action="{% url 'contact-restriction-revoke' contact.pk row.restriction.pk %}">
+                      {% csrf_token %}
+                      <label for="revoke-reason-{{ forloop.counter }}">Motivo</label>
+                      <textarea id="revoke-reason-{{ forloop.counter }}" name="reason" rows="3" required></textarea>
+                      <button class="button button--secondary button--small" type="submit">Quitar restricción manual</button>
+                    </form>
+                  </div>
+                </details>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="panel__body"><p class="muted flush">No hay restricciones registradas.</p></div>
+      {% endif %}
+    </section>
+
+    <section class="contact-visual-section" aria-labelledby="campaign-history-heading">
+      <div class="section-heading contact-section-heading">
+        <div>
+          <h2 id="campaign-history-heading">Historial de campañas</h2>
+          <p class="muted">Propuestas que vincularon a esta empresa con una campaña.</p>
+        </div>
+        <span class="badge">{{ contact_overview.campaign_count }} campaña{{ contact_overview.campaign_count|pluralize }}</span>
+      </div>
+      {% if enrollments %}
+        <div class="campaign-card-grid">
+          {% for enrollment in enrollments %}
+            <article class="campaign-mini-card">
+              <div>
+                <span class="campaign-mini-card__label">Campaña</span>
+                <h3><a href="{% url 'campaign-detail' enrollment.campaign_id %}">{{ enrollment.campaign.name }}</a></h3>
+              </div>
+              <dl class="mini-definition-grid">
+                <dt>Email usado</dt>
+                <dd>{{ enrollment.selected_email.original_email|default:"Sin email elegido" }}</dd>
+                <dt>Resultado</dt>
+                <dd>{{ enrollment.get_state_display }}</dd>
+                <dt>Fechas</dt>
+                <dd>
+                  {% if enrollment.initial_sent_at %}Propuesta: {{ enrollment.initial_sent_at|date:"d M Y" }}{% endif %}
+                  {% if enrollment.replied_at %}<span class="table-meta">Respuesta: {{ enrollment.replied_at|date:"d M Y" }}</span>{% endif %}
+                  {% if not enrollment.initial_sent_at and not enrollment.replied_at %}Sin envíos confirmados{% endif %}
+                </dd>
+              </dl>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <section class="panel empty-state empty-state--compact">
+          <div class="empty-state__icon" aria-hidden="true">○</div>
+          <h3>No está asociado a campañas anteriores</h3>
+          <p>Si responde una propuesta de campaña, esa historia quedará visible acá.</p>
+        </section>
+      {% endif %}
     </section>
   </main>
 
-  <aside class="contact-layout__side" aria-label="Información y controles del contacto">
-    <section class="panel">
-      <div class="panel__header"><div><h2>Emails</h2><p class="muted">Canales conocidos y de dónde salió cada uno.</p></div></div>
+  <aside class="contact-dashboard-layout__side" aria-label="Información y controles del contacto">
+    <section class="panel contact-side-panel">
+      <div class="panel__header">
+        <div>
+          <h2>Emails</h2>
+          <p class="muted">Canales conocidos y de dónde salió cada uno.</p>
+        </div>
+        <span class="badge">{{ contact_overview.email_count }}</span>
+      </div>
       <div class="panel__body contact-channels">
-        {% for row in email_rows %}<article class="contact-channel">
-          <div><strong>{{ row.address.original_email }}</strong>{% if row.address.is_preferred %} <span class="badge badge--success">Preferido</span>{% endif %}<p class="muted flush">{{ row.address.label|default:"Sin etiqueta" }} · {{ row.provenance_label }}</p><p class="muted flush">{{ row.address.get_validity_display }}{% if row.active_restrictions %} · No disponible para enviar{% endif %}</p></div>
-          {% if can_manage_contacts %}<div class="contact-channel__actions">
-            {% if row.address.validity == 'UNKNOWN' or row.address.validity == 'TRANSIENT' %}<form method="post" action="{% url 'contact-email-validate' contact.pk row.address.pk %}">{% csrf_token %}<button class="button button--small button--secondary" type="submit">Validar email</button><p class="field__help">Comprueba en segundo plano si el dominio puede recibir correos.</p></form>{% endif %}
-            {% if not row.address.is_preferred and row.address.validity != 'INVALID' %}<form method="post" action="{% url 'contact-email-preferred' contact.pk row.address.pk %}">{% csrf_token %}<button class="button button--small button--secondary" type="submit">Usar como preferido</button></form>{% endif %}
-            {% if not row.active_restrictions %}<details class="confirm"><summary>No usar este email</summary><div class="confirm__body"><p>Bloquea sólo esta dirección. Los demás emails siguen disponibles.</p><form method="post" action="{% url 'contact-email-restrict' contact.pk row.address.pk %}">{% csrf_token %}<label for="email-reason-{{ forloop.counter }}">Motivo</label><textarea id="email-reason-{{ forloop.counter }}" name="reason" rows="3" required></textarea><button class="button button--danger button--small" type="submit">Bloquear este email</button></form></div></details>{% endif %}
-          </div>{% endif %}
-        </article>{% empty %}<p class="muted">No hay emails registrados.</p>{% endfor %}
+        {% for row in email_rows %}
+          <article class="contact-channel contact-channel--{{ row.address.validity|lower }}{% if row.active_restrictions %} contact-channel--blocked{% endif %}">
+            <div class="contact-channel__main">
+              <span class="contact-channel__icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18v12H3z"/><path d="m3 7 9 7 9-7"/></svg></span>
+              <div>
+                <strong>{{ row.address.original_email }}</strong>
+                <div class="contact-channel__badges">
+                  {% if row.address.is_preferred %}<span class="badge badge--success">Preferido</span>{% endif %}
+                  <span class="badge{% if row.address.validity == 'VALID' %} badge--success{% elif row.address.validity == 'INVALID' or row.active_restrictions %} badge--danger{% elif row.address.validity == 'TRANSIENT' or row.address.validity == 'UNKNOWN' %} badge--warning{% endif %}">{{ row.address.get_validity_display }}</span>
+                </div>
+                <p class="muted flush">{{ row.address.label|default:"Sin etiqueta" }} · {{ row.provenance_label }}</p>
+                {% if row.active_restrictions %}<p class="error-text flush-top">No disponible para enviar</p>{% endif %}
+              </div>
+            </div>
+            {% if can_manage_contacts %}
+              <div class="contact-channel__actions">
+                {% if row.address.validity == 'UNKNOWN' or row.address.validity == 'TRANSIENT' %}
+                  <form method="post" action="{% url 'contact-email-validate' contact.pk row.address.pk %}">
+                    {% csrf_token %}
+                    <button class="button button--small button--secondary" type="submit">Validar email</button>
+                    <p class="field__help">Comprueba en segundo plano si el dominio puede recibir correos.</p>
+                  </form>
+                {% endif %}
+                {% if not row.address.is_preferred and row.address.validity != 'INVALID' %}
+                  <form method="post" action="{% url 'contact-email-preferred' contact.pk row.address.pk %}">
+                    {% csrf_token %}
+                    <button class="button button--small button--secondary" type="submit">Usar como preferido</button>
+                  </form>
+                {% endif %}
+                {% if not row.active_restrictions %}
+                  <details class="confirm">
+                    <summary>No usar este email</summary>
+                    <div class="confirm__body">
+                      <p>Bloquea sólo esta dirección. Los demás emails siguen disponibles.</p>
+                      <form method="post" action="{% url 'contact-email-restrict' contact.pk row.address.pk %}">
+                        {% csrf_token %}
+                        <label for="email-reason-{{ forloop.counter }}">Motivo</label>
+                        <textarea id="email-reason-{{ forloop.counter }}" name="reason" rows="3" required></textarea>
+                        <button class="button button--danger button--small" type="submit">Bloquear este email</button>
+                      </form>
+                    </div>
+                  </details>
+                {% endif %}
+              </div>
+            {% endif %}
+          </article>
+        {% empty %}
+          <p class="muted">No hay emails registrados.</p>
+        {% endfor %}
       </div>
-      {% if can_manage_contacts %}<div class="panel__footer"><details><summary>Agregar otro email</summary><form method="post" action="{% url 'contact-email-add' contact.pk %}" class="section-gap">{% csrf_token %}{% include "includes/field.html" with field=email_form.email %}{% include "includes/field.html" with field=email_form.label %}<div class="checkbox-line">{{ email_form.make_preferred }} <label for="{{ email_form.make_preferred.id_for_label }}">{{ email_form.make_preferred.label }}</label></div><p class="field__help">{{ email_form.make_preferred.help_text }}</p><button class="button button--small" type="submit">Agregar email</button></form></details></div>{% endif %}
+      {% if can_manage_contacts %}
+        <div class="panel__footer">
+          <details>
+            <summary>Agregar otro email</summary>
+            <form method="post" action="{% url 'contact-email-add' contact.pk %}" class="section-gap">
+              {% csrf_token %}
+              {% include "includes/field.html" with field=email_form.email %}
+              {% include "includes/field.html" with field=email_form.label %}
+              <div class="checkbox-line">{{ email_form.make_preferred }} <label for="{{ email_form.make_preferred.id_for_label }}">{{ email_form.make_preferred.label }}</label></div>
+              <p class="field__help">{{ email_form.make_preferred.help_text }}</p>
+              <button class="button button--small" type="submit">Agregar email</button>
+            </form>
+          </details>
+        </div>
+      {% endif %}
     </section>
 
-    <section class="panel">
-      <div class="panel__header"><div><h2>Notas internas</h2><p class="muted">Contexto compartido por el equipo.</p></div></div>
-      {% if can_manage_contacts %}<div class="panel__body"><form method="post" action="{% url 'contact-notes' contact.pk %}">{% csrf_token %}{% include "includes/field.html" with field=notes_form.notes %}<button class="button button--small" type="submit">Guardar notas</button></form></div>{% else %}<div class="panel__body"><p class="email-body flush">{{ contact.notes|default:"No hay notas registradas." }}</p></div>{% endif %}
-    </section>
-
-    <section class="panel">
-      <div class="panel__header"><div><h2>Próximo contacto</h2><p class="muted">Seguimiento periódico, separado de las campañas.</p></div></div>
-      <div class="panel__body">
-        {% if plan %}<dl class="definition-grid"><dt>Estado</dt><dd>{{ plan.get_state_display }}{% if plan.snoozed_until %}<span class="table-meta">Pospuesto hasta {{ plan.snoozed_until|date:"d M Y · H:i" }}</span>{% endif %}</dd><dt>Objetivo</dt><dd>{{ plan.get_purpose_display }}{% if plan.goal_text %}: {{ plan.goal_text }}{% endif %}</dd><dt>Modo</dt><dd>{{ plan.get_mode_display }}{% if plan.mode == 'REVIEW_BEFORE_SEND' %}<span class="table-meta">Nada se envía sin tu autorización.</span>{% else %}<span class="table-meta">Sólo envía si todos los controles de seguridad están habilitados.</span>{% endif %}</dd><dt>Frecuencia</dt><dd>Cada {{ plan.cadence_days }} días</dd><dt>Próxima fecha</dt><dd>{{ plan.next_due_at|date:"d M Y · H:i"|default:"Todavía no definida" }}</dd>{% if latest_attempt %}<dt>Último intento</dt><dd><span class="badge{% if latest_attempt.state == 'HUMAN_REQUIRED' or latest_attempt.state == 'INELIGIBLE' %} badge--warning{% elif latest_attempt.state == 'SENT' %} badge--success{% endif %}">{{ latest_attempt.get_state_display }}</span>{% if latest_attempt.reason %}<span class="table-meta">{{ latest_attempt.reason }}</span>{% endif %}</dd>{% endif %}</dl>{% else %}<p class="muted flush">No hay seguimiento periódico configurado.</p>{% endif %}
-
-        {% if can_manage_contacts and scheduled_draft_form and latest_attempt.outbound_message %}
-          <div class="alert alert--info section-gap" role="status"><div><strong>Hay un borrador listo para revisar.</strong><br>Todavía no se envió. Podés corregirlo y después autorizarlo.</div></div>
-          <form method="post" action="{% url 'scheduled-contact-draft-edit' contact.pk latest_attempt.pk %}" class="section-gap">{% csrf_token %}{% include "includes/field.html" with field=scheduled_draft_form.subject %}{% include "includes/field.html" with field=scheduled_draft_form.body_text %}<button class="button button--secondary button--small" type="submit">Guardar cambios</button></form>
-          <details class="confirm section-gap"><summary>Autorizar y enviar por Gmail</summary><div class="confirm__body"><p>Se enviará como un hilo nuevo al email preferido. No incluye PDFs.</p><form method="post" action="{% url 'scheduled-contact-authorize' contact.pk latest_attempt.pk %}">{% csrf_token %}<button class="button button--small" type="submit">Autorizar este mensaje</button></form></div></details>
-        {% endif %}
-
-        {% if can_manage_contacts and plan_form %}
-          {% if not has_validated_preferred_email %}<div class="alert alert--warning section-gap" role="status"><div><strong>Falta un email preferido validado.</strong><br>Elegí un canal validado como preferido en la sección Emails antes de activar este seguimiento.</div></div>{% endif %}
-          <details class="section-gap"{% if not plan %} open{% endif %}><summary>{% if plan %}Cambiar programación{% else %}Configurar próximo contacto{% endif %}</summary><form method="post" action="{% url 'contact-plan-save' contact.pk %}" class="section-gap">{% csrf_token %}<div class="checkbox-line">{{ plan_form.enabled }} <label for="{{ plan_form.enabled.id_for_label }}">{{ plan_form.enabled.label }}</label></div><p class="field__help">{{ plan_form.enabled.help_text }}</p>{% include "includes/field.html" with field=plan_form.preferred_email %}{% include "includes/field.html" with field=plan_form.purpose %}{% include "includes/field.html" with field=plan_form.goal_text %}{% include "includes/field.html" with field=plan_form.cadence_days %}{% include "includes/field.html" with field=plan_form.mode %}{% include "includes/field.html" with field=plan_form.next_due_at %}<button class="button button--small" type="submit">Guardar programación</button></form></details>
-          {% if plan %}<div class="actions section-gap">{% if plan.state == 'ACTIVE' %}<form method="post" action="{% url 'contact-plan-state' contact.pk 'pausar' %}">{% csrf_token %}<button class="button button--secondary button--small" type="submit">Pausar seguimiento</button></form>{% else %}<form method="post" action="{% url 'contact-plan-state' contact.pk 'activar' %}">{% csrf_token %}<button class="button button--small" type="submit">Activar seguimiento</button></form>{% endif %}{% if plan.state != 'DISABLED' %}<form method="post" action="{% url 'contact-plan-state' contact.pk 'desactivar' %}">{% csrf_token %}<button class="button button--secondary button--small" type="submit">Desactivar</button></form>{% endif %}</div>
-          <details class="section-gap"><summary>Posponer hasta otra fecha</summary><form method="post" action="{% url 'contact-plan-snooze' contact.pk %}" class="section-gap">{% csrf_token %}{% include "includes/field.html" with field=plan_snooze_form.until %}<button class="button button--secondary button--small" type="submit">Posponer</button></form></details>{% endif %}
-          {% if latest_attempt %}<details class="section-gap"><summary>Detalles técnicos</summary><dl class="definition-grid"><dt>Proveedor</dt><dd>{{ latest_attempt.provider|default:"Todavía no usado" }}</dd><dt>Modelo</dt><dd>{{ latest_attempt.model|default:"Todavía no usado" }}</dd><dt>Contexto</dt><dd>{% if latest_attempt.context_hash %}Verificado y acotado{% else %}Todavía no generado{% endif %}</dd></dl></details>{% endif %}
-        {% endif %}
+    <section class="panel contact-side-panel">
+      <div class="panel__header">
+        <div>
+          <h2>Notas internas</h2>
+          <p class="muted">Contexto compartido por el equipo.</p>
+        </div>
       </div>
+      {% if can_manage_contacts %}
+        <div class="panel__body">
+          <form method="post" action="{% url 'contact-notes' contact.pk %}">
+            {% csrf_token %}
+            {% include "includes/field.html" with field=notes_form.notes %}
+            <button class="button button--small" type="submit">Guardar notas</button>
+          </form>
+        </div>
+      {% else %}
+        <div class="panel__body"><p class="email-body flush">{{ contact.notes|default:"No hay notas registradas." }}</p></div>
+      {% endif %}
     </section>
 
-    <section class="panel">
-      <div class="panel__header"><div><h2>Restricciones e historial</h2><p class="muted">Una baja nunca puede quitarse. Las restricciones manuales guardan el motivo.</p></div></div>
-      {% if restriction_rows %}<div class="panel__body restriction-history">{% for row in restriction_rows %}<article><div><strong>{{ row.restriction.get_kind_display }}</strong> · {{ row.restriction.get_scope_display }}{% if row.restriction.email_address %}<span class="table-meta">{{ row.restriction.email_address.original_email }}</span>{% endif %}<p class="muted flush">{{ row.source_label }} · {{ row.restriction.created_at|date:"d M Y" }}</p>{% if row.reason %}<p class="flush-top">{{ row.reason }}</p>{% endif %}{% if row.restriction.revoked_at %}<p class="text-success flush-top">Habilitada nuevamente el {{ row.restriction.revoked_at|date:"d M Y" }}. {{ row.restriction.revocation_reason }}</p>{% endif %}</div>{% if can_manage_contacts and row.restriction.kind == 'MANUAL' and not row.restriction.revoked_at %}<details class="confirm"><summary>Volver a habilitar</summary><div class="confirm__body"><form method="post" action="{% url 'contact-restriction-revoke' contact.pk row.restriction.pk %}">{% csrf_token %}<label for="revoke-reason-{{ forloop.counter }}">Motivo</label><textarea id="revoke-reason-{{ forloop.counter }}" name="reason" rows="3" required></textarea><button class="button button--secondary button--small" type="submit">Quitar restricción manual</button></form></div></details>{% endif %}</article>{% endfor %}</div>{% else %}<div class="panel__body"><p class="muted flush">No hay restricciones registradas.</p></div>{% endif %}
-      {% if can_manage_contacts and contact.status != 'UNSUBSCRIBED' %}<div class="panel__footer"><details class="confirm"><summary>No contactar este contacto</summary><div class="confirm__body"><p>Bloquea todos los emails de esta empresa. Podés levantarlo más adelante dejando un motivo.</p><form method="post" action="{% url 'contact-restrict' contact.pk %}">{% csrf_token %}{% include "includes/field.html" with field=restriction_form.reason %}<button class="button button--danger button--small" type="submit">Bloquear todo el contacto</button></form></div></details></div>{% endif %}
-    </section>
   </aside>
 </div>
 {% endblock %}

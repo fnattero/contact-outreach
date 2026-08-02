@@ -74,11 +74,11 @@ Los emails agregados manualmente quedan excluidos de campañas desde el primer m
 por MX en segundo plano. La UI muestra “Validación pendiente” y permite reintentar sin bloquear la
 pantalla; sólo un resultado válido habilita comunicaciones programadas.
 
-`CommunicationRestriction` reúne baja, rebote y “No contactar”. “No contactar este contacto”
-bloquea todas sus direcciones; “No usar este email” bloquea sólo ese canal. `UNSUBSCRIBE` es
-irreversible. Un bounce invalida sólo la dirección. Una restricción manual sólo puede revertirla un
-admin con motivo auditado. La antigua página Supresiones desaparece, pero las barreras y su
-historial permanecen dentro de Contactos.
+`CommunicationRestriction` reúne baja, rebote y “No contactar”. El bloqueo completo del contacto se
+gestiona desde la lista de Contactos con un checkbox auditable; “No usar este email” bloquea sólo ese
+canal. `UNSUBSCRIBE` es irreversible. Un bounce invalida sólo la dirección. Una restricción manual
+sólo puede revertirla un admin con motivo auditado. La antigua página Supresiones desaparece, pero
+las barreras y su historial permanecen visibles dentro de Contactos.
 
 `Conversation` representa un Contacto más un hilo Gmail. Un Contacto puede tener varios hilos y
 direcciones; una propuesta redirigida abre un hilo nuevo y ambos aparecen en una misma cronología.
@@ -91,10 +91,10 @@ entre provincias. Se cargan geometrías oficiales versionadas para todas las pro
 partidos, departamentos o comunas. En CABA el nivel elegible sigue siendo Barrio. Las zonas custom
 se conservan.
 
-Al crear campaña el admin puede elegir una o más provincias, buscar y expandir sus distritos,
-seleccionar todo o limpiar por provincia. La UI usa las etiquetas “Partidos”, “Departamentos”,
-“Comunas” o “Barrios” y oculta jerga geométrica. Una campaña congela nombres, códigos, geometrías,
-hashes, reglas y orden.
+Al crear campaña el admin puede elegir una o más provincias y seleccionar distritos desde un mapa
+clickeable con respaldo de búsqueda/lista, selección total o limpieza por provincia. La UI usa las
+etiquetas “Partidos”, “Departamentos”, “Comunas” o “Barrios” y oculta jerga geométrica. Una campaña
+congela nombres, códigos, geometrías, hashes, reglas y orden.
 
 ### FR-04 Cobertura Overture particionada
 
@@ -309,15 +309,16 @@ no elimina ni cierra la tarea visible.
 
 ### FR-15 Comunicación programada con Contactos
 
-Cada Contacto puede optar, desactivado por defecto, por un `ContactCommunicationPlan` con propósito
-check-in, feedback de producto o meta escrita por admin; requiere email preferido. Cadencia default
-30 días, mínimo siete. El modo default es `REVIEW_BEFORE_SEND`; un admin puede elegir `AUTOMATIC`,
-pausar, posponer y definir próximo vencimiento.
+Un admin configura `FollowUpTopic` globales con nombre, objetivo, instrucciones, cadencia global,
+modo y próxima fecha global. En cada Contacto sólo se aprueban o pausan los temas aplicables mediante
+`ContactCommunicationPlan`; requiere email preferido validado. Cadencia default 30 días, mínimo
+siete. El modo default es `REVIEW_BEFORE_SEND`; `AUTOMATIC` sigue bloqueado por las mismas barreras.
 
-El scheduler determina la fecha y el LLM propone contenido con el mismo contexto acotado y hechos
-aprobados. El vencimiento crea borrador para revisión, mensaje autorizado en hilo nuevo o tarea
-humana. Nunca envía con Contacto/email restringido, tarea abierta, automatización suspendida,
-contexto insuficiente o kill switch de relaciones activo. Una interacción humana mueve el próximo
+El scheduler deriva el próximo vencimiento por aprobación desde el tema global, historial y snooze. El
+LLM propone contenido con el mismo contexto acotado y hechos aprobados para el tema aprobado. El
+vencimiento crea borrador para revisión, mensaje autorizado en hilo nuevo o tarea humana. Nunca envía
+con Contacto/email restringido, tarea abierta, automatización suspendida, contexto insuficiente o kill
+switch de relaciones activo. Una interacción humana mueve el próximo
 contacto al menos una cadencia; un envío confirmado calcula desde `sent_at`. No es recordatorio de
 campaña ni vuelve elegible a un Contacto.
 
@@ -325,10 +326,10 @@ campaña ni vuelve elegible a un Contacto.
 
 La navegación principal reemplaza Prospectos/Supresiones/Respuestas por `Contactos` y `Necesita
 atención`; la audiencia prospectiva queda dentro de cada campaña. La lista muestra empresa/nombre,
-email preferido, estado comprensible, última interacción, próximo contacto y badge de atención.
+email preferido, checkbox “No contactar”, temas aprobados, última interacción y badge de atención.
 
 El detalle presenta cronología agrupada por hilo, canales y proveniencia, campañas, restricciones,
-notas, automatización, tareas y próximo contacto. Vendedor ve la misma cronología legible sin
+notas, automatización, tareas y temas de seguimiento aprobables. Vendedor ve la misma cronología legible sin
 controles ni detalles técnicos. IDs, hashes, proveedor, modelo, confidence y manifiestos sólo
 aparecen para admin bajo “Detalles técnicos”. Todo cuerpo de contacto/mensaje responde
 `Cache-Control: private, no-store`.
@@ -383,8 +384,8 @@ responsive. El color nunca comunica un estado por sí solo.
   restore, health, seeds y runbooks reproducibles.
 - **DM-01:** persistir como mínimo las entidades detalladas en `DATA_MODEL.md`, incluidas Workspace,
   Membership, Organization, OrganizationIdentity, EmailAddress, Contact, restriction, enrollment,
-  Conversation, mensajes/adjuntos, decisiones/tareas/memoria/conocimiento, planes programados,
-  notificaciones y particiones Overture.
+  Conversation, mensajes/adjuntos, decisiones/tareas/memoria/conocimiento, temas y aprobaciones de
+  seguimiento, notificaciones y particiones Overture.
 - **QA-01:** cubrir fresh/upgrade migrations, permisos, auth/TOTP, estados, concurrencia,
   idempotencia, supresión, SSRF, contexto/IA, MIME, Gmail, recordatorios, redirección, métricas, UX y
   E2E fake con red bloqueada.

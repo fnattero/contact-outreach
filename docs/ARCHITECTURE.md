@@ -93,9 +93,10 @@ Todas las migraciones son forward. Nunca se editan las migraciones Overture exis
 
 ### 4.2 Geografía y Overture
 
-La UI selecciona provincias y distritos jerárquicos. Al iniciar discovery, una transacción congela
-zonas/rubros y resuelve una partición `READY` por provincia, todas del mismo `OvertureRelease`. Si
-falta una, aborta con el nombre y el camino “Datos de búsqueda”.
+La UI selecciona provincias y distritos jerárquicos; cada provincia carga un mapa SVG local de sus
+distritos seleccionables y conserva lista/búsqueda como respaldo. Al iniciar discovery, una
+transacción congela zonas/rubros y resuelve una partición `READY` por provincia, todas del mismo
+`OvertureRelease`. Si falta una, aborta con el nombre y el camino “Datos de búsqueda”.
 
 Maintenance ejecuta un `record_batch_reader` por bbox provincial. El import transmite lotes,
 deduplica GERS ID dentro del release, valida schema/taxonomía/proveniencia/licencias y aplica
@@ -180,10 +181,12 @@ canal secundario nunca cambia el task.
 
 ### 4.7 Comunicación programada
 
-Beat selecciona `ContactCommunicationPlan` vencidos bajo lock. El scheduler decide fecha; el LLM
-sólo propone contenido. `REVIEW_BEFORE_SEND` crea draft durable. `AUTOMATIC` todavía atraviesa el
-mismo policy engine, contexto y executor. Un envío confirmado o interacción genuina recalcula
-`next_due_at` desde el timestamp confirmado. Un plan no interactúa con elegibilidad de campaña.
+Beat selecciona aprobaciones `ContactCommunicationPlan` vencidas bajo lock. La fecha y cadencia viven
+en `FollowUpTopic` globales; cada aprobación sólo cachea el próximo vencimiento derivado por tema,
+historial y snooze. El LLM sólo propone contenido para el tema aprobado. `REVIEW_BEFORE_SEND` crea
+draft durable. `AUTOMATIC` todavía atraviesa el mismo policy engine, contexto y executor. Un envío
+confirmado o interacción genuina recalcula `next_due_at` desde el timestamp confirmado. Una
+aprobación no interactúa con elegibilidad de campaña.
 Un Contacto manual sin hilo previo puede recibir una `HumanTask` a nivel Contacto; al abrirla se
 suspende su automatización hasta que un administrador la resuelva o descarte.
 

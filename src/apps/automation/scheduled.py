@@ -26,6 +26,7 @@ from apps.automation.memory import refresh_contact_memory
 from apps.automation.models import (
     AutomaticActionReservation,
     ContactCommunicationPlan,
+    FollowUpTopic,
     HumanTask,
     ReplyAutomationConfiguration,
     ScheduledContactAttempt,
@@ -49,12 +50,6 @@ class ScheduledEligibility:
     message: str = ""
 
 
-PURPOSE_GOALS: dict[str, str] = {
-    "CHECK_IN": ("Preguntar de manera cordial cómo están y si hay algo en lo que podamos ayudar."),
-    "PRODUCT_FEEDBACK": (
-        "Pedir una opinión general sobre el producto o la atención, sin asumir detalles."
-    ),
-}
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
@@ -75,6 +70,133 @@ def _content_hash(*, subject: str, body: str, signature: str) -> str:
         separators=(",", ":"),
     )
     return sha256(payload.encode()).hexdigest()
+
+
+def follow_up_topic_goal(topic: FollowUpTopic) -> str:
+    parts = [topic.objective.strip()]
+    if topic.instructions.strip():
+        parts.append(f"Instrucciones del tema: {topic.instructions.strip()}")
+    return "\n".join(part for part in parts if part)
+
+
+def _next_due_for_approval(
+    plan: ContactCommunicationPlan,
+    *,
+    fallback_from: datetime | None = None,
+) -> datetime:
+    topic = plan.topic
+    candidates = []
+    if topic.next_due_at is not None:
+        candidates.append(topic.next_due_at)
+    if plan.last_interaction_at is not None:
+        candidates.append(plan.last_interaction_at + timedelta(days=topic.cadence_days))
+    if plan.last_sent_at is not None:
+        candidates.append(plan.last_sent_at + timedelta(days=topic.cadence_days))
+    if plan.snoozed_until is not None:
+        candidates.append(plan.snoozed_until)
+    if candidates:
+        return max(candidates)
+    return (fallback_from or timezone.now()) + timedelta(days=topic.cadence_days)
+
+
+def _reschedule_topic_approvals(
+    topic: FollowUpTopic,
+    *,
+    actor: User,
+    reason: str,
+) -> None:
+    plans = (
+        topic.contact_approvals.select_for_update()
+        .select_related("contact", "preferred_email", "topic")
+        .filter(state=ContactCommunicationPlan.State.ACTIVE)
+    )
+    for plan in plans:
+        _cancel_open_attempts(plan, reason=reason)
+        plan.next_due_at = _next_due_for_approval(plan) if topic.active else None
+        plan.updated_by = actor
+        plan.save(update_fields=("next_due_at", "updated_by", "updated_at"))
+
+
+@transaction.atomic
+def save_follow_up_topic(
+    *,
+    actor: User,
+    topic_id: uuid.UUID | str | None = None,
+    name: str,
+    objective: str,
+    instructions: str,
+    cadence_days: int,
+    mode: str,
+    next_due_at: datetime | None,
+    active: bool,
+) -> FollowUpTopic:
+    membership = require_user_capability(actor, Capability.MANAGE_AUTOMATION)
+    clean_name = name.strip()
+    clean_objective = objective.strip()
+    clean_instructions = instructions.strip()
+    if cadence_days < 7:
+        raise ValidationError("La periodicidad mínima es de siete días.")
+    if mode not in FollowUpTopic.Mode.values:
+        raise ValidationError("Elegí cómo se revisará el próximo mensaje.")
+    if topic_id is None:
+        topic = FollowUpTopic(
+            workspace=membership.workspace,
+            name=clean_name,
+            objective=clean_objective,
+            instructions=clean_instructions,
+            cadence_days=cadence_days,
+            mode=mode,
+            next_due_at=next_due_at,
+            active=active,
+            created_by=actor,
+            updated_by=actor,
+        )
+        created = True
+        schedule_changed = False
+    else:
+        topic = FollowUpTopic.objects.select_for_update().get(
+            pk=topic_id,
+            workspace=membership.workspace,
+        )
+        schedule_changed = (
+            topic.name != clean_name
+            or topic.cadence_days != cadence_days
+            or topic.mode != mode
+            or topic.next_due_at != next_due_at
+            or topic.active != active
+            or topic.objective != clean_objective
+            or topic.instructions != clean_instructions
+        )
+        topic.name = clean_name
+        topic.objective = clean_objective
+        topic.instructions = clean_instructions
+        topic.cadence_days = cadence_days
+        topic.mode = mode
+        topic.next_due_at = next_due_at
+        topic.active = active
+        topic.updated_by = actor
+        created = False
+    topic.full_clean()
+    topic.save()
+    if schedule_changed:
+        _reschedule_topic_approvals(
+            topic,
+            actor=actor,
+            reason="El tema de seguimiento cambió antes del envío.",
+        )
+    record_event(
+        action="scheduled_contact.topic_saved",
+        entity=topic,
+        actor=actor,
+        after={
+            "created": created,
+            "active": topic.active,
+            "mode": topic.mode,
+            "cadence_days": topic.cadence_days,
+            "next_due_at": topic.next_due_at.isoformat() if topic.next_due_at else None,
+        },
+    )
+    return topic
 
 
 def _active_restriction_exists(plan: ContactCommunicationPlan) -> bool:
@@ -99,6 +221,12 @@ def scheduled_contact_eligibility(
     email = plan.preferred_email
     if plan.state != ContactCommunicationPlan.State.ACTIVE:
         return ScheduledEligibility(False, "PLAN_INACTIVE", "El seguimiento no está activo.")
+    if not plan.topic.active:
+        return ScheduledEligibility(
+            False,
+            "TOPIC_INACTIVE",
+            "El tema de seguimiento no está activo.",
+        )
     if plan.snoozed_until is not None and plan.snoozed_until > now:
         return ScheduledEligibility(
             False,
@@ -219,6 +347,98 @@ def _cancel_open_attempts(
 
 
 @transaction.atomic
+def approve_contact_follow_up_topic(
+    *,
+    actor: User,
+    contact_id: uuid.UUID | str,
+    topic_id: uuid.UUID | str,
+    enabled: bool = True,
+) -> ContactCommunicationPlan:
+    membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
+    contact = (
+        Contact.objects.select_for_update()
+        .select_related("organization", "preferred_email")
+        .get(pk=contact_id)
+    )
+    if contact.workspace_id != membership.workspace_id:
+        raise PermissionDenied
+    topic = FollowUpTopic.objects.select_for_update().get(
+        pk=topic_id,
+        workspace=membership.workspace,
+    )
+    if not topic.active and enabled:
+        raise ValidationError("El tema de seguimiento está inactivo.")
+    email = contact.preferred_email
+    if email is None:
+        raise ValidationError("Elegí un email preferido validado antes de aprobar temas.")
+    if email.validity != EmailAddress.Validity.VALID or email.invalid_reason:
+        raise ValidationError("El email preferido debe estar validado antes de aprobar temas.")
+    state = (
+        ContactCommunicationPlan.State.ACTIVE
+        if enabled
+        else ContactCommunicationPlan.State.DISABLED
+    )
+    plan, created = ContactCommunicationPlan.objects.select_for_update().get_or_create(
+        contact=contact,
+        topic=topic,
+        defaults={
+            "preferred_email": email,
+            "state": state,
+            "created_by": actor,
+            "updated_by": actor,
+        },
+    )
+    due_at = _next_due_for_approval(plan) if enabled else None
+    if not created:
+        schedule_changed = (
+            plan.preferred_email_id != email.pk
+            or plan.next_due_at != due_at
+            or plan.state != state
+            or plan.snoozed_until is not None
+        )
+        plan.preferred_email = email
+        plan.state = state
+        plan.next_due_at = due_at
+        plan.snoozed_until = None
+        plan.updated_by = actor
+        plan.full_clean()
+        plan.save()
+        if schedule_changed:
+            _cancel_open_attempts(
+                plan,
+                reason="La programación cambió antes del envío.",
+            )
+    else:
+        plan.next_due_at = due_at
+        plan.full_clean()
+        plan.save(update_fields=("next_due_at", "updated_at"))
+    if state == ContactCommunicationPlan.State.ACTIVE:
+        eligibility = scheduled_contact_eligibility(plan)
+        if not eligibility.eligible:
+            raise ValidationError(eligibility.message)
+    record_event(
+        action="scheduled_contact.plan_saved",
+        entity=plan,
+        actor=actor,
+        after={
+            "state": plan.state,
+            "mode": plan.topic.mode,
+            "topic_id": str(plan.topic_id),
+            "next_due_at": plan.next_due_at.isoformat() if plan.next_due_at else None,
+        },
+    )
+    return plan
+
+
+LEGACY_PURPOSE_GOALS: dict[str, str] = {
+    "CHECK_IN": "Preguntar de manera cordial cómo están y si hay algo en lo que podamos ayudar.",
+    "PRODUCT_FEEDBACK": (
+        "Pedir una opinión general sobre el producto o la atención, sin asumir detalles."
+    ),
+}
+
+
+@transaction.atomic
 def save_contact_communication_plan(
     *,
     actor: User,
@@ -248,90 +468,52 @@ def save_contact_communication_plan(
         raise ValidationError("Elegí primero este email como preferido en la sección Emails.")
     if email.validity != EmailAddress.Validity.VALID or email.invalid_reason:
         raise ValidationError("El email preferido debe estar validado antes de programar envíos.")
-    if purpose not in ContactCommunicationPlan.Purpose.values:
-        raise ValidationError("Elegí para qué querés retomar el contacto.")
-    if mode not in ContactCommunicationPlan.Mode.values:
-        raise ValidationError("Elegí cómo se revisará el próximo mensaje.")
     if cadence_days < 7:
         raise ValidationError("La frecuencia mínima es de siete días.")
+    if mode not in FollowUpTopic.Mode.values:
+        raise ValidationError("Elegí cómo se revisará el próximo mensaje.")
     clean_goal = goal_text.strip()
     if purpose == ContactCommunicationPlan.Purpose.ADMIN_GOAL and not clean_goal:
         raise ValidationError("Escribí el objetivo de este contacto.")
-    state = (
-        ContactCommunicationPlan.State.ACTIVE
-        if enabled
-        else ContactCommunicationPlan.State.DISABLED
+    existing_plan = (
+        ContactCommunicationPlan.objects.select_for_update()
+        .select_related("topic")
+        .filter(contact=contact)
+        .order_by("created_at")
+        .first()
     )
-    due_at = next_due_at
-    if enabled and due_at is None:
-        due_at = timezone.now() + timedelta(days=cadence_days)
-    plan, created = ContactCommunicationPlan.objects.select_for_update().get_or_create(
-        contact=contact,
-        defaults={
-            "preferred_email": email,
-            "purpose": purpose,
-            "goal_text": clean_goal,
-            "cadence_days": cadence_days,
-            "mode": mode,
-            "state": state,
-            "next_due_at": due_at,
-            "created_by": actor,
-            "updated_by": actor,
-        },
-    )
-    if not created:
-        schedule_changed = (
-            plan.preferred_email_id != email.pk
-            or plan.purpose != purpose
-            or plan.goal_text != clean_goal
-            or plan.cadence_days != cadence_days
-            or plan.mode != mode
-            or plan.next_due_at != due_at
-            or plan.state != state
-            or plan.snoozed_until is not None
-        )
-        plan.preferred_email = email
-        plan.purpose = purpose
-        plan.goal_text = clean_goal
-        plan.cadence_days = cadence_days
-        plan.mode = mode
-        plan.state = state
-        plan.next_due_at = due_at
-        plan.snoozed_until = None
-        plan.updated_by = actor
-        plan.full_clean()
-        plan.save()
-        if schedule_changed:
-            _cancel_open_attempts(
-                plan,
-                reason="La programación cambió antes del envío.",
-            )
+    if existing_plan is not None:
+        topic = existing_plan.topic
     else:
-        plan.full_clean()
-    if state == ContactCommunicationPlan.State.ACTIVE:
-        eligibility = scheduled_contact_eligibility(plan)
-        if not eligibility.eligible:
-            raise ValidationError(eligibility.message)
-    record_event(
-        action="scheduled_contact.plan_saved",
-        entity=plan,
+        base_name = dict(ContactCommunicationPlan.Purpose.choices).get(purpose, "Seguimiento")
+        topic = FollowUpTopic(
+            workspace=membership.workspace,
+            name=f"{base_name} {str(contact.pk)[:8]}",
+            created_by=actor,
+            updated_by=actor,
+        )
+    topic.objective = clean_goal or LEGACY_PURPOSE_GOALS.get(purpose, "Retomar el contacto.")
+    topic.instructions = ""
+    topic.cadence_days = cadence_days
+    topic.mode = mode
+    topic.next_due_at = next_due_at
+    topic.active = True
+    topic.updated_by = actor
+    topic.full_clean()
+    topic.save()
+    return approve_contact_follow_up_topic(
         actor=actor,
-        after={
-            "state": plan.state,
-            "mode": plan.mode,
-            "purpose": plan.purpose,
-            "cadence_days": plan.cadence_days,
-            "next_due_at": plan.next_due_at.isoformat() if plan.next_due_at else None,
-        },
+        contact_id=contact.pk,
+        topic_id=topic.pk,
+        enabled=enabled,
     )
-    return plan
 
 
 @transaction.atomic
 def set_contact_communication_plan_state(
     *,
     actor: User,
-    contact_id: uuid.UUID | str,
+    plan_id: uuid.UUID | str,
     state: str,
 ) -> ContactCommunicationPlan:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
@@ -339,22 +521,25 @@ def set_contact_communication_plan_state(
         raise ValidationError("La acción solicitada no es válida.")
     plan = (
         ContactCommunicationPlan.objects.select_for_update()
-        .select_related("contact", "preferred_email")
-        .get(contact_id=contact_id)
+        .select_related("contact__preferred_email", "preferred_email", "topic")
+        .get(pk=plan_id)
     )
     if plan.contact.workspace_id != membership.workspace_id:
         raise PermissionDenied
     if state == ContactCommunicationPlan.State.ACTIVE:
         original_state = plan.state
         plan.state = ContactCommunicationPlan.State.ACTIVE
+        if plan.contact.preferred_email is None:
+            raise ValidationError("Elegí un email preferido validado antes de activar este tema.")
+        plan.preferred_email = plan.contact.preferred_email
+        if plan.next_due_at is None:
+            plan.next_due_at = _next_due_for_approval(plan)
         eligibility = scheduled_contact_eligibility(plan)
         plan.state = original_state
         if not eligibility.eligible and eligibility.code not in {
             "PLAN_SNOOZED",
         }:
             raise ValidationError(eligibility.message)
-        if plan.next_due_at is None:
-            plan.next_due_at = timezone.now() + timedelta(days=plan.cadence_days)
         if plan.snoozed_until is not None and plan.snoozed_until <= timezone.now():
             plan.snoozed_until = None
     else:
@@ -366,11 +551,14 @@ def set_contact_communication_plan_state(
                 else "El seguimiento se desactivó antes del envío."
             ),
         )
+        if state == ContactCommunicationPlan.State.DISABLED:
+            plan.next_due_at = None
     plan.state = state
     plan.updated_by = actor
     plan.save(
         update_fields=(
             "state",
+            "preferred_email",
             "next_due_at",
             "snoozed_until",
             "updated_by",
@@ -390,14 +578,14 @@ def set_contact_communication_plan_state(
 def snooze_contact_communication_plan(
     *,
     actor: User,
-    contact_id: uuid.UUID | str,
+    plan_id: uuid.UUID | str,
     until: datetime,
 ) -> ContactCommunicationPlan:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     plan = (
         ContactCommunicationPlan.objects.select_for_update()
-        .select_related("contact")
-        .get(contact_id=contact_id)
+        .select_related("contact", "topic")
+        .get(pk=plan_id)
     )
     if plan.contact.workspace_id != membership.workspace_id:
         raise PermissionDenied
@@ -422,54 +610,71 @@ def record_genuine_contact_interaction(
     contact_id: uuid.UUID | str,
     *,
     interacted_at: datetime,
-) -> ContactCommunicationPlan | None:
-    plan = (
-        ContactCommunicationPlan.objects.select_for_update().filter(contact_id=contact_id).first()
+) -> tuple[ContactCommunicationPlan, ...]:
+    plans = list(
+        ContactCommunicationPlan.objects.select_for_update()
+        .select_related("topic")
+        .filter(contact_id=contact_id)
     )
-    if plan is None:
-        return None
-    minimum_due = interacted_at + timedelta(days=plan.cadence_days)
-    plan.last_interaction_at = max(
-        (item for item in (plan.last_interaction_at, interacted_at) if item is not None),
-    )
-    candidates = [minimum_due]
-    if plan.next_due_at is not None:
-        candidates.append(plan.next_due_at)
-    if plan.snoozed_until is not None:
-        candidates.append(plan.snoozed_until)
-    plan.next_due_at = max(candidates)
-    _cancel_open_attempts(
-        plan,
-        reason="Hubo una interacción reciente; el próximo contacto se reprogramó.",
-        before=plan.next_due_at,
-    )
-    plan.save(update_fields=("last_interaction_at", "next_due_at", "updated_at"))
-    record_event(
-        action="scheduled_contact.interaction_rescheduled",
-        entity=plan,
-        actor=None,
-        after={"next_due_at": plan.next_due_at.isoformat()},
-    )
-    return plan
+    updated = []
+    for plan in plans:
+        minimum_due = interacted_at + timedelta(days=plan.topic.cadence_days)
+        plan.last_interaction_at = max(
+            (item for item in (plan.last_interaction_at, interacted_at) if item is not None),
+        )
+        candidates = [minimum_due]
+        if plan.next_due_at is not None:
+            candidates.append(plan.next_due_at)
+        if plan.snoozed_until is not None:
+            candidates.append(plan.snoozed_until)
+        plan.next_due_at = max(candidates)
+        _cancel_open_attempts(
+            plan,
+            reason="Hubo una interacción reciente; el próximo contacto se reprogramó.",
+            before=plan.next_due_at,
+        )
+        plan.save(update_fields=("last_interaction_at", "next_due_at", "updated_at"))
+        record_event(
+            action="scheduled_contact.interaction_rescheduled",
+            entity=plan,
+            actor=None,
+            after={"next_due_at": plan.next_due_at.isoformat()},
+        )
+        updated.append(plan)
+    return tuple(updated)
 
 
 def create_due_scheduled_attempts(*, at: datetime | None = None) -> tuple[uuid.UUID, ...]:
     now = at or timezone.now()
-    plan_ids = list(
+    candidates = list(
         ContactCommunicationPlan.objects.filter(
             state=ContactCommunicationPlan.State.ACTIVE,
+            topic__active=True,
             next_due_at__isnull=False,
             next_due_at__lte=now,
         )
         .filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lte=now))
-        .values_list("pk", flat=True)
+        .order_by("contact_id", "next_due_at", "topic__name")
+        .values_list("pk", "contact_id")
     )
+    plan_ids = []
+    seen_contact_ids: set[uuid.UUID] = set()
+    for plan_id, contact_id in candidates:
+        if contact_id in seen_contact_ids:
+            continue
+        seen_contact_ids.add(contact_id)
+        plan_ids.append(plan_id)
     attempt_ids: list[uuid.UUID] = []
     for plan_id in plan_ids:
         with transaction.atomic():
-            plan = ContactCommunicationPlan.objects.select_for_update().get(pk=plan_id)
+            plan = (
+                ContactCommunicationPlan.objects.select_for_update()
+                .select_related("topic")
+                .get(pk=plan_id)
+            )
             if (
                 plan.state != ContactCommunicationPlan.State.ACTIVE
+                or not plan.topic.active
                 or plan.next_due_at is None
                 or plan.next_due_at > now
                 or (plan.snoozed_until is not None and plan.snoozed_until > now)
@@ -598,6 +803,7 @@ def process_scheduled_contact_attempt(
         "plan__contact__organization",
         "plan__contact__preferred_email",
         "plan__preferred_email",
+        "plan__topic",
     ).get(pk=attempt_id)
     if attempt.state in {
         ScheduledContactAttempt.State.SENT,
@@ -626,7 +832,7 @@ def process_scheduled_contact_attempt(
                 state=ScheduledContactAttempt.State.INELIGIBLE,
                 reason=eligibility.message,
             )
-    if plan.mode == ContactCommunicationPlan.Mode.AUTOMATIC:
+    if plan.topic.mode == FollowUpTopic.Mode.AUTOMATIC:
         send_eligibility = scheduled_contact_eligibility(plan, for_send=True)
         if not send_eligibility.eligible:
             with transaction.atomic():
@@ -641,7 +847,7 @@ def process_scheduled_contact_attempt(
             with transaction.atomic():
                 locked = (
                     ScheduledContactAttempt.objects.select_for_update()
-                    .select_related("plan__contact__workspace")
+                    .select_related("plan__contact__workspace", "plan__topic")
                     .get(pk=attempt.pk)
                 )
                 opened = _open_scheduled_task(
@@ -661,7 +867,7 @@ def process_scheduled_contact_attempt(
 
     provider_name, model_name, base_url, owner_id = _provider_configuration(plan.contact.workspace)
     try:
-        goal = PURPOSE_GOALS.get(plan.purpose, plan.goal_text.strip())
+        goal = follow_up_topic_goal(plan.topic)
         refresh_contact_memory(plan.contact_id)
         context = build_bounded_scheduled_contact_context(plan, goal=goal)
         selected_provider = provider or get_llm_provider(
@@ -673,7 +879,7 @@ def process_scheduled_contact_attempt(
         request = ScheduledContactDraftRequest(
             context=context.blocks,
             facts=context.facts,
-            purpose=plan.purpose,
+            purpose=plan.topic.name,
             goal=goal,
             correlation_id=secrets.token_hex(16),
             idempotency_key=f"{attempt.idempotency_key}:llm",
@@ -683,7 +889,7 @@ def process_scheduled_contact_attempt(
         with transaction.atomic():
             locked = (
                 ScheduledContactAttempt.objects.select_for_update()
-                .select_related("plan__contact__workspace")
+                .select_related("plan__contact__workspace", "plan__topic")
                 .get(pk=attempt.pk)
             )
             summary = "No pudimos preparar un mensaje seguro. Revisá el objetivo y la conversación."
@@ -710,6 +916,7 @@ def process_scheduled_contact_attempt(
                 "plan__contact__organization",
                 "plan__contact__preferred_email",
                 "plan__preferred_email",
+                "plan__topic",
             )
             .get(pk=attempt.pk)
         )
@@ -760,7 +967,7 @@ def process_scheduled_contact_attempt(
                 )
             )
             return locked
-        if plan.mode == ContactCommunicationPlan.Mode.AUTOMATIC:
+        if plan.topic.mode == FollowUpTopic.Mode.AUTOMATIC:
             now = timezone.now()
             send_eligibility = scheduled_contact_eligibility(plan, at=now, for_send=True)
             if not send_eligibility.eligible:
@@ -800,7 +1007,7 @@ def process_scheduled_contact_attempt(
         key = f"{locked.idempotency_key}:outbound"
         outbound_state = (
             OutboundMessage.State.REVIEW_READY
-            if plan.mode == ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND
+            if plan.topic.mode == FollowUpTopic.Mode.REVIEW_BEFORE_SEND
             else OutboundMessage.State.QUEUED
         )
         try:
@@ -876,7 +1083,7 @@ def edit_scheduled_contact_draft(
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     attempt = (
         ScheduledContactAttempt.objects.select_for_update()
-        .select_related("plan__contact", "outbound_message")
+        .select_related("plan__contact", "plan__topic", "outbound_message")
         .get(pk=attempt_id)
     )
     if attempt.plan.contact.workspace_id != membership.workspace_id:
@@ -937,6 +1144,7 @@ def authorize_scheduled_contact_attempt(
             "plan__contact__workspace",
             "plan__contact__preferred_email",
             "plan__preferred_email",
+            "plan__topic",
             "outbound_message",
         )
         .get(pk=attempt_id)
@@ -990,7 +1198,7 @@ def complete_scheduled_contact_attempt(
 ) -> ScheduledContactAttempt | None:
     attempt = (
         ScheduledContactAttempt.objects.select_for_update()
-        .select_related("plan__contact__workspace", "outbound_message")
+        .select_related("plan__contact__workspace", "plan__topic", "outbound_message")
         .filter(outbound_message_id=uuid.UUID(str(message_id)))
         .first()
     )
@@ -1027,7 +1235,10 @@ def complete_scheduled_contact_attempt(
         attempt.save(update_fields=("state", "sent_at", "reason", "updated_at"))
         plan = ContactCommunicationPlan.objects.select_for_update().get(pk=attempt.plan_id)
         plan.last_sent_at = sent_at
-        plan.next_due_at = sent_at + timedelta(days=plan.cadence_days)
+        plan.next_due_at = max(
+            sent_at + timedelta(days=plan.topic.cadence_days),
+            plan.topic.next_due_at or sent_at,
+        )
         plan.snoozed_until = None
         plan.save(update_fields=("last_sent_at", "next_due_at", "snoozed_until", "updated_at"))
         record_event(

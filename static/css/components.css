@@ -35,7 +35,7 @@
 .badge--running, .badge--sending, .badge--queued, .badge--connected, .badge--enriched, .badge--email_found, .badge--analyzed { background: var(--info-100); color: var(--info-700); }
 .badge--paused, .badge--retry_wait, .badge--reconciling, .badge--auto_reply, .badge--warning { background: var(--warning-100); color: var(--warning-800); }
 .badge--completed, .badge--succeeded, .badge--sent, .badge--interested, .badge--target_reached, .badge--success, .badge--active { background: var(--success-100); color: var(--success-700); }
-.badge--stopped_error, .badge--error, .badge--failed, .badge--send_failed, .badge--failed_permanent, .badge--bounce, .badge--unsubscribe, .badge--unsubscribed, .badge--do_not_contact { background: var(--danger-100); color: var(--danger-700); }
+.badge--stopped_error, .badge--error, .badge--failed, .badge--send_failed, .badge--failed_permanent, .badge--bounce, .badge--unsubscribe, .badge--unsubscribed, .badge--do_not_contact, .badge--danger { background: var(--danger-100); color: var(--danger-700); }
 .badge--dry_run, .badge--dry_run_completed, .badge--review_only, .badge--review_ready, .badge--simulation, .badge--dry-run { background: var(--simulation-100); color: var(--simulation-700); }
 .status-chip { min-height: 1.75rem; padding-inline: .6rem; }
 .status-chip--safe { background: var(--success-100); color: var(--success-700); }
@@ -109,6 +109,7 @@ details.confirm[open] summary { border-bottom: 1px solid var(--ink-200); }
 .no-js [data-tooltip]::after { position: absolute; z-index: 1000; bottom: calc(100% + .45rem); left: 50%; display: none; width: max-content; max-width: min(19rem, calc(100vw - 1rem)); padding: .55rem .7rem; border-radius: var(--radius-md); background: #172033; color: white; content: attr(data-tooltip); font-size: .78rem; font-weight: 500; line-height: 1.45; text-align: left; transform: translateX(-50%); white-space: normal; box-shadow: var(--shadow-md); }
 .no-js [data-tooltip]:hover::after, .no-js [data-tooltip]:focus::after { display: block; }
 .checkbox-line { display: flex; align-items: flex-start; gap: .6rem; }
+.table-toggle { margin: 0; align-items: center; font-weight: 650; white-space: nowrap; }
 .section-gap { margin-top: var(--space-4); }
 .section-actions { margin-bottom: var(--space-5); }
 .flush-top { margin-top: var(--space-4); margin-bottom: 0; }

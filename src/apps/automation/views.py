@@ -14,17 +14,20 @@ from apps.accounts.permissions import Capability, require_capability, workspace_
 from apps.automation.forms import (
     AutomationModeForm,
     DecisionReviewForm,
+    FollowUpTopicForm,
     GlobalKnowledgeContextForm,
     KnowledgeRevisionForm,
     KnowledgeSearchPreviewForm,
 )
 from apps.automation.models import (
+    FollowUpTopic,
     KnowledgeFactRevision,
     ReplyAutomationConfiguration,
     ReplyDecision,
     WorkspaceKnowledgeContextRevision,
 )
 from apps.automation.retrieval import retrieve_relevant_fact_revisions
+from apps.automation.scheduled import save_follow_up_topic
 from apps.automation.services import (
     approve_global_knowledge_context_revision,
     approve_knowledge_revision,
@@ -66,6 +69,27 @@ def _automation_settings_context(
         .order_by("-version")
         .first()
     )
+    topics = FollowUpTopic.objects.filter(workspace=workspace).select_related(
+        "created_by",
+        "updated_by",
+    )
+    selected_topic = None
+    edit_topic_id = request.GET.get("edit_topic")
+    if edit_topic_id:
+        selected_topic = topics.filter(pk=edit_topic_id).first()
+    topic_initial = (
+        {
+            "name": selected_topic.name,
+            "objective": selected_topic.objective,
+            "instructions": selected_topic.instructions,
+            "cadence_days": selected_topic.cadence_days,
+            "mode": selected_topic.mode,
+            "next_due_at": selected_topic.next_due_at,
+            "active": selected_topic.active,
+        }
+        if selected_topic is not None
+        else None
+    )
     return {
         "configuration": configuration,
         "qualification": qualification_snapshot(workspace),
@@ -85,6 +109,9 @@ def _automation_settings_context(
         "knowledge_preview": knowledge_preview,
         "mode_form": AutomationModeForm(initial={"mode": configuration.mode}),
         "review_outcomes": ReplyDecision.ReviewOutcome.choices,
+        "follow_up_topics": topics.order_by("-active", "name"),
+        "selected_follow_up_topic": selected_topic,
+        "follow_up_topic_form": FollowUpTopicForm(initial=topic_initial),
     }
 
 
@@ -97,6 +124,30 @@ def automation_settings(request: HttpRequest) -> HttpResponse:
         "automation/settings.html",
         _automation_settings_context(request),
     )
+
+
+@require_capability(Capability.MANAGE_AUTOMATION)
+@require_POST
+@never_cache
+def follow_up_topic_save(request: HttpRequest) -> HttpResponse:
+    actor = request.user
+    assert isinstance(actor, User)
+    form = FollowUpTopicForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Revisá el tema de seguimiento antes de guardarlo.")
+        return redirect("automation-settings")
+    topic_id = request.POST.get("topic_id") or None
+    try:
+        save_follow_up_topic(
+            actor=actor,
+            topic_id=topic_id,
+            **form.cleaned_data,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Tema de seguimiento guardado.")
+    return redirect("automation-settings")
 
 
 @require_capability(Capability.MANAGE_KNOWLEDGE)

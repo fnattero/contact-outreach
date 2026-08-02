@@ -398,23 +398,14 @@ def build_bounded_reply_context(
     )
 
 
-_SCHEDULED_PURPOSE_TEXT: dict[str, str] = {
-    "CHECK_IN": (
-        "Retomar el contacto de manera cordial y preguntar cómo están, sin asumir una compra "
-        "ni una experiencia concreta."
-    ),
-    "PRODUCT_FEEDBACK": (
-        "Pedir una opinión general sobre el producto o la atención, sin asumir qué compró "
-        "ni cómo fue su experiencia."
-    ),
-}
-
-
 def _scheduled_mandatory_blocks(
     plan: ContactCommunicationPlan,
+    *,
+    goal: str,
 ) -> list[ReplyContextBlock]:
     contact = plan.contact
-    purpose_text = _SCHEDULED_PURPOSE_TEXT.get(plan.purpose, plan.goal_text.strip())
+    topic = plan.topic
+    purpose_text = goal.strip()
     if not purpose_text:
         raise ValidationError("El seguimiento no tiene un objetivo claro.")
     profile_parts = []
@@ -422,12 +413,13 @@ def _scheduled_mandatory_blocks(
         profile_parts.append(f"Nombre del contacto: {contact.name}")
     if contact.organization.name:
         profile_parts.append(f"Empresa: {contact.organization.name}")
+    profile_parts.append(f"Tema aprobado: {topic.name}")
     profile_parts.append(f"Email elegido: {plan.preferred_email.normalized_email}")
     return [
         _message_block(
-            source_id=plan.pk,
+            source_id=topic.pk,
             role="WORKSPACE",
-            provenance="SCHEDULED_PURPOSE",
+            provenance="FOLLOW_UP_TOPIC",
             text=purpose_text,
             mandatory=True,
         ),
@@ -530,20 +522,25 @@ def build_bounded_scheduled_contact_context(
 
     if plan.contact_id is None or plan.preferred_email_id is None:
         raise ValidationError("El seguimiento necesita un contacto y un email preferido.")
-    scheduled_mandatory = _scheduled_mandatory_blocks(plan)
+    request_goal = goal if goal is not None else plan.topic.objective.strip()
+    if plan.topic.instructions.strip():
+        request_goal = "\n".join(
+            part
+            for part in (
+                request_goal,
+                f"Instrucciones del tema: {plan.topic.instructions.strip()}",
+            )
+            if part
+        )
+    scheduled_mandatory = _scheduled_mandatory_blocks(plan, goal=request_goal)
     mandatory = scheduled_mandatory + _global_context_blocks(plan.contact.workspace_id)
-    request_goal = (
-        goal
-        if goal is not None
-        else _SCHEDULED_PURPOSE_TEXT.get(plan.purpose, plan.goal_text.strip())
-    )
 
     def input_count(blocks: list[ReplyContextBlock], facts: list[FactRevisionRef]) -> int:
         return scheduled_contact_input_character_count(
             ScheduledContactDraftRequest(
                 context=tuple(blocks),
                 facts=tuple(facts),
-                purpose=plan.purpose,
+                purpose=plan.topic.name,
                 goal=request_goal,
                 correlation_id="",
                 idempotency_key="",
@@ -588,7 +585,7 @@ def build_bounded_scheduled_contact_context(
     manifest["request"] = manifest_request_metadata(
         character_count=used,
         schema_version=schema_version,
-        purpose=plan.purpose,
+        purpose=plan.topic.name,
         goal_hash=sha256(request_goal.encode()).hexdigest(),
     )
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))

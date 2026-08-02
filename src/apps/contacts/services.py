@@ -1669,6 +1669,57 @@ def revoke_manual_restriction(
     return restriction
 
 
+@transaction.atomic
+def set_contact_no_contact(
+    *,
+    actor: User,
+    contact_id: uuid.UUID | str,
+    blocked: bool,
+) -> Contact:
+    membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
+    contact = Contact.objects.select_for_update().get(pk=contact_id)
+    if contact.workspace_id != membership.workspace_id:
+        raise PermissionDenied
+    active_contact_restrictions = list(
+        CommunicationRestriction.objects.select_for_update().filter(
+            workspace=membership.workspace,
+            contact=contact,
+            scope=CommunicationRestriction.Scope.CONTACT,
+            revoked_at__isnull=True,
+        )
+    )
+    if blocked:
+        has_manual_restriction = any(
+            item.kind == CommunicationRestriction.Kind.MANUAL
+            for item in active_contact_restrictions
+        )
+        if has_manual_restriction:
+            return contact
+        create_manual_restriction(
+            actor=actor,
+            scope=CommunicationRestriction.Scope.CONTACT,
+            contact_id=contact.pk,
+            reason="Marcado desde la lista de Contactos.",
+        )
+        contact.refresh_from_db()
+        return contact
+    permanent = [
+        item
+        for item in active_contact_restrictions
+        if item.kind != CommunicationRestriction.Kind.MANUAL
+    ]
+    if permanent:
+        raise ValidationError("Esta restricción no se puede quitar desde Contactos.")
+    for restriction in active_contact_restrictions:
+        revoke_manual_restriction(
+            actor=actor,
+            restriction_id=restriction.pk,
+            reason="Rehabilitado desde la lista de Contactos.",
+        )
+    contact.refresh_from_db()
+    return contact
+
+
 def communication_is_restricted(
     *,
     contact: Contact,

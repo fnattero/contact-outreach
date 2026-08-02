@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, cast
-
 from django import forms
 
-from apps.automation.models import ContactCommunicationPlan
-from apps.contacts.models import Contact, EmailAddress
+from apps.contacts.models import Contact
 
 
 class ContactFilterForm(forms.Form):
@@ -112,101 +109,6 @@ class HumanTaskResolutionForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 3}),
         help_text="Dejá una nota breve para que el equipo entienda cómo terminó la revisión.",
     )
-
-
-class ContactCommunicationPlanForm(forms.Form):
-    enabled = forms.BooleanField(
-        required=False,
-        label="Activar próximos contactos",
-        help_text=(
-            "Cuando está activo, el sistema prepara un mensaje en la próxima fecha elegida."
-        ),
-    )
-    preferred_email = forms.ModelChoiceField(
-        queryset=EmailAddress.objects.none(),
-        label="Email para próximos contactos",
-        empty_label="Elegí un email validado",
-        help_text="Debe ser el email preferido y estar validado.",
-    )
-    purpose = forms.ChoiceField(
-        label="Qué querés lograr",
-        choices=ContactCommunicationPlan.Purpose.choices,
-    )
-    goal_text = forms.CharField(
-        required=False,
-        label="Objetivo personalizado",
-        max_length=1000,
-        widget=forms.Textarea(attrs={"rows": 3}),
-        help_text="Completalo sólo si elegís un objetivo escrito por el administrador.",
-    )
-    cadence_days = forms.IntegerField(
-        label="Repetir cada cuántos días",
-        min_value=7,
-        initial=30,
-        help_text="El mínimo es 7 días. La opción recomendada es 30.",
-    )
-    mode = forms.ChoiceField(
-        label="Cómo se envía",
-        choices=ContactCommunicationPlan.Mode.choices,
-        initial=ContactCommunicationPlan.Mode.REVIEW_BEFORE_SEND,
-        help_text=(
-            "Revisar antes de enviar crea un borrador. Automático sólo funciona cuando todos "
-            "los controles de seguridad están habilitados."
-        ),
-    )
-    next_due_at = forms.DateTimeField(
-        required=False,
-        label="Próxima fecha",
-        input_formats=("%Y-%m-%dT%H:%M",),
-        widget=forms.DateTimeInput(
-            format="%Y-%m-%dT%H:%M",
-            attrs={"type": "datetime-local"},
-        ),
-        help_text="Si la dejás vacía, se programa según la frecuencia elegida.",
-    )
-
-    def __init__(
-        self,
-        *args: Any,
-        contact: Contact,
-        plan: ContactCommunicationPlan | None = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        preferred_email_field = cast(Any, self.fields["preferred_email"])
-        preferred_email_field.queryset = EmailAddress.objects.filter(
-            organization=contact.organization,
-            validity=EmailAddress.Validity.VALID,
-            invalid_reason="",
-        ).order_by("-is_preferred", "original_email")
-        if plan is not None and not self.is_bound:
-            self.initial.update(
-                {
-                    "enabled": plan.state == ContactCommunicationPlan.State.ACTIVE,
-                    "preferred_email": plan.preferred_email_id,
-                    "purpose": plan.purpose,
-                    "goal_text": plan.goal_text,
-                    "cadence_days": plan.cadence_days,
-                    "mode": plan.mode,
-                    "next_due_at": plan.next_due_at,
-                }
-            )
-        elif not self.is_bound:
-            self.initial.update(
-                {
-                    "preferred_email": contact.preferred_email_id,
-                    "purpose": ContactCommunicationPlan.Purpose.CHECK_IN,
-                }
-            )
-
-    def clean(self) -> dict[str, Any]:
-        cleaned = super().clean() or {}
-        if (
-            cleaned.get("purpose") == ContactCommunicationPlan.Purpose.ADMIN_GOAL
-            and not str(cleaned.get("goal_text") or "").strip()
-        ):
-            self.add_error("goal_text", "Escribí qué querés lograr con este contacto.")
-        return cleaned
 
 
 class ContactPlanSnoozeForm(forms.Form):

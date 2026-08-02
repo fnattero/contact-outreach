@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import uuid
 
+from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -21,11 +23,13 @@ from apps.accounts.permissions import (
 )
 from apps.automation.models import (
     ContactCommunicationPlan,
+    FollowUpTopic,
     HumanTask,
     ReplyAutomationConfiguration,
     ScheduledContactAttempt,
 )
 from apps.automation.scheduled import (
+    approve_contact_follow_up_topic,
     authorize_scheduled_contact_attempt,
     edit_scheduled_contact_draft,
     save_contact_communication_plan,
@@ -35,7 +39,6 @@ from apps.automation.scheduled import (
 from apps.automation.services import close_human_task
 from apps.campaigns.models import Campaign
 from apps.contacts.forms import (
-    ContactCommunicationPlanForm,
     ContactEmailForm,
     ContactFilterForm,
     ContactNotesForm,
@@ -55,6 +58,7 @@ from apps.contacts.services import (
     create_manual_restriction,
     queue_contact_email_validation,
     revoke_manual_restriction,
+    set_contact_no_contact,
     set_contact_preferred_email,
     update_contact_notes,
 )
@@ -107,13 +111,6 @@ def _contact_or_404(contact_id: uuid.UUID, *, workspace_id: object) -> Contact:
     )
 
 
-def _plan_for(contact: Contact) -> ContactCommunicationPlan | None:
-    try:
-        return contact.communication_plan
-    except ObjectDoesNotExist:
-        return None
-
-
 def _automation_summary(contact: Contact) -> str:
     if contact.automation_suspended:
         return "Pausada para este contacto"
@@ -150,6 +147,34 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "can_manage_contacts": has_capability(actor, Capability.MANAGE_CONTACTS),
         },
     )
+
+
+@require_capability(Capability.MANAGE_CONTACTS)
+@require_POST
+@never_cache
+def contact_no_contact_toggle(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
+    actor = request.user
+    assert isinstance(actor, User)
+    workspace = workspace_for_user(actor, Capability.MANAGE_CONTACTS)
+    _contact_or_404(contact_id, workspace_id=workspace.pk)
+    blocked = request.POST.get("blocked") == "1"
+    try:
+        set_contact_no_contact(actor=actor, contact_id=contact_id, blocked=blocked)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+    else:
+        messages.success(
+            request,
+            "Contacto marcado como No contactar." if blocked else "Contacto habilitado nuevamente.",
+        )
+    target = request.POST.get("next") or reverse("contacts")
+    if not url_has_allowed_host_and_scheme(
+        target,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        target = reverse("contacts")
+    return redirect(target)
 
 
 @require_capability(Capability.MANAGE_CONTACTS)
@@ -193,17 +218,29 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
         .prefetch_related("restrictions")
         .order_by("-is_preferred", "provider_order", "created_at")
     )
-    email_rows = [
-        {
-            "address": address,
-            "provenance_label": EMAIL_PROVENANCE_LABELS.get(
-                address.provenance,
-                "Origen registrado" if address.provenance else "Origen no informado",
-            ),
-            "active_restrictions": [item for item in address.restrictions.all() if item.is_active],
-        }
-        for address in email_addresses
-    ]
+    email_rows = []
+    available_email_count = 0
+    pending_email_count = 0
+    for address in email_addresses:
+        active_restrictions = [item for item in address.restrictions.all() if item.is_active]
+        if (
+            address.validity == EmailAddress.Validity.VALID
+            and not address.invalid_reason
+            and not active_restrictions
+        ):
+            available_email_count += 1
+        if address.validity in {EmailAddress.Validity.UNKNOWN, EmailAddress.Validity.TRANSIENT}:
+            pending_email_count += 1
+        email_rows.append(
+            {
+                "address": address,
+                "provenance_label": EMAIL_PROVENANCE_LABELS.get(
+                    address.provenance,
+                    "Origen registrado" if address.provenance else "Origen no informado",
+                ),
+                "active_restrictions": active_restrictions,
+            }
+        )
     restrictions = list(
         CommunicationRestriction.objects.filter(workspace=workspace)
         .filter(Q(contact=contact) | Q(email_address__organization=contact.organization))
@@ -242,13 +279,38 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
         }
         for task in tasks
     ]
-    plan = _plan_for(contact)
-    latest_attempt = (
-        plan.attempts.select_related("outbound_message").order_by("-due_at").first()
-        if plan is not None
-        else None
+    plans = list(
+        ContactCommunicationPlan.objects.filter(contact=contact)
+        .select_related("topic", "preferred_email")
+        .order_by("topic__name")
     )
-    plan_form = ContactCommunicationPlanForm(contact=contact, plan=plan) if can_manage else None
+    active_plans = [
+        plan
+        for plan in plans
+        if plan.state == ContactCommunicationPlan.State.ACTIVE and plan.topic.active
+    ]
+    primary_plan = min(
+        (plan for plan in active_plans if plan.next_due_at is not None),
+        key=lambda item: item.next_due_at,
+        default=(active_plans[0] if active_plans else None),
+    )
+    latest_attempt = (
+        ScheduledContactAttempt.objects.filter(plan__contact=contact)
+        .select_related("plan__topic", "outbound_message")
+        .order_by("-due_at")
+        .first()
+    )
+    follow_up_topics = list(
+        FollowUpTopic.objects.filter(workspace=workspace).order_by("-active", "name")
+    )
+    plans_by_topic = {plan.topic_id: plan for plan in plans}
+    topic_rows = [
+        {
+            "topic": topic,
+            "plan": plans_by_topic.get(topic.pk),
+        }
+        for topic in follow_up_topics
+    ]
     draft_form = None
     if (
         can_manage
@@ -262,6 +324,22 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
                 "body_text": latest_attempt.outbound_message.body_text,
             }
         )
+    timelines = conversation_timelines(contact, include_simulations=can_manage)
+    enrollment_rows = list(enrollments.order_by("-created_at"))
+    contact_wide_blocked = any(
+        item.is_active and item.scope == CommunicationRestriction.Scope.CONTACT
+        for item in restrictions
+    )
+    contact_overview = {
+        "email_count": len(email_rows),
+        "available_email_count": 0 if contact_wide_blocked else available_email_count,
+        "pending_email_count": pending_email_count,
+        "conversation_count": len(timelines),
+        "message_count": sum(len(timeline.items) for timeline in timelines),
+        "campaign_count": len(enrollment_rows),
+        "active_restriction_count": sum(1 for item in restrictions if item.is_active),
+        "approved_follow_up_count": len(active_plans),
+    }
     return render(
         request,
         "contacts/detail.html",
@@ -269,14 +347,16 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
             "contact": contact,
             "email_rows": email_rows,
             "restriction_rows": restriction_rows,
-            "enrollments": enrollments.order_by("-created_at"),
-            "timelines": conversation_timelines(contact, include_simulations=can_manage),
+            "enrollments": enrollment_rows,
+            "timelines": timelines,
             "task_rows": task_rows,
             "open_task_count": sum(1 for task in tasks if task.status == HumanTask.Status.OPEN),
-            "plan": plan,
+            "contact_overview": contact_overview,
+            "plan": primary_plan,
+            "plans": plans,
+            "topic_rows": topic_rows,
             "latest_attempt": latest_attempt,
-            "plan_form": plan_form,
-            "plan_snooze_form": ContactPlanSnoozeForm() if can_manage and plan else None,
+            "plan_snooze_form": ContactPlanSnoozeForm() if can_manage and plans else None,
             "scheduled_draft_form": draft_form,
             "has_validated_preferred_email": bool(
                 contact.preferred_email
@@ -296,50 +376,71 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
 @require_capability(Capability.MANAGE_CONTACTS)
 @require_POST
 @never_cache
-def contact_plan_save(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
+def contact_follow_up_topic_approve(
+    request: HttpRequest,
+    contact_id: uuid.UUID,
+    topic_id: uuid.UUID,
+) -> HttpResponse:
     actor = request.user
     assert isinstance(actor, User)
     workspace = workspace_for_user(actor, Capability.MANAGE_CONTACTS)
     contact = _contact_or_404(contact_id, workspace_id=workspace.pk)
-    plan = _plan_for(contact)
-    form = ContactCommunicationPlanForm(
-        request.POST,
-        contact=contact,
-        plan=plan,
-    )
-    if not form.is_valid():
-        detail = " ".join(str(message) for errors in form.errors.values() for message in errors)
-        messages.error(request, detail or "Revisá la programación e intentá nuevamente.")
+    get_object_or_404(FollowUpTopic, pk=topic_id, workspace=workspace)
+    if not contact.preferred_email_id:
+        messages.error(request, "Elegí un email preferido validado antes de aprobar temas.")
     else:
         try:
-            preferred_email = form.cleaned_data["preferred_email"]
-            assert isinstance(preferred_email, EmailAddress)
-            save_contact_communication_plan(
+            approve_contact_follow_up_topic(
                 actor=actor,
                 contact_id=contact.pk,
-                preferred_email_id=preferred_email.pk,
-                purpose=form.cleaned_data["purpose"],
-                goal_text=form.cleaned_data["goal_text"],
-                cadence_days=form.cleaned_data["cadence_days"],
-                mode=form.cleaned_data["mode"],
-                enabled=form.cleaned_data["enabled"],
-                next_due_at=form.cleaned_data["next_due_at"],
+                topic_id=topic_id,
+                enabled=True,
             )
         except ValidationError as exc:
             messages.error(request, _validation_message(exc))
         else:
             messages.success(
                 request,
-                (
-                    "Próximo contacto activado. El sistema respetará la fecha y los controles "
-                    "de seguridad."
-                    if form.cleaned_data["enabled"]
-                    else (
-                        "Configuración guardada. No se prepararán mensajes mientras esté "
-                        "desactivada."
-                    )
-                ),
+                "Tema aprobado para este contacto. La fecha y periodicidad salen del tema global.",
             )
+    return redirect("contact-detail", contact_id=contact_id)
+
+
+@require_capability(Capability.MANAGE_CONTACTS)
+@require_POST
+@never_cache
+def contact_plan_save(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
+    actor = request.user
+    assert isinstance(actor, User)
+    workspace = workspace_for_user(actor, Capability.MANAGE_CONTACTS)
+    _contact_or_404(contact_id, workspace_id=workspace.pk)
+    date_field = forms.DateTimeField(
+        required=False,
+        input_formats=("%Y-%m-%dT%H:%M",),
+    )
+    try:
+        next_due_at = date_field.clean(request.POST.get("next_due_at") or None)
+        save_contact_communication_plan(
+            actor=actor,
+            contact_id=contact_id,
+            preferred_email_id=request.POST.get("preferred_email", ""),
+            purpose=request.POST.get("purpose", ContactCommunicationPlan.Purpose.CHECK_IN),
+            goal_text=request.POST.get("goal_text", ""),
+            cadence_days=int(request.POST.get("cadence_days", "30")),
+            mode=request.POST.get("mode", FollowUpTopic.Mode.REVIEW_BEFORE_SEND),
+            enabled=request.POST.get("enabled") == "on",
+            next_due_at=next_due_at,
+        )
+    except (TypeError, ValueError, ValidationError) as exc:
+        message = (
+            _validation_message(exc) if isinstance(exc, ValidationError) else "Revisá el tema."
+        )
+        messages.error(request, message)
+    else:
+        messages.success(
+            request,
+            "Programación migrada a un tema global y aprobada para este contacto.",
+        )
     return redirect("contact-detail", contact_id=contact_id)
 
 
@@ -349,12 +450,14 @@ def contact_plan_save(request: HttpRequest, contact_id: uuid.UUID) -> HttpRespon
 def contact_plan_state(
     request: HttpRequest,
     contact_id: uuid.UUID,
+    plan_id: uuid.UUID,
     state: str,
 ) -> HttpResponse:
     actor = request.user
     assert isinstance(actor, User)
     workspace = workspace_for_user(actor, Capability.MANAGE_CONTACTS)
     _contact_or_404(contact_id, workspace_id=workspace.pk)
+    get_object_or_404(ContactCommunicationPlan, pk=plan_id, contact_id=contact_id)
     allowed = {
         "activar": ContactCommunicationPlan.State.ACTIVE,
         "pausar": ContactCommunicationPlan.State.PAUSED,
@@ -367,7 +470,7 @@ def contact_plan_state(
         try:
             set_contact_communication_plan_state(
                 actor=actor,
-                contact_id=contact_id,
+                plan_id=plan_id,
                 state=selected,
             )
         except (ContactCommunicationPlan.DoesNotExist, ValidationError) as exc:
@@ -397,6 +500,12 @@ def contact_plan_snooze(request: HttpRequest, contact_id: uuid.UUID) -> HttpResp
     assert isinstance(actor, User)
     workspace = workspace_for_user(actor, Capability.MANAGE_CONTACTS)
     _contact_or_404(contact_id, workspace_id=workspace.pk)
+    plan_id = request.POST.get("plan_id", "")
+    if plan_id:
+        get_object_or_404(ContactCommunicationPlan, pk=plan_id, contact_id=contact_id)
+    else:
+        messages.error(request, "Primero aprobá un tema de seguimiento.")
+        return redirect("contact-detail", contact_id=contact_id)
     form = ContactPlanSnoozeForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Elegí una fecha futura para posponer el contacto.")
@@ -404,7 +513,7 @@ def contact_plan_snooze(request: HttpRequest, contact_id: uuid.UUID) -> HttpResp
         try:
             snooze_contact_communication_plan(
                 actor=actor,
-                contact_id=contact_id,
+                plan_id=plan_id,
                 until=form.cleaned_data["until"],
             )
         except (ContactCommunicationPlan.DoesNotExist, ValidationError) as exc:
@@ -425,7 +534,11 @@ def _scheduled_attempt_or_404(
     workspace_id: object,
 ) -> ScheduledContactAttempt:
     return get_object_or_404(
-        ScheduledContactAttempt.objects.select_related("plan__contact", "outbound_message"),
+        ScheduledContactAttempt.objects.select_related(
+            "plan__contact",
+            "plan__topic",
+            "outbound_message",
+        ),
         pk=attempt_id,
         plan__contact__workspace_id=workspace_id,
     )

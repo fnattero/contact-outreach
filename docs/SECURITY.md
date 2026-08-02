@@ -106,7 +106,8 @@ mode/approval, Gmail, ventana/cupo, recipient elegible y adjuntos íntegros. Res
 además exige `AUTO_REPLY_KILL_SWITCH=false`, mode LIVE calificado, Conversation activa, intent
 allowlisted, contexto/facts válidos y reservas de rate limit. La recuperación por embeddings sólo
 decide qué facts llegan al request; no autoriza Gmail ni puede saltarse política, kill switches o
-tareas humanas. Comunicación programada usa además `RELATIONSHIP_KILL_SWITCH=false`.
+tareas humanas. Comunicación programada usa temas globales aprobados por contacto y exige además
+`RELATIONSHIP_KILL_SWITCH=false`.
 
 Estas barreras se comprueban al preparar/autorizar/encolar y **otra vez inmediatamente antes de
 Gmail**. DB authorization nunca reemplaza la barrera externa. Headers de auto submitted/bulk/list,

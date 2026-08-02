@@ -88,7 +88,7 @@
 
     var categoryList = document.getElementById("category-choices");
     var zoneList = document.getElementById("zone-choices");
-    var zoneMapCanvas = document.querySelector("[data-zone-map-canvas]");
+    var zoneMaps = document.querySelectorAll("[data-zone-map]");
 
     function zoneInput(zoneId) {
         if (!zoneList) return null;
@@ -99,9 +99,9 @@
         return matchingInput;
     }
 
-    function syncZoneMap() {
-        if (!zoneMapCanvas) return;
-        zoneMapCanvas.querySelectorAll("[data-zone-id]").forEach(function (shape) {
+    function syncZoneMap(root) {
+        var scope = root || document;
+        scope.querySelectorAll("[data-zone-id]").forEach(function (shape) {
             var input = zoneInput(shape.getAttribute("data-zone-id"));
             shape.setAttribute("aria-checked", String(Boolean(input && input.checked)));
         });
@@ -153,6 +153,9 @@
                 panel.querySelectorAll('input[type="checkbox"]').forEach(function (district) {
                     district.checked = false;
                 });
+            } else {
+                var map = panel.querySelector("[data-zone-map]");
+                if (map) loadZoneMap(map);
             }
             updateSelections();
         }
@@ -210,79 +213,104 @@
         return commands.join(" ");
     }
 
-    function initializeZoneMap() {
-        if (!zoneMapCanvas) return;
-        var dataNode = document.getElementById("campaign-zone-map-data");
-        if (!dataNode) return;
-        var zones;
-        try {
-            zones = JSON.parse(dataNode.textContent);
-        } catch (error) {
-            zones = [];
-        }
-        var validZones = zones.filter(function (zone) {
-            return Array.isArray(zone.bbox) && zone.bbox.length === 4 && zone.bbox.every(Number.isFinite);
-        });
-        var emptyMessage = document.querySelector("[data-zone-map-empty]");
-        if (!validZones.length) {
-            zoneMapCanvas.hidden = true;
-            if (emptyMessage) emptyMessage.hidden = false;
-            return;
-        }
-
-        var minX = Math.min.apply(null, validZones.map(function (zone) { return zone.bbox[0]; }));
-        var minY = Math.min.apply(null, validZones.map(function (zone) { return zone.bbox[1]; }));
-        var maxX = Math.max.apply(null, validZones.map(function (zone) { return zone.bbox[2]; }));
-        var maxY = Math.max.apply(null, validZones.map(function (zone) { return zone.bbox[3]; }));
-        var width = 1000;
-        var height = 560;
-        var padding = 24;
-        var xRange = Math.max(maxX - minX, 0.000001);
-        var yRange = Math.max(maxY - minY, 0.000001);
-        var scale = Math.min((width - padding * 2) / xRange, (height - padding * 2) / yRange);
-        var offsetX = (width - xRange * scale) / 2;
-        var offsetY = (height - yRange * scale) / 2;
-        var project = function (longitude, latitude) {
-            if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return null;
-            return [offsetX + (longitude - minX) * scale, offsetY + (maxY - latitude) * scale];
-        };
+    function renderZoneShape(canvas, zone) {
         var namespace = "http://www.w3.org/2000/svg";
-        var rendered = 0;
-
-        validZones.forEach(function (zone) {
-            var pathData = geometryPath(zone.geometry, project);
-            if (!pathData || !zoneInput(String(zone.id))) return;
-            var shape = document.createElementNS(namespace, "path");
-            var title = document.createElementNS(namespace, "title");
-            title.textContent = zone.name;
-            shape.appendChild(title);
-            shape.setAttribute("d", pathData);
-            shape.setAttribute("class", "zone-map__shape");
-            shape.setAttribute("data-zone-id", String(zone.id));
-            shape.setAttribute("role", "checkbox");
-            shape.setAttribute("tabindex", "0");
-            shape.setAttribute("aria-label", "Zona " + zone.name);
-            shape.addEventListener("click", function () {
-                var input = zoneInput(String(zone.id));
-                if (!input) return;
-                input.checked = !input.checked;
-                input.dispatchEvent(new Event("change", { bubbles: true }));
-            });
-            shape.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                shape.dispatchEvent(new Event("click"));
-            });
-            zoneMapCanvas.appendChild(shape);
-            rendered += 1;
-        });
-
-        if (!rendered) {
-            zoneMapCanvas.hidden = true;
-            if (emptyMessage) emptyMessage.hidden = false;
+        var pathData = zone.path;
+        if (!pathData && zone.geometry && typeof zone.project === "function") {
+            pathData = geometryPath(zone.geometry, zone.project);
         }
+        if (!pathData || !zoneInput(String(zone.id))) return false;
+        var shape = document.createElementNS(namespace, "path");
+        var title = document.createElementNS(namespace, "title");
+        title.textContent = zone.name;
+        shape.appendChild(title);
+        shape.setAttribute("d", pathData);
+        shape.setAttribute("class", "zone-map__shape");
+        shape.setAttribute("data-zone-id", String(zone.id));
+        shape.setAttribute("role", "checkbox");
+        shape.setAttribute("tabindex", "0");
+        shape.setAttribute("aria-label", "Zona " + zone.name);
+        shape.addEventListener("click", function () {
+            var input = zoneInput(String(zone.id));
+            if (!input) return;
+            input.checked = !input.checked;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        shape.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            shape.dispatchEvent(new Event("click"));
+        });
+        canvas.appendChild(shape);
+        return true;
     }
 
-    initializeZoneMap();
+    function clearSvg(svg) {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+    }
+
+    function renderZoneMap(map, payload) {
+        var canvas = map.querySelector("[data-zone-map-canvas]");
+        var emptyMessage = map.querySelector("[data-zone-map-empty]");
+        var count = map.querySelector("[data-zone-map-count]");
+        var zones = payload && Array.isArray(payload.zones) ? payload.zones : [];
+        var rendered = 0;
+        if (!canvas) return;
+        clearSvg(canvas);
+        canvas.setAttribute("viewBox", payload.viewBox || "0 0 1000 560");
+        zones.forEach(function (zone) {
+            if (renderZoneShape(canvas, zone)) rendered += 1;
+        });
+        map.setAttribute("data-zone-map-loaded", "true");
+        map.removeAttribute("data-zone-map-loading");
+        if (count) count.textContent = String(rendered);
+
+        if (!rendered) {
+            canvas.hidden = true;
+            if (emptyMessage) emptyMessage.hidden = false;
+        } else {
+            canvas.hidden = false;
+            if (emptyMessage) emptyMessage.hidden = true;
+        }
+        syncZoneMap(map);
+    }
+
+    function failZoneMap(map) {
+        var canvas = map.querySelector("[data-zone-map-canvas]");
+        var emptyMessage = map.querySelector("[data-zone-map-empty]");
+        map.removeAttribute("data-zone-map-loading");
+        if (canvas) canvas.hidden = true;
+        if (emptyMessage) emptyMessage.hidden = false;
+    }
+
+    function loadZoneMap(map) {
+        if (map.getAttribute("data-zone-map-loaded") === "true") return;
+        if (map.getAttribute("data-zone-map-loading") === "true") return;
+        var url = map.getAttribute("data-zone-map-url");
+        if (!url || !window.fetch) {
+            failZoneMap(map);
+            return;
+        }
+        map.setAttribute("data-zone-map-loading", "true");
+        window.fetch(url, {
+            credentials: "same-origin",
+            headers: { "Accept": "application/json" }
+        }).then(function (response) {
+            if (!response.ok) throw new Error("zone map unavailable");
+            return response.json();
+        }).then(function (payload) {
+            renderZoneMap(map, payload);
+        }).catch(function () {
+            failZoneMap(map);
+        });
+    }
+
+    function initializeZoneMaps() {
+        zoneMaps.forEach(function (map) {
+            if (!map.closest("[hidden]")) loadZoneMap(map);
+        });
+    }
+
+    initializeZoneMaps();
     updateSelections();
 }());
