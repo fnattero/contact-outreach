@@ -140,15 +140,18 @@ nunca sustituye negativos.
 - Deterministic unsubscribe/bounce/auto precedence prevents LLM effect.
 - Candidate extraction: plain/mailto, punctuation, Unicode/IDN, dedupe, maximum ten,
   NEW_CONTENT/SIGNATURE/QUOTED, quoted markers, obfuscated rejected, multiple ambiguous -> human.
-- Context always contains full authored inbound plus approved global context. Campaign replies add
+- Context always contains full authored inbound plus current global context. Campaign replies add
   original/direct parent; direct Contact inbound adds Contact profile. It may also include up to 6
   cross-thread recent, source-linked memory and <=3 approved facts selected by embeddings. No
   PDF/raw HTML/unapproved facts.
 - RAG retrieval: deterministic fake embeddings, OpenAI-compatible adapter payload validation,
-  cached embedding reuse, model/dimension hash invalidation, low similarity -> no facts, ambiguous
-  near-tie -> no facts/human path, and provider/schema failure -> HumanTask when facts are needed.
+  cached embedding reuse, model/dimension hash invalidation, low similarity/ambiguous near-tie ->
+  <=3 suggested facts with `may_be_irrelevant=true`, and provider/schema failure -> HumanTask when
+  facts are needed.
 - Mandatory exact boundary/overflow -> HumanTask without provider; total <=24.000 chars and stable
   manifest IDs/versions/retrieval status/hash. DB/logs do not duplicate prompt bodies.
+- Admin writing instructions save from the dashboard, count toward the bounded LLM input and arrive
+  as `ADMIN_WRITING_INSTRUCTIONS` without weakening fixed policy.
 - Prompt injection in inbound/signature/quoted/memory/fact cannot change schema/action/fact IDs.
 
 ## 10. Reply decisions, SHADOW y policy
@@ -157,8 +160,7 @@ nunca sustituye negativos.
   rejects extra/unknown IDs, wrong region, stale revision or incompatibility.
 - OFF and SHADOW create zero Gmail authorizations/calls under all provider outputs; SHADOW shows
   draft/friendly facts/feedback.
-- Qualification gate boundaries: 29/30 reviews, 9/10 eligible, 89.9/90 accuracy and one unsafe auto;
-  reauth required and audit. Confidence 0.899/0.90 cannot override intent policy.
+- LIVE enable requires admin reauth and audit. Confidence 0.899/0.90 cannot override intent policy.
 - Auto allowlist only product/company/simple clarification with approved facts and explicit
   redirect. Polite ack/not interested no reply.
 - Every meeting/date, pricing, negotiation, complaint, legal/privacy, unsupported technical,
@@ -166,6 +168,8 @@ nunca sustituye negativos.
   provider/schema failure opens task.
 - HumanTask opens once under double processing, suspends Conversation, prevents subsequent auto,
   vendor view-only; resolve/dismiss only admin and resumes only when no open task.
+- Manual reply success resolves the inbound's open `REPLY_REVIEW` task and resumes the Conversation
+  only when no other task remains; Gmail failure/reconciliation leaves the task open.
 - Limits: fourth automatic in Conversation rolling 24h and 21st Workspace/day blocked; concurrent
   reservations; AUTO_REPLY_KILL_SWITCH checked immediately pre-send.
 
@@ -223,7 +227,7 @@ E2E fake ejecuta con formularios/views/tasks reales:
 2. seed profile/messages/knowledge/geography, two READY provinces and multiple PDFs;
 3. deterministic discovery and campaign approval with zero initial LLM;
 4. dry-run/live fake, same-day reschedule and reminder;
-5. inbound promotion, SHADOW review, qualification fixture and LIVE policy;
+5. inbound promotion, SHADOW review, LIVE reauth and LIVE policy;
 6. safe fact reply, redirect two-thread saga, meeting HumanTask/notifications;
 7. scheduled Contact review/automatic and metrics.
 

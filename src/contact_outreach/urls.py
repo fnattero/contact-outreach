@@ -17,6 +17,7 @@ from apps.accounts.views import (
 )
 from apps.audit.views import audit_log, job_list, retry_job
 from apps.automation.views import (
+    automatic_reply_prompt_save,
     automation_mode,
     automation_settings,
     decision_review,
@@ -192,6 +193,11 @@ urlpatterns = [
     path("mensajes-fijos/", message_templates, name="message-templates"),
     path("prompts/", prompts, name="prompts"),
     path("respuesta-automatica/", automation_settings, name="automation-settings"),
+    path(
+        "respuesta-automatica/instrucciones/guardar/",
+        automatic_reply_prompt_save,
+        name="automatic-reply-prompt-save",
+    ),
     path("respuesta-automatica/modo/", automation_mode, name="automation-mode"),
     path(
         "respuesta-automatica/temas/guardar/",

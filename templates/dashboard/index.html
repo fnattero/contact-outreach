@@ -86,11 +86,12 @@
             {% else %}<div class="empty-state"><div class="empty-state__icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 3v4m8-4v4M4 10h16"/></svg></div><h3>No hay campañas disponibles</h3><p>{% if can_administer %}Definí una audiencia, límites seguros y una versión de catálogo. El borrador no ejecuta nada hasta que lo inicies.{% else %}Cuando una campaña deje de ser borrador, vas a poder verla acá.{% endif %}</p>{% if can_administer %}<a class="button" href="{% url 'campaign-create' %}">Crear primera campaña</a>{% endif %}</div>{% endif %}
         </section>
 
-        {% if attention_campaigns or problem_jobs %}
+        {% if attention_campaigns or attention_task_rows or problem_jobs %}
         <section class="panel" aria-labelledby="attention-title">
-            <div class="panel__header"><div><h2 id="attention-title">Necesita atención</h2><p class="muted">Pausas, errores finales o reintentos diferidos que requieren seguimiento.</p></div></div>
+            <div class="panel__header"><div><h2 id="attention-title">Necesita atención</h2><p class="muted">Revisiones, pausas, errores finales o reintentos diferidos que requieren seguimiento.</p></div></div>
             <div class="panel__body">
                 {% for campaign in attention_campaigns %}<div class="checklist__item"><span class="checklist__marker">!</span><div class="checklist__content"><strong><a href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a> · {{ campaign.get_state_display }}</strong><small>{{ campaign.status_reason|default:"Revisá el detalle y las precondiciones antes de continuar." }}</small></div></div>{% endfor %}
+                {% for row in attention_task_rows %}<div class="checklist__item"><span class="checklist__marker">!</span><div class="checklist__content"><strong>{% if row.task.inbound_id %}<a href="{% url 'response-thread' row.task.inbound_id %}">{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</a>{% else %}<a href="{% url 'contact-detail' row.task.contact_id %}#attention">{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</a>{% endif %} · {{ row.review_reason.title }}</strong><small>{{ row.review_reason.summary }}</small></div></div>{% endfor %}
                 {% for job in problem_jobs %}<div class="checklist__item"><span class="checklist__marker">!</span><div class="checklist__content"><strong><a href="{% url 'jobs' %}?q={{ job.pk }}">{{ job.task_name|etiqueta_es }}</a> · {{ job.get_state_display }}</strong><small>{{ job.error|default:"El sistema conserva el próximo reintento y la entidad relacionada." }}</small></div></div>{% endfor %}
             </div>
         </section>

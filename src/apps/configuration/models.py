@@ -18,6 +18,14 @@ DEFAULT_EMAIL_DRAFTING_PROMPT = (
     "Priorizá un tono profesional, directo y prudente. Explicá una relación posible con los "
     "productos del perfil sin asumir que el negocio ya los compra o necesita."
 )
+DEFAULT_AUTOMATIC_REPLY_PROMPT = (
+    "Respondé como una persona de la empresa, no como una lista de datos.\n"
+    "Contestá la pregunta concreta del cliente en la primera frase.\n"
+    "Usá 1 a 3 párrafos cortos e integrá los datos relevantes con tus palabras.\n"
+    "Si falta información, pedí sólo los datos mínimos necesarios y explicá para qué sirven.\n"
+    "No menciones facts, tarjetas, contexto ni procesos internos.\n"
+    "Cerrá con una próxima acción simple cuando ayude."
+)
 
 
 def normalize_name(value: str) -> str:
@@ -203,6 +211,7 @@ class PromptConfiguration(TimestampedUUIDModel):
         related_name="prompt_configuration",
     )
     email_drafting_prompt = models.TextField(default=DEFAULT_EMAIL_DRAFTING_PROMPT)
+    automatic_reply_prompt = models.TextField(default=DEFAULT_AUTOMATIC_REPLY_PROMPT)
     revision = models.PositiveIntegerField(default=1, editable=False)
 
     def __str__(self) -> str:

@@ -135,11 +135,13 @@ mail directo vincula el Contacto existente y queda sin campaña/outbound padre. 
 una task de decisión. El lock ya está liberado antes de LLM.
 
 El análisis trabaja sobre un snapshot de contexto acotado. Extrae emails literales antes del LLM,
-inyecta el contexto general aprobado, usa `EmbeddingProvider` para elegir hasta tres facts
+inyecta el contexto general vigente, usa `EmbeddingProvider` para elegir hasta tres facts
 puntuales aprobados por similitud y construye el manifiesto/schema dinámico con candidate IDs/fact
-revision IDs permitidos. Si la búsqueda semántica es pobre o ambigua, esos facts no entran; si la
-respuesta los necesitaba, el policy/LLM deriva a HumanTask. Si falla o falta contexto obligatorio,
-crea HumanTask; nunca reconstruye prompts desde logs.
+revision IDs permitidos. Si la búsqueda semántica es pobre o ambigua, los facts mejor rankeados
+pueden entrar como candidatos con `may_be_irrelevant=true`; el LLM debe ignorar los que no apliquen
+y el policy deriva a HumanTask cuando no hay fundamento suficiente. Si falla o falta contexto
+obligatorio, crea HumanTask. Las instrucciones admin de redacción entran como
+`ADMIN_WRITING_INSTRUCTIONS` y sólo gobiernan estilo; nunca reconstruye prompts desde logs.
 
 ### 4.5 Decisión y efecto automático
 
@@ -181,6 +183,10 @@ la fuente durable de la alerta. Después del commit se crean `NotificationDelive
 activo; cada una usa Gmail con asunto genérico y link generado desde `PUBLIC_BASE_URL`. Fallar el
 canal secundario nunca cambia el task.
 
+Cuando una respuesta manual `MANUAL_REPLY` llega a `SENT`, el servicio de dominio resuelve las
+tareas `REPLY_REVIEW` abiertas para ese inbound y reactiva la Conversation sólo si no quedan otras
+tareas abiertas. Una autorización manual en cola o fallida no limpia la alerta.
+
 ### 4.7 Comunicación programada
 
 Beat selecciona aprobaciones `ContactCommunicationPlan` vencidas bajo lock. La fecha y cadencia viven
@@ -214,9 +220,11 @@ dos schedulers efectivos.
 
 Workspace posee `BusinessProfile`, `IntegrationConfiguration`, `PromptConfiguration`, defaults de
 mensajes y knowledge. `IntegrationConfiguration` define también proveedor/modelo/dimensiones de
-embeddings; la variante OpenAI-compatible reutiliza la conexión OpenAI-compatible configurada. Las
-credenciales se cifran con subclaves por propósito derivadas de `FIELD_ENCRYPTION_KEY`, son
-write-only y se resuelven al construir adaptador. Campañas guardan sólo snapshots no secretos.
+embeddings; la variante OpenAI-compatible reutiliza la conexión OpenAI-compatible configurada.
+`PromptConfiguration` separa preferencias de campañas de las instrucciones de respuestas
+automáticas. Las credenciales se cifran con subclaves por propósito derivadas de
+`FIELD_ENCRYPTION_KEY`, son write-only y se resuelven al construir adaptador. Campañas guardan sólo
+snapshots no secretos.
 
 Controles externos de despliegue:
 
@@ -245,7 +253,7 @@ integridad de cada PDF y particiones Overture activas antes de habilitar live.
   residual tras timeout.
 - Outreach frío, aunque limitado, puede afectar reputación o incumplir obligaciones legales; live
   exige revisión externa.
-- Una decisión LLM puede equivocarse; allowlists, hechos versionados, SHADOW, qualification gate,
-  límites y kill switch contienen el daño.
+- Una decisión LLM puede equivocarse; allowlists, hechos versionados, SHADOW, límites y kill switch
+  contienen el daño.
 - La aplicación aún no está desplegada de forma pública: readiness no reemplaza proxy TLS,
   certificados, monitoreo ni revisión de infraestructura.

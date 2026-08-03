@@ -35,7 +35,11 @@ from apps.automation.notifications import (
     ensure_notification_deliveries,
     reconcile_notification,
 )
-from apps.automation.services import process_inbound_decision
+from apps.automation.services import (
+    approve_global_knowledge_context_revision,
+    create_global_knowledge_context_revision,
+    process_inbound_decision,
+)
 from apps.automation.tasks import recover_automation_actions
 from apps.campaigns.content import REDIRECT_ACK_BODY
 from apps.campaigns.models import (
@@ -45,6 +49,7 @@ from apps.campaigns.models import (
     OutboundMessage,
 )
 from apps.catalogs.models import Catalog
+from apps.configuration.services import save_automatic_reply_prompt
 from apps.contacts.models import (
     CampaignEnrollment,
     Contact,
@@ -287,7 +292,7 @@ def _scenario(
 
 def _allow_test_live_gate(monkeypatch) -> None:
     monkeypatch.setattr(
-        "apps.automation.execution._live_qualification_error",
+        "apps.automation.execution._live_mode_error",
         lambda decision: "",
     )
 
@@ -324,6 +329,39 @@ def test_live_decision_is_enqueued_only_after_commit(
             OutboundMessage.Kind.REDIRECT_ACK,
         )
     ).exists()
+
+
+@pytest.mark.django_db
+def test_reply_decision_uses_configured_writing_instructions(
+    owner,
+    private_catalog_dir,
+    django_capture_on_commit_callbacks,
+) -> None:
+    scenario = _scenario(owner, private_catalog_dir=private_catalog_dir)
+    scenario.decision.delete()
+    save_automatic_reply_prompt(
+        owner=owner,
+        automatic_reply_prompt="Respondé primero la pregunta y evitá listar tarjetas.",
+    )
+    provider = MockLLMProvider()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        decision = process_inbound_decision(
+            scenario.inbound.pk,
+            provider=provider,
+            resolver=MockMXResolver(),
+        )
+
+    assert decision is not None
+    assert provider.decision_requests[0].writing_instructions == (
+        "Respondé primero la pregunta y evitá listar tarjetas."
+    )
+    request_metadata = decision.context_manifest["request"]
+    assert (
+        request_metadata["writing_instructions_sha256"]
+        == sha256("Respondé primero la pregunta y evitá listar tarjetas.".encode()).hexdigest()
+    )
+    assert "evitá listar tarjetas" not in str(decision.context_manifest)
 
 
 @pytest.mark.django_db
@@ -748,6 +786,49 @@ def test_ambiguous_redirect_ack_is_reconciled_without_a_duplicate(
     assert scenario.decision.state == ReplyDecision.State.COMPLETED
     assert OutboundMessage.objects.filter(kind=OutboundMessage.Kind.REDIRECT_ACK).count() == 1
     assert FakeGmailMessage.objects.count() == 2
+
+
+@pytest.mark.django_db
+@override_settings(
+    SEND_MODE="live",
+    SEND_KILL_SWITCH=False,
+    AUTO_REPLY_KILL_SWITCH=False,
+)
+def test_direct_contact_reply_profile_and_global_context_survive_policy_recheck(
+    owner,
+    private_catalog_dir,
+    monkeypatch,
+) -> None:
+    scenario = _scenario(owner, private_catalog_dir=private_catalog_dir)
+    scenario.inbound.related_outbound = None
+    scenario.inbound.campaign_enrollment = None
+    scenario.inbound.subject = "Consulta directa"
+    scenario.inbound.save(
+        update_fields=("related_outbound", "campaign_enrollment", "subject", "updated_at")
+    )
+    revision = create_global_knowledge_context_revision(
+        workspace=scenario.contact.workspace,
+        actor=owner,
+        context_text="Somos fabricantes de carbones para motores y atendemos consultas técnicas.",
+        source_notes="",
+    )
+    approve_global_knowledge_context_revision(revision, actor=owner)
+    context = build_bounded_reply_context(scenario.inbound)
+    scenario.decision.context_manifest = context.manifest
+    scenario.decision.context_hash = context.context_hash
+    scenario.decision.save(update_fields=("context_manifest", "context_hash", "updated_at"))
+    assert {"CONTACT_RECORD", "GLOBAL_APPROVED_CONTEXT"}.issubset(
+        {block["provenance"] for block in context.manifest["blocks"]}
+    )
+    _allow_test_live_gate(monkeypatch)
+
+    authorized = authorize_reply_decision(scenario.decision.pk)
+
+    assert isinstance(authorized, OutboundMessage)
+    assert authorized.kind == OutboundMessage.Kind.AUTOMATIC_REPLY
+    assert not HumanTask.objects.filter(
+        inbound=scenario.inbound, status=HumanTask.Status.OPEN
+    ).exists()
 
 
 @pytest.mark.django_db

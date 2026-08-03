@@ -35,6 +35,7 @@ class RetrievalScore:
     revision: KnowledgeFactRevision
     score: float
     selected: bool
+    may_be_irrelevant: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,9 +103,10 @@ def approved_fact_revisions(workspace_id: uuid.UUID | str) -> list[KnowledgeFact
 def knowledge_embedding_input(revision: KnowledgeFactRevision) -> str:
     parts = [
         f"Nombre: {revision.fact.title}",
-        f"Tema: {revision.fact.category or 'Sin tema'}",
         f"Información aprobada: {revision.text}",
     ]
+    if revision.fact.category:
+        parts.insert(1, f"Tema: {revision.fact.category}")
     return "\n".join(parts)
 
 
@@ -277,28 +279,46 @@ def retrieve_relevant_fact_revisions(
     )
     above_threshold = [item for item in scored if item.score >= min_similarity]
     if not above_threshold:
+        suggested = tuple(
+            RetrievalScore(
+                revision=item.revision,
+                score=item.score,
+                selected=True,
+                may_be_irrelevant=True,
+            )
+            for item in scored[:max_facts]
+        )
         return KnowledgeRetrievalResult(
-            revisions=(),
-            scores=tuple(scored[:max_facts]),
+            revisions=tuple(item.revision for item in suggested),
+            scores=suggested,
             status="LOW_SIMILARITY",
             manifest={
                 **base_manifest,
                 "status": "LOW_SIMILARITY",
-                "scores": _scores_manifest(scored[:max_facts]),
+                "scores": _scores_manifest(suggested),
             },
         )
     if (
         len(above_threshold) > 1
         and above_threshold[0].score - above_threshold[1].score <= ambiguity_margin
     ):
+        suggested = tuple(
+            RetrievalScore(
+                revision=item.revision,
+                score=item.score,
+                selected=True,
+                may_be_irrelevant=True,
+            )
+            for item in above_threshold[:max_facts]
+        )
         return KnowledgeRetrievalResult(
-            revisions=(),
-            scores=tuple(above_threshold[:max_facts]),
+            revisions=tuple(item.revision for item in suggested),
+            scores=suggested,
             status="AMBIGUOUS",
             manifest={
                 **base_manifest,
                 "status": "AMBIGUOUS",
-                "scores": _scores_manifest(above_threshold[:max_facts]),
+                "scores": _scores_manifest(suggested),
             },
         )
     selected = tuple(
@@ -327,6 +347,7 @@ def _scores_manifest(
             "version": score.revision.version,
             "score": round(score.score, 6),
             "selected": score.selected,
+            "may_be_irrelevant": score.may_be_irrelevant,
         }
         for score in scores
     ]

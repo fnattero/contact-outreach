@@ -164,8 +164,10 @@
                 <time datetime="{{ row.task.opened_at|date:'c' }}">{{ row.task.opened_at|date:"d M Y · H:i" }}</time>
               </div>
               <div class="task-card__body">
-                <h3>{{ row.reason_label }}</h3>
+                <h3>{{ row.review_reason.title }}</h3>
+                <p>{{ row.review_reason.summary }}</p>
                 <p class="muted">{{ row.task.conversation.subject|default:"Sin asunto" }}</p>
+                {% if row.review_reason.next_step %}<p class="muted">{{ row.review_reason.next_step }}</p>{% endif %}
                 {% if row.task.resolution_note %}<p>Decisión: {{ row.task.resolution_note }}</p>{% endif %}
                 {% if row.task.resolved_at %}<p class="muted">Cerrada {{ row.task.resolved_at|date:"d M Y · H:i" }}</p>{% endif %}
               </div>

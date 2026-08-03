@@ -17,8 +17,10 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent, BackgroundJob
 from apps.audit.observability import RedactingJsonFormatter, correlation_id_var
 from apps.audit.services import record_event
+from apps.automation.models import HumanTask, ReplyDecision
 from apps.campaigns.models import Campaign, OutboundMessage, SearchQuery, SearchRun
 from apps.catalogs.services import create_catalog
+from apps.contacts.models import Contact, Conversation, EmailAddress, Organization
 from apps.dashboard.csv_export import spreadsheet_safe
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection, InboundMessage
@@ -192,6 +194,70 @@ def test_operational_views_filter_paginate_and_export_safely(
         message_id=f"<manual-{inbound.pk}@example.invalid>",
     )
     record_event(action="campaign.checked", entity=campaign, actor=owner)
+    organization = Organization.objects.create(
+        workspace=campaign.workspace,
+        name="Cliente operativo",
+        normalized_name="cliente operativo",
+    )
+    contact_email = EmailAddress.objects.create(
+        workspace=campaign.workspace,
+        organization=organization,
+        original_email="cliente-operativo@example.com",
+        normalized_email="cliente-operativo@example.com",
+        domain="example.com",
+        validity=EmailAddress.Validity.VALID,
+        is_preferred=True,
+    )
+    contact = Contact.objects.create(
+        workspace=campaign.workspace,
+        organization=organization,
+        preferred_email=contact_email,
+        name="Cliente operativo",
+        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
+        created_by=owner,
+    )
+    conversation = Conversation.objects.create(
+        workspace=campaign.workspace,
+        contact=contact,
+        connection=inbound.connection,
+        gmail_thread_id="dashboard-review-thread",
+        subject="Consulta por envíos",
+    )
+    inbound.organization = organization
+    inbound.contact = contact
+    inbound.conversation = conversation
+    inbound.save(update_fields=("organization", "contact", "conversation", "updated_at"))
+    decision = ReplyDecision.objects.create(
+        workspace=campaign.workspace,
+        inbound=inbound,
+        contact=contact,
+        conversation=conversation,
+        mode="LIVE",
+        provider="fake",
+        model="fake",
+        policy_version="reply-policy-v1",
+        classification="INTERESTED",
+        intent="APPROVED_PRODUCT_INFORMATION",
+        action="REPLY",
+        confidence="0.900",
+        human_reason="HUMAN_TASK_OPEN",
+        context_manifest={},
+        context_hash="b" * 64,
+        state=ReplyDecision.State.REJECTED_POLICY,
+        error="Hay una revisión humana pendiente para este contacto.",
+    )
+    HumanTask.objects.create(
+        workspace=campaign.workspace,
+        contact=contact,
+        conversation=conversation,
+        inbound=inbound,
+        decision=decision,
+        kind="REPLY_REVIEW",
+        reason="HUMAN_TASK_OPEN",
+        status=HumanTask.Status.OPEN,
+        friendly_summary="Hay una revisión humana pendiente para este contacto.",
+        opened_at=timezone.now(),
+    )
     client.force_login(owner)
 
     dashboard = client.get(reverse("dashboard"), {"campaign": campaign.pk})
@@ -200,6 +266,9 @@ def test_operational_views_filter_paginate_and_export_safely(
     assert dashboard.context["metrics"]["interested"] == 1
     assert dashboard.context["metrics"]["sent"] == 0
     assert dashboard.context["metrics"]["failed"] == 1
+    dashboard_page = dashboard.content.decode()
+    assert "Ya hay una revisión abierta para este contacto" in dashboard_page
+    assert "Hay una revisión humana pendiente para este contacto." in dashboard_page
     assert client.get(reverse("dashboard"), {"campaign": "inválida"}).status_code == 200
 
     prospects = client.get(

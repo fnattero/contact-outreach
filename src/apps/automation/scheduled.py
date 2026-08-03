@@ -31,7 +31,7 @@ from apps.automation.models import (
     ReplyAutomationConfiguration,
     ScheduledContactAttempt,
 )
-from apps.automation.services import open_human_task, qualification_snapshot
+from apps.automation.services import open_human_task
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.integrations import runtime_integration_configuration
@@ -743,8 +743,6 @@ def _automatic_mode_error(plan: ContactCommunicationPlan) -> str:
     ).first()
     if configuration is None or configuration.mode != ReplyAutomationConfiguration.Mode.LIVE:
         return "Las respuestas automáticas todavía no están en modo activo."
-    if not qualification_snapshot(plan.contact.workspace).qualified:
-        return "Todavía faltan revisiones seguras para permitir este envío automático."
     return ""
 
 

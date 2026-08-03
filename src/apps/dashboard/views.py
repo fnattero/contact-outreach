@@ -19,7 +19,8 @@ from apps.accounts.permissions import (
     workspace_for_user,
 )
 from apps.audit.models import AuditEvent, BackgroundJob
-from apps.automation.models import ReplyAutomationConfiguration
+from apps.automation.models import HumanTask, ReplyAutomationConfiguration
+from apps.automation.presentation import review_reason_for_task
 from apps.campaigns.models import Campaign, OutboundMessage, SearchRun
 from apps.campaigns.review import (
     approve_message_for_delivery,
@@ -74,6 +75,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     assert isinstance(owner, User)
     workspace = workspace_for_user(owner, Capability.VIEW_SUMMARY)
     is_admin = has_capability(owner, Capability.MANAGE_CAMPAIGNS)
+    can_view_contacts = has_capability(owner, Capability.VIEW_CONTACTS)
     providers: dict[str, str] = {}
     if is_admin:
         integration_runtime = runtime_integration_configuration(owner.pk)
@@ -189,6 +191,18 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "median_first_response": duration_label(informative_metrics.median_first_response),
         "median_human_intervention": duration_label(informative_metrics.median_human_intervention),
     }
+    attention_tasks = (
+        HumanTask.objects.filter(workspace=workspace, status=HumanTask.Status.OPEN)
+        .select_related(
+            "contact__organization",
+            "conversation",
+            "inbound",
+            "decision",
+        )
+        .order_by("-opened_at")[:5]
+        if can_view_contacts
+        else ()
+    )
     return render(
         request,
         "dashboard/index.html",
@@ -256,6 +270,13 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             )[:5]
             if is_admin
             else (),
+            "attention_task_rows": [
+                {
+                    "task": task,
+                    "review_reason": review_reason_for_task(task),
+                }
+                for task in attention_tasks
+            ],
             "problem_jobs": BackgroundJob.objects.filter(
                 state__in=(BackgroundJob.State.FAILED, BackgroundJob.State.RETRY_WAIT)
             )[:5]

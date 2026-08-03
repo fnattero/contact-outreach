@@ -218,6 +218,7 @@ def test_reply_context_keeps_mandatory_messages_and_bounds_optional_history(owne
     assert len(recent) == MAX_RECENT_MESSAGES
     assert any(block.source_id == str(memory.pk) for block in context.blocks)
     assert len(context.facts) == MAX_FACTS
+    assert all(not fact.may_be_irrelevant for fact in context.facts)
     assert context.manifest["knowledge_retrieval"]["status"] == "SELECTED"
     assert context.character_count <= 24_000
     request = ReplyDecisionRequest(
@@ -335,7 +336,7 @@ def test_reply_context_includes_approved_global_context(owner: User) -> None:
 
 
 @pytest.mark.django_db
-def test_reply_context_with_low_rag_similarity_passes_no_facts(owner: User) -> None:
+def test_reply_context_with_low_rag_similarity_passes_suggested_facts(owner: User) -> None:
     inbound, _, _ = _reply_context_fixture(owner)
     assert inbound.contact is not None
     revision = create_knowledge_revision(
@@ -353,8 +354,13 @@ def test_reply_context_with_low_rag_similarity_passes_no_facts(owner: User) -> N
         embedding_provider=LowSimilarityEmbeddingProvider(),
     )
 
-    assert context.facts == ()
+    assert len(context.facts) == 1
+    assert context.facts[0].retrieval_status == "LOW_SIMILARITY"
+    assert context.facts[0].may_be_irrelevant is True
+    assert context.facts[0].similarity == pytest.approx(0)
     assert context.manifest["knowledge_retrieval"]["status"] == "LOW_SIMILARITY"
+    assert context.manifest["knowledge_retrieval"]["scores"][0]["selected"] is True
+    assert context.manifest["knowledge_retrieval"]["scores"][0]["may_be_irrelevant"] is True
 
 
 @pytest.mark.django_db

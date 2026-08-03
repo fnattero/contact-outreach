@@ -17,6 +17,7 @@ from apps.configuration.models import (
     WorkspaceMessageTemplateRevision,
 )
 from apps.configuration.services import (
+    save_automatic_reply_prompt,
     save_business_profile,
     save_config_item,
     save_prompt_configuration,
@@ -113,7 +114,25 @@ def test_prompt_configuration_is_versioned_and_audited_without_plaintext(owner: 
     )
     event = AuditEvent.objects.get(action="prompt_configuration.updated")
     assert "email_drafting_prompt_sha256" in event.after
+    assert "automatic_reply_prompt_sha256" in event.after
     assert "Usá un tono sobrio" not in str(event.after)
+
+
+@pytest.mark.django_db
+def test_prompt_configuration_keeps_campaign_and_reply_prompts_separate(owner: User) -> None:
+    save_automatic_reply_prompt(
+        owner=owner,
+        automatic_reply_prompt="Contestá primero la pregunta concreta.",
+    )
+
+    save_prompt_configuration(
+        owner=owner,
+        email_drafting_prompt="Usá un tono comercial sobrio.",
+    )
+
+    configured = PromptConfiguration.objects.get(owner=owner)
+    assert configured.email_drafting_prompt == "Usá un tono comercial sobrio."
+    assert configured.automatic_reply_prompt == "Contestá primero la pregunta concreta."
 
 
 def test_category_form_accepts_variants_without_operator_syntax() -> None:

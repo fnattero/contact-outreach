@@ -74,7 +74,11 @@ class RecordingTransport:
 
 def test_scheduled_schema_scopes_fact_revision_ids() -> None:
     schema = scheduled_contact_draft_json_schema(_request())
-    assert schema["properties"]["fact_revision_ids"]["items"] == {"enum": ["fact-1"]}
+    assert schema["properties"]["fact_revision_ids"]["items"] == {
+        "type": "string",
+        "enum": ["fact-1"],
+    }
+    assert set(schema["required"]) == set(schema["properties"])
 
 
 def test_scheduled_draft_rejects_invented_fact_and_inconsistent_human_result() -> None:

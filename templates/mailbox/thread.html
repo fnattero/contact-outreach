@@ -48,25 +48,46 @@
       </article>
     {% endfor %}
   </section>
-  {% if inbound.is_human and can_reply %}
-    <aside class="panel">
-      <div class="panel__header">
-        <div>
-          <h2>Responder manualmente</h2>
-          <p class="muted">Se mantienen el destinatario, el asunto y la conversación.</p>
+  {% if show_thread_sidebar %}
+    <aside class="section-stack" aria-label="Acciones y estado de respuesta">
+    {% if automation_review %}
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2>Respuesta automática</h2>
+            <p class="muted">Motivo registrado para este hilo.</p>
+          </div>
+          <span class="badge badge--warning">{{ automation_review.status_label }}</span>
         </div>
-      </div>
-      <div class="panel__body">
-        <div class="alert alert--warning">
-          <div><strong>Acción explícita</strong><br>Ninguna tarea redacta ni envía esta respuesta sin tu clic.</div>
+        <div class="panel__body">
+          <div class="alert alert--warning">
+            <div><strong>{{ automation_review.title }}</strong><br>{{ automation_review.summary }}</div>
+          </div>
+          {% if automation_review.next_step %}<p class="muted flush">{{ automation_review.next_step }}</p>{% endif %}
         </div>
-        <form method="post" action="{% url 'manual-reply' inbound.pk %}">
-          {% csrf_token %}
-          {{ form.idempotency_key }}
-          {% include "includes/field.html" with field=form.body_text %}
-          <button class="button" type="submit">Enviar respuesta</button>
-        </form>
-      </div>
+      </section>
+    {% endif %}
+    {% if inbound.is_human and can_reply %}
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2>Responder manualmente</h2>
+            <p class="muted">Se mantienen el destinatario, el asunto y la conversación.</p>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div class="alert alert--warning">
+            <div><strong>Acción explícita</strong><br>Ninguna tarea redacta ni envía esta respuesta sin tu clic.</div>
+          </div>
+          <form method="post" action="{% url 'manual-reply' inbound.pk %}">
+            {% csrf_token %}
+            {{ form.idempotency_key }}
+            {% include "includes/field.html" with field=form.body_text %}
+            <button class="button" type="submit">Enviar respuesta</button>
+          </form>
+        </div>
+      </section>
+    {% endif %}
     </aside>
   {% endif %}
 </div>

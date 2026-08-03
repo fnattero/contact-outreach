@@ -88,13 +88,16 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
   URLs activas peligrosas se eliminan. Raw HTML no entra al modelo.
 - Texto de web, email, firmas y citas se rotula como datos no confiables. No puede cambiar sistema,
   policy ni listas permitidas.
+- Las instrucciones de redacción editables por admin se envían como guía separada y no pueden
+  contradecir la policy fija, permitir hechos no aprobados ni evitar HumanTask.
 - El LLM no recibe Gmail, HTTP, calendario, filesystem ni tool calling. Sólo devuelve JSON.
 - El schema enumera en cada request candidate IDs, fact revision IDs, intents y actions exactos.
   Campos/IDs extra, conflicto, multi-intent o output inválido fallan hacia HumanTask.
-- Los hechos sólo provienen de revisiones aprobadas. El contexto global aprobado se inyecta siempre
-  como orientación, y los facts puntuales se recuperan con embeddings hasta un máximo pequeño; si
-  la búsqueda es baja o ambigua, no se usan como fundamento automático. No se extraen PDFs ni se
-  inventan claims.
+- Los hechos sólo provienen de revisiones guardadas/activas por administradores. El contexto global
+  vigente se inyecta siempre como orientación, y los facts puntuales se recuperan con embeddings
+  hasta un máximo pequeño; si la búsqueda es baja o ambigua, pueden llegar marcados como
+  `may_be_irrelevant=true` y sólo pueden fundamentar una respuesta si el LLM los juzga claramente
+  aplicables. No se extraen PDFs ni se inventan claims.
 - Contexto máximo 24.000 caracteres: mandatory completo o HumanTask. Se limita historia y no se
   persiste prompt gigante/cuerpos duplicados en logs.
 - Emails candidatos se extraen literalmente, máximo diez, con región. No se reconstruyen
@@ -115,6 +118,8 @@ tareas humanas. Comunicación programada usa temas globales aprobados por contac
 Estas barreras se comprueban al preparar/autorizar/encolar y **otra vez inmediatamente antes de
 Gmail**. DB authorization nunca reemplaza la barrera externa. Headers de auto submitted/bulk/list,
 unsubscribe, bounce, restricción, HumanTask abierto o cambio de contexto cancelan el efecto.
+Una respuesta manual sólo limpia la tarea de revisión asociada después de confirmación Gmail
+`SENT`; si falla o queda ambigua, la alerta no se oculta.
 
 Límites automáticos: tres replies por Conversation en 24 h móviles y veinte por Workspace/día,
 reservados transaccionalmente. Meeting/dates, price/quote, negotiation, complaints, legal/privacy,
@@ -185,5 +190,5 @@ separado; restore prueba descifrado e integridad sin imprimir valores.
 - Gmail scopes/app/refresh token, reconciliación y límites aprobados.
 - PDFs/contenido/firma/cobertura Overture y same-day guard aprobados.
 - SEND/AUTO_REPLY/RELATIONSHIP kill switches probados.
-- SHADOW gate: >=30 reviews, >=10 auto-eligible, accuracy >=90%, cero unsafe auto; reauth para LIVE.
+- Reauth admin para LIVE.
 - Revisión legal/deliverability registrada externamente.

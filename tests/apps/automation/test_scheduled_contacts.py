@@ -29,7 +29,7 @@ from apps.automation.scheduled import (
     set_contact_communication_plan_state,
     snooze_contact_communication_plan,
 )
-from apps.automation.services import QualificationSnapshot, close_human_task
+from apps.automation.services import close_human_task
 from apps.automation.tasks import dispatch_scheduled_contacts, recover_automation_actions
 from apps.campaigns.models import OutboundAttachment, OutboundMessage
 from apps.contacts.models import (
@@ -218,9 +218,8 @@ def test_due_topics_create_one_attempt_per_contact(owner: User) -> None:
     AUTO_REPLY_KILL_SWITCH=False,
     RELATIONSHIP_KILL_SWITCH=False,
 )
-def test_automatic_plan_requires_live_qualification_and_queues_new_thread(
+def test_automatic_plan_requires_live_mode_and_queues_new_thread(
     owner: User,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contact, email = _contact(owner)
     _ready_gmail(owner)
@@ -229,10 +228,6 @@ def test_automatic_plan_requires_live_qualification_and_queues_new_thread(
         mode=ReplyAutomationConfiguration.Mode.LIVE,
         live_enabled_at=timezone.now(),
         live_enabled_by=owner,
-    )
-    monkeypatch.setattr(
-        "apps.automation.scheduled.qualification_snapshot",
-        lambda workspace: QualificationSnapshot(30, 10, 30, 0),
     )
     _plan(owner, contact, email, mode=FollowUpTopic.Mode.AUTOMATIC)
     attempt_id = create_due_scheduled_attempts()[0]
@@ -260,7 +255,6 @@ def test_automatic_plan_requires_live_qualification_and_queues_new_thread(
 )
 def test_relationship_kill_switch_blocks_automatic_attempt_before_llm(
     owner: User,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contact, email = _contact(owner)
     _ready_gmail(owner)
@@ -269,10 +263,6 @@ def test_relationship_kill_switch_blocks_automatic_attempt_before_llm(
         mode=ReplyAutomationConfiguration.Mode.LIVE,
         live_enabled_at=timezone.now(),
         live_enabled_by=owner,
-    )
-    monkeypatch.setattr(
-        "apps.automation.scheduled.qualification_snapshot",
-        lambda workspace: QualificationSnapshot(30, 10, 30, 0),
     )
     _plan(owner, contact, email, mode=FollowUpTopic.Mode.AUTOMATIC)
     provider = MockLLMProvider()

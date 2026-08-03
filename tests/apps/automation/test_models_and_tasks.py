@@ -14,6 +14,7 @@ from apps.automation.models import (
     ReplyAutomationConfiguration,
 )
 from apps.automation.services import (
+    _human_task_lock_queryset,
     approve_knowledge_revision,
     close_human_task,
     create_knowledge_revision,
@@ -140,6 +141,12 @@ def test_conversation_resumes_only_after_last_open_task_is_closed(owner) -> None
     conversation.refresh_from_db()
     assert not conversation.automation_suspended
     assert not HumanTask.objects.filter(status=HumanTask.Status.OPEN).exists()
+
+
+def test_human_task_close_locks_only_the_task_row() -> None:
+    query = _human_task_lock_queryset().query
+    assert query.select_for_update
+    assert query.select_for_update_of == ("self",)
 
 
 @pytest.mark.django_db

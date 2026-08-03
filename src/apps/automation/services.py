@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from dataclasses import dataclass
 from functools import partial
 from hashlib import sha256
 from typing import Any
@@ -10,7 +9,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from apps.accounts.models import Workspace
@@ -31,6 +30,7 @@ from apps.automation.models import (
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import IntegrationConfiguration
+from apps.configuration.services import runtime_prompt_configuration
 from apps.contacts.models import EmailAddress
 from apps.integrations.contracts import (
     LLMProvider,
@@ -62,67 +62,6 @@ HUMAN_REQUIRED_INTENT_REASONS = {
     "INSUFFICIENT_CONTEXT": "INSUFFICIENT_CONTEXT",
 }
 MIN_AUTOMATIC_CONFIDENCE = 0.90
-
-
-@dataclass(frozen=True, slots=True)
-class QualificationSnapshot:
-    reviewed: int
-    auto_eligible_reviewed: int
-    correct: int
-    unsafe_auto: int
-
-    @property
-    def accuracy(self) -> float:
-        return self.correct / self.reviewed if self.reviewed else 0.0
-
-    @property
-    def accuracy_percent(self) -> float:
-        return self.accuracy * 100
-
-    @property
-    def qualified(self) -> bool:
-        return (
-            self.reviewed >= 30
-            and self.auto_eligible_reviewed >= 10
-            and self.accuracy >= 0.90
-            and self.unsafe_auto == 0
-        )
-
-
-def qualification_snapshot(workspace: Workspace) -> QualificationSnapshot:
-    reviewed = ReplyDecision.objects.filter(
-        workspace=workspace,
-        reviewed_at__isnull=False,
-    )
-    aggregates = reviewed.aggregate(
-        reviewed=Count("pk"),
-        correct=Count("pk", filter=Q(reviewed_outcome=ReplyDecision.ReviewOutcome.CORRECT)),
-        auto_eligible=Count(
-            "pk",
-            filter=Q(
-                action__in=AUTO_ACTIONS,
-                intent__in=AUTO_INTENTS,
-                confidence__gte=MIN_AUTOMATIC_CONFIDENCE,
-                human_reason="",
-            ),
-        ),
-        unsafe_auto=Count(
-            "pk",
-            filter=Q(
-                action__in=AUTO_ACTIONS,
-                intent__in=AUTO_INTENTS,
-                confidence__gte=MIN_AUTOMATIC_CONFIDENCE,
-                human_reason="",
-                reviewed_outcome=ReplyDecision.ReviewOutcome.NEEDED_HUMAN,
-            ),
-        ),
-    )
-    return QualificationSnapshot(
-        reviewed=int(aggregates["reviewed"] or 0),
-        auto_eligible_reviewed=int(aggregates["auto_eligible"] or 0),
-        correct=int(aggregates["correct"] or 0),
-        unsafe_auto=int(aggregates["unsafe_auto"] or 0),
-    )
 
 
 @transaction.atomic
@@ -204,11 +143,6 @@ def set_live_mode(
     require_user_capability(actor, Capability.MANAGE_AUTOMATION, workspace_id=workspace.pk)
     if not reauthenticated:
         raise PermissionDenied("Volvé a ingresar tu contraseña antes de activar respuestas.")
-    snapshot = qualification_snapshot(workspace)
-    if not snapshot.qualified:
-        raise ValidationError(
-            "Todavía faltan revisiones seguras antes de activar respuestas automáticas."
-        )
     configuration, _ = ReplyAutomationConfiguration.objects.select_for_update().get_or_create(
         workspace=workspace
     )
@@ -220,13 +154,25 @@ def set_live_mode(
         action="automation.live_enabled",
         entity=configuration,
         actor=actor,
-        after={
-            "reviewed": snapshot.reviewed,
-            "auto_eligible_reviewed": snapshot.auto_eligible_reviewed,
-            "accuracy": snapshot.accuracy,
-        },
+        after={"mode": ReplyAutomationConfiguration.Mode.LIVE},
     )
     return configuration
+
+
+@transaction.atomic
+def save_global_knowledge_context(
+    *,
+    workspace: Workspace,
+    actor: User,
+    context_text: str,
+) -> WorkspaceKnowledgeContextRevision:
+    revision = create_global_knowledge_context_revision(
+        workspace=workspace,
+        actor=actor,
+        context_text=context_text,
+        source_notes="",
+    )
+    return approve_global_knowledge_context_revision(revision, actor=actor)
 
 
 @transaction.atomic
@@ -265,6 +211,27 @@ def create_knowledge_revision(
         after={"fact_id": str(fact.pk), "version": version},
     )
     return revision
+
+
+@transaction.atomic
+def save_knowledge_revision(
+    *,
+    workspace: Workspace,
+    actor: User,
+    title: str,
+    category: str,
+    text: str,
+    source_notes: str = "",
+) -> KnowledgeFactRevision:
+    revision = create_knowledge_revision(
+        workspace=workspace,
+        actor=actor,
+        title=title,
+        category=category,
+        text=text,
+        source_notes=source_notes,
+    )
+    return approve_knowledge_revision(revision, actor=actor)
 
 
 @transaction.atomic
@@ -443,6 +410,34 @@ def open_human_task(
     return task
 
 
+def _human_task_lock_queryset() -> QuerySet[HumanTask]:
+    # Conversation can be NULL; only lock the task row to avoid FOR UPDATE on an outer join.
+    return HumanTask.objects.select_for_update(of=("self",)).select_related(
+        "contact",
+        "conversation",
+    )
+
+
+def _resume_automation_after_task_close(task: HumanTask) -> None:
+    if task.conversation is not None:
+        still_open = HumanTask.objects.filter(
+            conversation=task.conversation,
+            status=HumanTask.Status.OPEN,
+        ).exists()
+        if not still_open:
+            task.conversation.automation_suspended = False
+            task.conversation.save(update_fields=("automation_suspended", "updated_at"))
+    else:
+        still_open = HumanTask.objects.filter(
+            contact=task.contact,
+            conversation__isnull=True,
+            status=HumanTask.Status.OPEN,
+        ).exists()
+        if not still_open:
+            task.contact.automation_suspended = False
+            task.contact.save(update_fields=("automation_suspended", "updated_at"))
+
+
 @transaction.atomic
 def close_human_task(
     task: HumanTask,
@@ -451,11 +446,7 @@ def close_human_task(
     dismiss: bool,
     note: str,
 ) -> HumanTask:
-    locked = (
-        HumanTask.objects.select_for_update()
-        .select_related("contact", "conversation")
-        .get(pk=task.pk)
-    )
+    locked = _human_task_lock_queryset().get(pk=task.pk)
     require_user_capability(
         actor,
         Capability.MANAGE_AUTOMATION,
@@ -478,23 +469,7 @@ def close_human_task(
             "updated_at",
         )
     )
-    if locked.conversation is not None:
-        still_open = HumanTask.objects.filter(
-            conversation=locked.conversation,
-            status=HumanTask.Status.OPEN,
-        ).exists()
-        if not still_open:
-            locked.conversation.automation_suspended = False
-            locked.conversation.save(update_fields=("automation_suspended", "updated_at"))
-    else:
-        still_open = HumanTask.objects.filter(
-            contact=locked.contact,
-            conversation__isnull=True,
-            status=HumanTask.Status.OPEN,
-        ).exists()
-        if not still_open:
-            locked.contact.automation_suspended = False
-            locked.contact.save(update_fields=("automation_suspended", "updated_at"))
+    _resume_automation_after_task_close(locked)
     record_event(
         action="human_task.dismissed" if dismiss else "human_task.resolved",
         entity=locked,
@@ -502,6 +477,47 @@ def close_human_task(
         after={"status": locked.status},
     )
     return locked
+
+
+@transaction.atomic
+def resolve_reply_review_tasks_for_manual_reply(
+    *,
+    inbound_id: uuid.UUID | str,
+    workspace_id: uuid.UUID | str,
+    actor: User,
+) -> int:
+    tasks = list(
+        _human_task_lock_queryset().filter(
+            workspace_id=workspace_id,
+            inbound_id=uuid.UUID(str(inbound_id)),
+            kind="REPLY_REVIEW",
+            status=HumanTask.Status.OPEN,
+        )
+    )
+    resolved = 0
+    for task in tasks:
+        task.status = HumanTask.Status.RESOLVED
+        task.resolved_at = timezone.now()
+        task.resolved_by = actor
+        task.resolution_note = "Respondida manualmente."
+        task.save(
+            update_fields=(
+                "status",
+                "resolved_at",
+                "resolved_by",
+                "resolution_note",
+                "updated_at",
+            )
+        )
+        _resume_automation_after_task_close(task)
+        record_event(
+            action="human_task.resolved",
+            entity=task,
+            actor=actor,
+            after={"status": task.status, "source": "manual_reply"},
+        )
+        resolved += 1
+    return resolved
 
 
 @transaction.atomic
@@ -722,11 +738,13 @@ def process_inbound_decision(
         provider_name = runtime.llm_provider
         model_name = runtime.llm_model
         base_url = runtime.llm_base_url()
+    prompt_runtime = runtime_prompt_configuration(owner_id)
     try:
         refresh_contact_memory(contact.pk)
         context = build_bounded_reply_context(
             inbound,
             policy_version=configuration.policy_version,
+            writing_instructions=prompt_runtime.automatic_reply_prompt,
         )
         selected_provider = provider or get_llm_provider(
             provider_name,
@@ -741,6 +759,7 @@ def process_inbound_decision(
             correlation_id=secrets.token_hex(16),
             idempotency_key=f"reply-decision:{inbound.gmail_message_id}",
             policy_version=configuration.policy_version,
+            writing_instructions=prompt_runtime.automatic_reply_prompt,
         )
         result = selected_provider.decide_reply(request)
         _validate_result_references(

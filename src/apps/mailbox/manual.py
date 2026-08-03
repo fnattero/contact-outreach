@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.utils import parseaddr
+from functools import partial
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -14,6 +15,7 @@ from django.utils import timezone
 
 from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
+from apps.automation.services import resolve_reply_review_tasks_for_manual_reply
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
@@ -297,7 +299,7 @@ def authorize_manual_reply(
     if existing is not None:
         return existing, False
     inbound = (
-        InboundMessage.objects.select_for_update()
+        InboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "connection",
             "related_outbound__campaign",
@@ -498,6 +500,17 @@ def _finish_manual_reply(
         actor=actor,
         after={"state": state},
     )
+    if state == OutboundMessage.State.SENT and actor is not None and message.parent_inbound_id:
+        parent = message.parent_inbound
+        assert parent is not None
+        transaction.on_commit(
+            partial(
+                resolve_reply_review_tasks_for_manual_reply,
+                inbound_id=message.parent_inbound_id,
+                workspace_id=parent.connection.workspace_id,
+                actor=actor,
+            )
+        )
     return message.state
 
 
@@ -506,7 +519,7 @@ def _prepare_manual_effect(
     message_id: uuid.UUID | str,
 ) -> ManualReplyEffect | str:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "campaign__created_by",
             "prospect_email",
@@ -581,7 +594,7 @@ def _execute_manual_effect(
 ) -> str:
     lock_email_eligibility(effect.recipient_normalized)
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "campaign__created_by",
             "prospect_email",
@@ -687,7 +700,7 @@ def reconcile_manual_reply(
     ):
         with transaction.atomic():
             locked = (
-                OutboundMessage.objects.select_for_update()
+                OutboundMessage.objects.select_for_update(of=("self",))
                 .select_related("sent_by")
                 .get(pk=message.pk)
             )
@@ -732,7 +745,9 @@ def reconcile_manual_reply(
             )
     with transaction.atomic():
         locked = (
-            OutboundMessage.objects.select_for_update().select_related("sent_by").get(pk=message.pk)
+            OutboundMessage.objects.select_for_update(of=("self",))
+            .select_related("sent_by")
+            .get(pk=message.pk)
         )
         if result is not None:
             return _finish_manual_reply(

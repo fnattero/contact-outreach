@@ -143,10 +143,10 @@ Estados: `PENDING`, `SHADOW_RECORDED`, `NO_ACTION`, `AUTO_ELIGIBLE`, `AUTHORIZED
 | PENDING/AUTO_ELIGIBLE/AUTHORIZED/EXECUTING | FAILED | Error persistido; sin reclamo de éxito |
 
 Confianza >=0,90 es necesaria, nunca suficiente. IDs no incluidos o campos extra producen
-`HUMAN_REQUIRED/FAILED`, no fallback. El contexto válido incluye contexto global aprobado y, para
-respuestas fundamentadas, facts puntuales seleccionados por embeddings; similitud baja o selección
-ambigua no autoriza una respuesta por sí sola. Una Conversation `SUSPENDED_HUMAN` impide nuevas
-autorizaciones automáticas.
+`HUMAN_REQUIRED/FAILED`, no fallback. El contexto válido incluye contexto global vigente y, para
+respuestas fundamentadas, facts puntuales activos seleccionados por embeddings; si llegan por
+similitud baja o selección ambigua se marcan como posibles y no autorizan una respuesta por sí
+solos. Una Conversation `SUSPENDED_HUMAN` impide nuevas autorizaciones automáticas.
 
 ### Saga de redirección
 
@@ -162,6 +162,10 @@ propuesta. Un semantic action por inbound impide dos sagas.
 HumanTask: `OPEN -> RESOLVED|DISMISSED`. Abrir pone Conversation en `SUSPENDED_HUMAN`. Resolver o
 descartar puede restaurar `ACTIVE` sólo si no queda otro task abierto; no dispara envío salvo una
 acción admin separada y explícita.
+
+Una respuesta manual confirmada (`MANUAL_REPLY -> SENT`) resuelve automáticamente las tareas
+`REPLY_REVIEW` abiertas para ese inbound, usando como actor al usuario que autorizó la respuesta.
+Si el envío manual falla o queda `RECONCILING`, la tarea sigue `OPEN`.
 
 NotificationDelivery: `PENDING -> SENDING -> SENT|RECONCILING|FAILED`; `RECONCILING -> SENT|PENDING|
 FAILED`. El task sigue OPEN aunque todas las notificaciones fallen.

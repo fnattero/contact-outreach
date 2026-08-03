@@ -3,6 +3,28 @@ from __future__ import annotations
 from django import forms
 
 from apps.automation.models import FollowUpTopic, ReplyAutomationConfiguration, ReplyDecision
+from apps.configuration.services import MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
+
+
+class AutomaticReplyPromptForm(forms.Form):
+    automatic_reply_prompt = forms.CharField(
+        max_length=MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
+        label="Instrucciones para redactar respuestas automáticas",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 8,
+                "spellcheck": "true",
+                "placeholder": (
+                    "Ej.: Respondé de forma cordial y directa. Contestá primero la pregunta "
+                    "del cliente. Si faltan datos, pedí sólo los mínimos necesarios."
+                ),
+            }
+        ),
+        help_text=(
+            "Define tono y forma de escritura. No puede permitir respuestas sin datos aprobados "
+            "ni evitar revisión humana."
+        ),
+    )
 
 
 class GlobalKnowledgeContextForm(forms.Form):
@@ -24,38 +46,14 @@ class GlobalKnowledgeContextForm(forms.Form):
             "general y límites: qué puede decir y qué debe derivar a una persona."
         ),
     )
-    source_notes = forms.CharField(
-        required=False,
-        label="Quién confirmó este contexto",
-        widget=forms.Textarea(
-            attrs={
-                "rows": 2,
-                "placeholder": "Ej.: Revisado por Fran el 27/07/2026.",
-            }
-        ),
-        help_text="Nota interna. No se envía al cliente.",
-    )
 
 
 class KnowledgeRevisionForm(forms.Form):
     title = forms.CharField(
         max_length=240,
         label="Nombre corto",
-        help_text=(
-            "Sirve para que vos y el agente reconozcan rápido este dato. Ejemplo: "
-            "“Años de experiencia”, “Medidas disponibles” o “Zonas de entrega”."
-        ),
+        help_text="Un título simple para encontrarlo después.",
         widget=forms.TextInput(attrs={"placeholder": "Ej.: Años de experiencia"}),
-    )
-    category = forms.CharField(
-        max_length=120,
-        required=False,
-        label="Tema",
-        help_text=(
-            "Agrupa datos parecidos. Ayuda a encontrar la información y a que el agente elija "
-            "mejor qué usar. Ejemplos: Empresa, Productos, Entrega, Garantía."
-        ),
-        widget=forms.TextInput(attrs={"placeholder": "Ej.: Empresa"}),
     )
     text = forms.CharField(
         max_length=4000,
@@ -71,8 +69,7 @@ class KnowledgeRevisionForm(forms.Form):
             }
         ),
         help_text=(
-            "Escribí una respuesta breve, concreta y verdadera. El agente sólo puede responder "
-            "con datos aprobados de esta sección: no lee los PDF ni inventa información."
+            "Escribí un dato confirmado que pueda usarse en una respuesta. Una tarjeta por idea."
         ),
     )
 
@@ -93,20 +90,6 @@ class KnowledgeSearchPreviewForm(forms.Form):
         help_text=(
             "Pegá una pregunta parecida a la que podría mandar un cliente. Te mostramos qué "
             "datos encontraría el buscador antes de llamar al agente."
-        ),
-    )
-    source_notes = forms.CharField(
-        required=False,
-        label="De dónde sale este dato",
-        widget=forms.Textarea(
-            attrs={
-                "rows": 2,
-                "placeholder": "Ej.: Confirmado por Fran el 27/07/2026; catálogo interno 2026.",
-            }
-        ),
-        help_text=(
-            "Nota sólo para el equipo. No se envía al cliente. Usala para recordar quién confirmó "
-            "el dato o de qué documento salió."
         ),
     )
 
@@ -135,7 +118,7 @@ class AutomationModeForm(forms.Form):
         required=False,
         label="Tu contraseña actual",
         widget=forms.PasswordInput,
-        help_text="Sólo se pide para activar respuestas automáticas reales.",
+        help_text="Se pide sólo al pasar a respuestas automáticas activas.",
     )
 
 

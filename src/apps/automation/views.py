@@ -6,12 +6,14 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.permissions import Capability, require_capability, workspace_for_user
 from apps.automation.forms import (
+    AutomaticReplyPromptForm,
     AutomationModeForm,
     DecisionReviewForm,
     FollowUpTopicForm,
@@ -31,14 +33,19 @@ from apps.automation.scheduled import save_follow_up_topic
 from apps.automation.services import (
     approve_global_knowledge_context_revision,
     approve_knowledge_revision,
-    create_global_knowledge_context_revision,
-    create_knowledge_revision,
-    qualification_snapshot,
     review_reply_decision,
+    save_global_knowledge_context,
+    save_knowledge_revision,
     set_live_mode,
     set_non_live_mode,
 )
+from apps.configuration.services import runtime_prompt_configuration, save_automatic_reply_prompt
 from apps.integrations.contracts import ProviderError
+
+
+def _automation_settings_url(anchor: str = "") -> str:
+    url = reverse("automation-settings")
+    return f"{url}#{anchor}" if anchor else url
 
 
 def _automation_settings_context(
@@ -50,6 +57,7 @@ def _automation_settings_context(
     assert isinstance(actor, User)
     workspace = workspace_for_user(actor, Capability.MANAGE_AUTOMATION)
     configuration, _ = ReplyAutomationConfiguration.objects.get_or_create(workspace=workspace)
+    prompt_runtime = runtime_prompt_configuration(actor.pk)
     decisions = (
         ReplyDecision.objects.filter(workspace=workspace)
         .select_related("contact__organization", "inbound", "reviewed_by")
@@ -61,11 +69,12 @@ def _automation_settings_context(
         .select_related("fact", "approved_by")
         .order_by("fact__category", "fact__title", "-version")
     )
-    global_revisions = WorkspaceKnowledgeContextRevision.objects.filter(
-        workspace=workspace
-    ).select_related("approved_by")
     global_current = (
-        global_revisions.filter(approved_at__isnull=False, superseded_at__isnull=True)
+        WorkspaceKnowledgeContextRevision.objects.filter(
+            workspace=workspace,
+            approved_at__isnull=False,
+            superseded_at__isnull=True,
+        )
         .order_by("-version")
         .first()
     )
@@ -92,21 +101,23 @@ def _automation_settings_context(
     )
     return {
         "configuration": configuration,
-        "qualification": qualification_snapshot(workspace),
         "decisions": page,
         "page_obj": page,
         "revisions": revisions,
-        "global_context_revisions": global_revisions.order_by("-version")[:5],
-        "global_current": global_current,
         "global_context_form": GlobalKnowledgeContextForm(
             initial={
                 "context_text": global_current.context_text if global_current else "",
-                "source_notes": "",
             }
         ),
         "knowledge_form": KnowledgeRevisionForm(),
         "knowledge_preview_form": KnowledgeSearchPreviewForm(),
         "knowledge_preview": knowledge_preview,
+        "automatic_reply_prompt_form": AutomaticReplyPromptForm(
+            initial={
+                "automatic_reply_prompt": prompt_runtime.automatic_reply_prompt,
+            }
+        ),
+        "automatic_reply_prompt_revision": prompt_runtime.revision,
         "mode_form": AutomationModeForm(initial={"mode": configuration.mode}),
         "review_outcomes": ReplyDecision.ReviewOutcome.choices,
         "follow_up_topics": topics.order_by("-active", "name"),
@@ -129,13 +140,38 @@ def automation_settings(request: HttpRequest) -> HttpResponse:
 @require_capability(Capability.MANAGE_AUTOMATION)
 @require_POST
 @never_cache
+def automatic_reply_prompt_save(request: HttpRequest) -> HttpResponse:
+    actor = request.user
+    assert isinstance(actor, User)
+    form = AutomaticReplyPromptForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Revisá las instrucciones antes de guardarlas.")
+        return redirect(_automation_settings_url("reply-prompt"))
+    try:
+        saved = save_automatic_reply_prompt(
+            owner=actor,
+            automatic_reply_prompt=form.cleaned_data["automatic_reply_prompt"],
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(
+            request,
+            f"Instrucciones guardadas como revisión {saved.revision}.",
+        )
+    return redirect(_automation_settings_url("reply-prompt"))
+
+
+@require_capability(Capability.MANAGE_AUTOMATION)
+@require_POST
+@never_cache
 def follow_up_topic_save(request: HttpRequest) -> HttpResponse:
     actor = request.user
     assert isinstance(actor, User)
     form = FollowUpTopicForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Revisá el tema de seguimiento antes de guardarlo.")
-        return redirect("automation-settings")
+        return redirect(_automation_settings_url("follow-up-topics"))
     topic_id = request.POST.get("topic_id") or None
     try:
         save_follow_up_topic(
@@ -147,7 +183,7 @@ def follow_up_topic_save(request: HttpRequest) -> HttpResponse:
         messages.error(request, "; ".join(exc.messages))
     else:
         messages.success(request, "Tema de seguimiento guardado.")
-    return redirect("automation-settings")
+    return redirect(_automation_settings_url("follow-up-topics"))
 
 
 @require_capability(Capability.MANAGE_KNOWLEDGE)
@@ -159,17 +195,23 @@ def knowledge_create(request: HttpRequest) -> HttpResponse:
     form = KnowledgeRevisionForm(request.POST)
     if form.is_valid():
         try:
-            create_knowledge_revision(workspace=workspace, actor=actor, **form.cleaned_data)
+            save_knowledge_revision(
+                workspace=workspace,
+                actor=actor,
+                title=form.cleaned_data["title"],
+                category="",
+                text=form.cleaned_data["text"],
+            )
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages))
         else:
             messages.success(
                 request,
-                "Información guardada como borrador. Aprobala antes de que pueda usarse.",
+                "Información guardada. Se usará en futuras respuestas.",
             )
     else:
         messages.error(request, "Revisá los campos de la nueva información.")
-    return redirect("automation-settings")
+    return redirect(_automation_settings_url("knowledge-create"))
 
 
 @require_capability(Capability.MANAGE_KNOWLEDGE)
@@ -181,21 +223,21 @@ def global_context_create(request: HttpRequest) -> HttpResponse:
     form = GlobalKnowledgeContextForm(request.POST)
     if form.is_valid():
         try:
-            create_global_knowledge_context_revision(
+            save_global_knowledge_context(
                 workspace=workspace,
                 actor=actor,
-                **form.cleaned_data,
+                context_text=form.cleaned_data["context_text"],
             )
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages))
         else:
             messages.success(
                 request,
-                "Contexto general guardado como borrador. Aprobalo para que el agente lo use.",
+                "Contexto general guardado. Se usará en futuras respuestas.",
             )
     else:
         messages.error(request, "Revisá el contexto general antes de guardarlo.")
-    return redirect("automation-settings")
+    return redirect(_automation_settings_url("global-context"))
 
 
 @require_capability(Capability.MANAGE_KNOWLEDGE)
@@ -218,7 +260,7 @@ def global_context_approve(request: HttpRequest, revision_id: str) -> HttpRespon
             request,
             "Contexto general aprobado. Se usará en futuras respuestas automáticas.",
         )
-    return redirect("automation-settings")
+    return redirect(_automation_settings_url("global-context"))
 
 
 @require_capability(Capability.MANAGE_KNOWLEDGE)
@@ -238,7 +280,7 @@ def knowledge_approve(request: HttpRequest, revision_id: str) -> HttpResponse:
         messages.error(request, "; ".join(exc.messages))
     else:
         messages.success(request, "Información aprobada y disponible para futuras respuestas.")
-    return redirect("automation-settings")
+    return redirect(_automation_settings_url("knowledge-list"))
 
 
 @require_capability(Capability.MANAGE_KNOWLEDGE)
@@ -271,15 +313,15 @@ def knowledge_search_preview(request: HttpRequest) -> HttpResponse:
             status_messages = {
                 "SELECTED": "Estos son los datos que entrarían al contexto del agente.",
                 "LOW_SIMILARITY": (
-                    "No apareció un dato suficientemente parecido. Para una consulta "
-                    "informativa, el sistema pediría revisión humana."
+                    "No apareció una coincidencia fuerte. Estas tarjetas entrarían como "
+                    "contexto posible, y el agente puede ignorarlas si no aplican."
                 ),
                 "AMBIGUOUS": (
-                    "Hay datos demasiado parecidos entre sí. Para evitar una respuesta "
-                    "confusa, el sistema pediría revisión humana."
+                    "Hay datos parecidos entre sí. Entrarían como contexto posible, y el "
+                    "agente debe usar sólo los que coincidan claro con la consulta."
                 ),
                 "NO_APPROVED_FACTS": (
-                    "Todavía no hay datos aprobados para buscar. Cargá y aprobá una tarjeta."
+                    "Todavía no hay datos guardados para buscar. Cargá una tarjeta."
                 ),
                 "NO_QUERY": "Escribí una consulta de ejemplo para probar.",
             }
@@ -315,7 +357,7 @@ def decision_review(request: HttpRequest, decision_id: str) -> HttpResponse:
             messages.success(request, "Revisión guardada. Ayuda a validar el modo automático.")
     else:
         messages.error(request, "Elegí un resultado y explicá cualquier corrección.")
-    return redirect("automation-settings")
+    return redirect(_automation_settings_url("decisions"))
 
 
 @require_capability(Capability.MANAGE_AUTOMATION)

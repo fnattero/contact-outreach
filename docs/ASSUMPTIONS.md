@@ -37,17 +37,17 @@ seguridad no se relajan desde el dashboard.
 | A-030 | Gmail sync corre cada minuto por default y nunca sostiene su lock durante LLM; publica análisis con transaction.on_commit. | Operación |
 | A-056 | Gmail sync importa mails directos sólo si el remitente coincide con un EmailAddress válido de un Contacto existente; no crea contactos desde desconocidos. | Seguridad / producto |
 | A-031 | Se extraen máximo diez emails literales inbound de plain text/mailto, con NEW_CONTENT/SIGNATURE/QUOTED; no se reconstruyen ofuscados. | Seguridad |
-| A-032 | Contexto LLM máximo 24.000 caracteres; inbound authored, original, padre y contexto general aprobado son obligatorios; luego hasta seis recientes, memoria con fuentes y tres facts aprobados elegidos por embeddings. | Costo / seguridad |
+| A-032 | Input LLM máximo 24.000 caracteres; instrucciones admin, inbound authored, original/padre cuando existen y contexto general vigente son obligatorios; luego hasta seis recientes, memoria con fuentes y tres facts activos elegidos por embeddings. | Costo / seguridad |
 | A-033 | No entran PDFs ni raw HTML al LLM; sólo se persiste manifest de IDs/versiones/retrieval/hash, no prompts gigantes duplicados. | Privacidad |
-| A-034 | El conocimiento sólo usa revisiones explícitamente aprobadas; no hay extracción automática desde catálogos. Embeddings selecciona facts, no autoriza respuestas. | Integridad |
-| A-055 | Embeddings default `fake`; OpenAI-compatible usa modelo `text-embedding-3-small` y dimensiones configurables desde Integraciones. Similitud baja o selección ambigua no inyecta facts puntuales. | Integración IA |
+| A-034 | El conocimiento sólo usa revisiones guardadas/activas por administradores; no hay extracción automática desde catálogos. Embeddings selecciona facts, no autoriza respuestas. | Integridad |
+| A-055 | Embeddings default `fake`; OpenAI-compatible usa modelo `text-embedding-3-small` y dimensiones configurables desde Integraciones. Similitud baja o selección ambigua inyecta hasta tres facts como sugerencias `may_be_irrelevant=true`, no como autorización automática. | Integración IA |
 | A-035 | No se usa LangGraph. `decide_reply` produce JSON estructurado; policy/domain services ejecutan efectos sin tools para el modelo. | Arquitectura |
 | A-036 | Modos de respuesta: OFF, SHADOW default y LIVE. SHADOW produce cero autorizaciones Gmail. | Seguridad |
-| A-037 | LIVE exige >=30 decisiones revisadas, >=10 auto-elegibles, >=90% accuracy y cero unsafe auto; habilitar requiere reauth admin. | Seguridad |
+| A-037 | LIVE se habilita por decisión explícita de un administrador y requiere reauth admin. | Seguridad |
 | A-038 | Confianza automática mínima 0,90 es necesaria pero no suficiente. | Seguridad |
 | A-039 | Sólo product info/company facts/simple clarification fundamentados y redirect explícito son auto-elegibles. ACK cortés/not interested no reciben reply. | Política IA |
 | A-040 | Meeting/dates, pricing/quotes, negotiation, complaints, legal/privacy, unsupported technical, multi-intent, ambiguity, ownership conflict, insufficient context y provider/schema failure son humanos. | Política IA |
-| A-041 | HumanTask OPEN suspende automation de Conversation hasta resolución/dismiss admin. | Seguridad |
+| A-041 | HumanTask OPEN suspende automation de Conversation hasta resolución/dismiss admin; una respuesta manual confirmada resuelve la tarea del inbound respondido. | Seguridad |
 | A-042 | Redirect agrega el email explícito al mismo Contact, envía proposal en hilo nuevo y ACK exacto sólo tras confirmación; fallo crea task sin false ACK. | Integridad |
 | A-043 | Proposal/ACK tienen keys separadas y sólo hay una semantic action por inbound Gmail ID. | Idempotencia |
 | A-044 | Máximo tres automatic replies por Conversation/24 h y veinte por Workspace/día. | Anti-abuso |

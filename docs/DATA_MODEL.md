@@ -59,8 +59,9 @@ Relación 1:1 Workspace. Integration guarda proveedores/parámetros no secretos,
 proveedor/modelo/dimensiones de embeddings; ciphertext write-only para LLM/Google y revisión. La
 configuración OpenAI-compatible de embeddings usa la misma conexión OpenAI-compatible y credencial
 del LLM, pero detrás de un contrato separado. Prompt conserva preferencias usadas sólo por
-respuestas y comunicación con Contactos; no modifica campañas iniciales ni reglas de búsqueda. Root
-keys, barreras live e infraestructura no se guardan.
+respuestas y comunicación con Contactos. Además guarda instrucciones de redacción para respuestas
+automáticas; esas instrucciones orientan tono/estructura y no pueden modificar policy, datos
+permitidos ni reglas de búsqueda. Root keys, barreras live e infraestructura no se guardan.
 
 ### WorkspaceMessageTemplateRevision
 
@@ -70,22 +71,24 @@ edita; otra fila la reemplaza para campañas futuras.
 
 ### KnowledgeFact y KnowledgeFactRevision
 
-Fact agrupa una pregunta/hecho con categoría y estado. Revision contiene texto aprobado, fuentes
-humanas, version, hash, `approved_at/by`, superseded flag y timestamps. Sólo revisiones aprobadas
-entran al contexto. PDFs no se parsean automáticamente.
+Fact agrupa una pregunta/hecho con título, categoría interna opcional y estado; la UI sólo pide
+título e información y activa la revisión al guardar. Revision contiene texto confirmado, fuentes
+humanas, version, hash, `approved_at/by` interno, superseded flag y timestamps. Sólo revisiones
+activas entran al contexto. PDFs no se parsean automáticamente.
 
 ### WorkspaceKnowledgeContextRevision
 
-Contexto global del Workspace: texto breve de background, fuente humana, version, hash,
-`approved_at/by` y superseded flag. Una versión aprobada no se edita; aprobar una nueva reemplaza
-la anterior para solicitudes futuras. Se inyecta siempre como orientación, pero no alcanza por sí
-sola para fundamentar respuestas que requieran un dato puntual.
+Contexto global del Workspace: texto breve de background, version, hash, `approved_at/by` y
+superseded flag. La UI lo guarda y activa en un solo paso para administradores; `approved_by`
+registra internamente qué usuario lo guardó. Una versión activa no se edita; guardar otra fila
+reemplaza la anterior para solicitudes futuras. Se inyecta siempre como orientación, pero no
+alcanza por sí sola para fundamentar respuestas que requieran un dato puntual.
 
 ### KnowledgeFactEmbedding
 
-Embedding cacheado por `KnowledgeFactRevision` aprobada, provider, model, dimensions e input hash.
+Embedding cacheado por `KnowledgeFactRevision` activa, provider, model, dimensions e input hash.
 Guarda vector normalizado cuando está `READY` o error redactado cuando está `FAILED`. Cambiar texto,
-modelo, proveedor o dimensiones produce una fila nueva; no muta la revisión aprobada.
+modelo, proveedor o dimensiones produce una fila nueva; no muta la revisión activa.
 
 ### SearchCategory y SearchCategoryRule
 
@@ -302,7 +305,7 @@ guarda objetivo, cadencia ni fecha editable por contacto; esos datos vienen del 
 
 ### ScheduledContactAttempt
 
-FK plan, due_at, provider/model, manifest/hash acotado de contexto, IDs de revisiones aprobadas,
+FK plan, due_at, provider/model, manifest/hash acotado de contexto, IDs de revisiones activas,
 OutboundMessage opcional, state
 `DUE|DRAFT_REVIEW|AUTHORIZED|SENT|HUMAN_REQUIRED|CANCELLED|INELIGIBLE`, idempotency key, reason and
 timestamps. Única por plan/due cycle; impide doble trabajo de Beat.

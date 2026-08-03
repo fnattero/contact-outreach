@@ -23,6 +23,7 @@ from apps.automation.retrieval import (
     retrieve_relevant_fact_revisions,
 )
 from apps.campaigns.models import OutboundMessage
+from apps.contacts.models import Contact
 from apps.integrations.contracts import (
     EmailCandidateRef,
     EmbeddingProvider,
@@ -89,6 +90,21 @@ def _message_block(
     )
 
 
+def direct_contact_profile_context_text(contact: Contact) -> str:
+    profile_parts = []
+    if contact.name:
+        profile_parts.append(f"Nombre del contacto: {contact.name}")
+    if contact.organization.name:
+        profile_parts.append(f"Empresa: {contact.organization.name}")
+    if contact.preferred_email is not None:
+        profile_parts.append(f"Email preferido: {contact.preferred_email.normalized_email}")
+    profile_parts.append(
+        "Origen: mensaje entrante directo de un contacto existente, sin correo previo "
+        "enviado por la app."
+    )
+    return "\n".join(profile_parts)
+
+
 def _original_outbound(inbound: InboundMessage) -> OutboundMessage:
     if inbound.contact_id is None or inbound.conversation_id is None:
         raise ValidationError("La respuesta todavía no está vinculada a un Contacto.")
@@ -135,23 +151,12 @@ def _mandatory_blocks(inbound: InboundMessage) -> list[ReplyContextBlock]:
         contact = inbound.contact
         if contact is None:
             return blocks
-        profile_parts = []
-        if contact.name:
-            profile_parts.append(f"Nombre del contacto: {contact.name}")
-        if contact.organization.name:
-            profile_parts.append(f"Empresa: {contact.organization.name}")
-        if contact.preferred_email is not None:
-            profile_parts.append(f"Email preferido: {contact.preferred_email.normalized_email}")
-        profile_parts.append(
-            "Origen: mensaje entrante directo de un contacto existente, sin correo previo "
-            "enviado por la app."
-        )
         blocks.append(
             _message_block(
                 source_id=contact.pk,
                 role="CONTACT_PROFILE",
                 provenance="CONTACT_RECORD",
-                text="\n".join(profile_parts),
+                text=direct_contact_profile_context_text(contact),
                 mandatory=True,
             )
         )
@@ -328,6 +333,9 @@ def _manifest_for(
                 "version": fact.version,
                 "characters": len(fact.text),
                 "sha256": sha256(fact.text.encode()).hexdigest(),
+                "similarity": (round(fact.similarity, 6) if fact.similarity is not None else None),
+                "retrieval_status": fact.retrieval_status,
+                "may_be_irrelevant": fact.may_be_irrelevant,
             }
             for fact in facts
         ],
@@ -343,6 +351,7 @@ def build_bounded_reply_context(
     embedding_provider: EmbeddingProvider | None = None,
     policy_version: str = "2026-07",
     schema_version: str = "1",
+    writing_instructions: str = "",
     max_characters: int = MAX_REPLY_CONTEXT_CHARS,
 ) -> BoundedReplyContext:
     if inbound.contact_id is None or inbound.conversation_id is None:
@@ -363,6 +372,7 @@ def build_bounded_reply_context(
                 idempotency_key="",
                 policy_version=policy_version,
                 schema_version=schema_version,
+                writing_instructions=writing_instructions,
             )
         )
 
@@ -389,11 +399,16 @@ def build_bounded_reply_context(
         query_text=authored_block.text,
         provider=embedding_provider,
     )
+    retrieval_scores = {score.revision.pk: score for score in retrieval.scores if score.selected}
     for revision in retrieval.revisions:
+        score = retrieval_scores.get(revision.pk)
         fact = FactRevisionRef(
             revision_id=str(revision.pk),
             version=revision.version,
             text=revision.text,
+            similarity=score.score if score is not None else None,
+            retrieval_status=retrieval.status,
+            may_be_irrelevant=score.may_be_irrelevant if score is not None else False,
         )
         candidate_facts = [*facts, fact]
         if input_count(blocks, candidate_facts) > max_characters:
@@ -414,6 +429,10 @@ def build_bounded_reply_context(
         ),
         policy_version=policy_version,
         schema_version=schema_version,
+        writing_instructions_sha256=(
+            sha256(writing_instructions.encode()).hexdigest() if writing_instructions else ""
+        ),
+        writing_instructions_characters=len(writing_instructions),
     )
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
     return BoundedReplyContext(
@@ -597,11 +616,16 @@ def build_bounded_scheduled_contact_context(
         query_text=query_text,
         provider=embedding_provider,
     )
+    retrieval_scores = {score.revision.pk: score for score in retrieval.scores if score.selected}
     for revision in retrieval.revisions:
+        score = retrieval_scores.get(revision.pk)
         fact = FactRevisionRef(
             revision_id=str(revision.pk),
             version=revision.version,
             text=revision.text,
+            similarity=score.score if score is not None else None,
+            retrieval_status=retrieval.status,
+            may_be_irrelevant=score.may_be_irrelevant if score is not None else False,
         )
         candidate_facts = [*facts, fact]
         if input_count(blocks, candidate_facts) > max_characters:

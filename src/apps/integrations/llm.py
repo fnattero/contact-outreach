@@ -5,7 +5,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Collection, Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -16,6 +16,7 @@ from apps.integrations.contracts import (
     AIAnalysisResult,
     AnalysisRequest,
     AuthenticationError,
+    FactRevisionRef,
     JSONResponse,
     JSONTransport,
     RateLimitError,
@@ -126,6 +127,26 @@ HUMAN_REASONS = (
     "PROVIDER_OR_SCHEMA_FAILURE",
 )
 MAX_FACT_IDS_PER_DECISION = 3
+UNSUPPORTED_OPENAI_STRICT_SCHEMA_KEYS = frozenset(
+    {
+        "default",
+        "exclusiveMaximum",
+        "exclusiveMinimum",
+        "format",
+        "maxItems",
+        "maxLength",
+        "maxProperties",
+        "minItems",
+        "minLength",
+        "minProperties",
+        "minimum",
+        "maximum",
+        "multipleOf",
+        "pattern",
+        "title",
+        "uniqueItems",
+    }
+)
 
 
 class StructuredReplyDecision(BaseModel):
@@ -204,18 +225,40 @@ def validate_llm_base_url(value: str, *, label: str) -> str:
     return normalized
 
 
+def _openai_strict_json_schema(value: Any) -> Any:
+    """Reduce Pydantic JSON Schema to the subset accepted by strict structured outputs."""
+
+    if isinstance(value, list):
+        return [_openai_strict_json_schema(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    sanitized = {
+        key: _openai_strict_json_schema(item)
+        for key, item in value.items()
+        if key not in UNSUPPORTED_OPENAI_STRICT_SCHEMA_KEYS
+    }
+    properties = sanitized.get("properties")
+    if isinstance(properties, dict):
+        sanitized["required"] = list(properties.keys())
+        sanitized.setdefault("additionalProperties", False)
+    return sanitized
+
+
+def _openai_strict_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    return cast(dict[str, Any], _openai_strict_json_schema(schema))
+
+
 def analysis_json_schema(evidence_ids: Collection[str] | None = None) -> dict[str, Any]:
     schema = StructuredAnalysisOutput.model_json_schema()
-    if evidence_ids is None:
-        return schema
-    allowed = sorted(set(evidence_ids))
-    if not allowed:
-        raise ValueError("El schema de análisis necesita al menos un fact_id permitido.")
-    evidence = schema["properties"]["evidence"]
-    if not isinstance(evidence, dict) or not isinstance(evidence.get("items"), dict):
-        raise RuntimeError("El schema de evidence no tiene la estructura esperada.")
-    evidence["items"]["enum"] = allowed
-    return schema
+    if evidence_ids is not None:
+        allowed = sorted(set(evidence_ids))
+        if not allowed:
+            raise ValueError("El schema de análisis necesita al menos un fact_id permitido.")
+        evidence = schema["properties"]["evidence"]
+        if not isinstance(evidence, dict) or not isinstance(evidence.get("items"), dict):
+            raise RuntimeError("El schema de evidence no tiene la estructura esperada.")
+        evidence["items"]["enum"] = allowed
+    return _openai_strict_object_schema(schema)
 
 
 def _invalid_evidence_diagnostic(invalid_ids: Collection[str]) -> str:
@@ -266,7 +309,12 @@ def parse_analysis_output(
 
 
 def reply_classification_json_schema() -> dict[str, Any]:
-    return StructuredReplyClassification.model_json_schema()
+    schema = StructuredReplyClassification.model_json_schema()
+    schema["properties"]["classification"] = {
+        "type": "string",
+        "enum": list(REPLY_CLASSIFICATIONS),
+    }
+    return _openai_strict_object_schema(schema)
 
 
 def parse_reply_classification(value: str | dict[str, Any]) -> ReplyClassification:
@@ -288,16 +336,24 @@ def reply_decision_json_schema(request: ReplyDecisionRequest) -> dict[str, Any]:
 
     schema = StructuredReplyDecision.model_json_schema()
     properties = schema["properties"]
+    properties["classification"] = {"type": "string", "enum": list(REPLY_CLASSIFICATIONS)}
+    properties["intent"] = {"type": "string", "enum": list(REPLY_INTENTS)}
+    properties["action"] = {"type": "string", "enum": list(REPLY_ACTIONS)}
+    properties["human_reason"] = {
+        "anyOf": [{"type": "string", "enum": list(HUMAN_REASONS)}, {"type": "null"}]
+    }
     candidate_ids = sorted({item.candidate_id for item in request.candidates})
     candidate_schema = properties["candidate_id"]
     candidate_schema.clear()
-    candidate_schema["anyOf"] = ([{"enum": candidate_ids}] if candidate_ids else []) + [
-        {"type": "null"}
-    ]
+    candidate_schema["anyOf"] = (
+        [{"type": "string", "enum": candidate_ids}] if candidate_ids else []
+    ) + [{"type": "null"}]
     fact_ids = sorted({item.revision_id for item in request.facts})
-    fact_item_schema: dict[str, Any] = {"enum": fact_ids}
+    fact_item_schema: dict[str, Any] = (
+        {"type": "string", "enum": fact_ids} if fact_ids else {"type": "string"}
+    )
     properties["fact_revision_ids"]["items"] = fact_item_schema
-    return schema
+    return _openai_strict_object_schema(schema)
 
 
 def parse_reply_decision(
@@ -367,9 +423,19 @@ def scheduled_contact_draft_json_schema(
     """Constrain citations to approved revisions supplied for this attempt."""
 
     schema = StructuredScheduledContactDraft.model_json_schema()
+    properties = schema["properties"]
+    properties["status"] = {"type": "string", "enum": ["DRAFT", "HUMAN"]}
+    properties["human_reason"] = {
+        "anyOf": [
+            {"type": "string", "enum": ["INSUFFICIENT_CONTEXT", "UNSUPPORTED_GOAL"]},
+            {"type": "null"},
+        ]
+    }
     fact_ids = sorted({item.revision_id for item in request.facts})
-    schema["properties"]["fact_revision_ids"]["items"] = {"enum": fact_ids}
-    return schema
+    properties["fact_revision_ids"]["items"] = (
+        {"type": "string", "enum": fact_ids} if fact_ids else {"type": "string"}
+    )
+    return _openai_strict_object_schema(schema)
 
 
 def parse_scheduled_contact_draft(
@@ -443,6 +509,53 @@ class UrllibJSONTransport:
             raise RetryableProviderError("No se pudo contactar al proveedor IA.") from exc
         except json.JSONDecodeError as exc:
             raise ValidationProviderError("La respuesta HTTP del proveedor IA no es JSON.") from exc
+
+
+_FAKE_FACT_STOPWORDS = {
+    "ante",
+    "como",
+    "consulta",
+    "cliente",
+    "clientes",
+    "datos",
+    "dato",
+    "esta",
+    "este",
+    "esto",
+    "para",
+    "pero",
+    "puede",
+    "pueden",
+    "sobre",
+    "texto",
+    "tiene",
+    "tienen",
+}
+
+
+def _fake_content_terms(value: str) -> set[str]:
+    normalized = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", value.casefold())
+        if not unicodedata.combining(character)
+    )
+    return {
+        term for term in re.findall(r"[a-z0-9]{4,}", normalized) if term not in _FAKE_FACT_STOPWORDS
+    }
+
+
+def _fake_usable_fact(
+    request: ReplyDecisionRequest,
+    authored_text: str,
+) -> FactRevisionRef | None:
+    for fact in request.facts:
+        if not fact.may_be_irrelevant:
+            return fact
+    authored_terms = _fake_content_terms(authored_text)
+    for fact in request.facts:
+        if authored_terms & _fake_content_terms(fact.text):
+            return fact
+    return None
 
 
 class MockLLMProvider:
@@ -538,15 +651,15 @@ class MockLLMProvider:
                 "proposed_body": None,
                 "human_reason": None,
             }
-        elif request.facts:
+        elif usable_fact := _fake_usable_fact(request, authored):
             raw = {
                 "classification": "INTERESTED",
                 "intent": "GROUNDED_SIMPLE_CLARIFICATION",
                 "action": "REPLY",
                 "confidence": 0.95,
                 "candidate_id": None,
-                "fact_revision_ids": [request.facts[0].revision_id],
-                "proposed_body": request.facts[0].text,
+                "fact_revision_ids": [usable_fact.revision_id],
+                "proposed_body": usable_fact.text,
                 "human_reason": None,
             }
         else:

@@ -1165,7 +1165,7 @@ def apply_inbound_contact_effect(inbound: InboundMessage) -> InboundContactEffec
     from apps.mailbox.models import InboundMessage
 
     message = (
-        InboundMessage.objects.select_for_update()
+        InboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "connection",
             "related_outbound",

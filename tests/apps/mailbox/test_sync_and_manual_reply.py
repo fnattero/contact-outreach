@@ -15,7 +15,7 @@ from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.automation.models import EmailCandidate, ReplyDecision
+from apps.automation.models import EmailCandidate, HumanTask, ReplyDecision
 from apps.campaigns.delivery import deliver_message, pending_message_ids
 from apps.campaigns.models import Campaign, OutboundMessage, SearchQuery, SearchRun
 from apps.catalogs.services import create_catalog
@@ -656,6 +656,7 @@ def test_manual_reply_is_explicit_idempotent_and_stays_in_thread(
     owner: User,
     private_catalog_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
+    django_capture_on_commit_callbacks,
 ) -> None:
     del private_catalog_dir
     _, root = _thread_fixture(owner, suffix="manual")
@@ -673,6 +674,21 @@ def test_manual_reply_is_explicit_idempotent_and_stays_in_thread(
     )
     sync_gmail_connection(connection.pk, provider=fake)
     inbound = InboundMessage.objects.get()
+    assert inbound.contact is not None
+    assert inbound.conversation is not None
+    inbound.conversation.automation_suspended = True
+    inbound.conversation.save(update_fields=("automation_suspended", "updated_at"))
+    review_task = HumanTask.objects.create(
+        workspace=root.campaign.workspace,
+        contact=inbound.contact,
+        conversation=inbound.conversation,
+        inbound=inbound,
+        kind="REPLY_REVIEW",
+        reason="MEETING_OR_DATE",
+        status=HumanTask.Status.OPEN,
+        friendly_summary="Quiere coordinar una llamada.",
+        opened_at=timezone.now(),
+    )
     request_key = uuid.uuid4()
     client.force_login(owner)
 
@@ -696,9 +712,16 @@ def test_manual_reply_is_explicit_idempotent_and_stays_in_thread(
         direction=FakeGmailMessage.Direction.OUTBOUND,
         rfc_message_id=manual.message_id,
     ).exists()
-    assert deliver_manual_reply_task(str(manual.pk)) == OutboundMessage.State.SENT
+    with django_capture_on_commit_callbacks(execute=True):
+        assert deliver_manual_reply_task(str(manual.pk)) == OutboundMessage.State.SENT
     manual.refresh_from_db()
+    review_task.refresh_from_db()
+    inbound.conversation.refresh_from_db()
     assert manual.state == OutboundMessage.State.SENT
+    assert review_task.status == HumanTask.Status.RESOLVED
+    assert review_task.resolved_by == owner
+    assert review_task.resolution_note == "Respondida manualmente."
+    assert not inbound.conversation.automation_suspended
     assert manual.gmail_thread_id == root.gmail_thread_id
     assert manual.parent_inbound == inbound
     assert manual.sent_by == owner
@@ -748,6 +771,21 @@ def test_manual_reply_rechecks_late_suppression_before_gmail_effect(
     )
     sync_gmail_connection(connection.pk, provider=fake)
     inbound = InboundMessage.objects.get()
+    assert inbound.contact is not None
+    assert inbound.conversation is not None
+    inbound.conversation.automation_suspended = True
+    inbound.conversation.save(update_fields=("automation_suspended", "updated_at"))
+    review_task = HumanTask.objects.create(
+        workspace=root.campaign.workspace,
+        contact=inbound.contact,
+        conversation=inbound.conversation,
+        inbound=inbound,
+        kind="REPLY_REVIEW",
+        reason="MEETING_OR_DATE",
+        status=HumanTask.Status.OPEN,
+        friendly_summary="Necesita revisión antes de responder.",
+        opened_at=timezone.now(),
+    )
     manual, created = authorize_manual_reply(
         actor=owner,
         inbound_id=inbound.pk,
@@ -764,7 +802,11 @@ def test_manual_reply_rechecks_late_suppression_before_gmail_effect(
 
     assert deliver_manual_reply(manual.pk, provider=fake) == OutboundMessage.State.SEND_FAILED
     manual.refresh_from_db()
+    review_task.refresh_from_db()
+    inbound.conversation.refresh_from_db()
     assert "suprimido" in manual.error
+    assert review_task.status == HumanTask.Status.OPEN
+    assert inbound.conversation.automation_suspended
     assert not FakeGmailMessage.objects.filter(
         direction=FakeGmailMessage.Direction.OUTBOUND,
         rfc_message_id=manual.message_id,
@@ -873,6 +915,80 @@ def test_contact_only_thread_can_authorize_and_deliver_a_manual_reply(
     assert manual.pk in pending_manual_reply_ids()
     fake = FakeGmailProvider(account_email=connection.email, persist=True)
     assert deliver_manual_reply(manual.pk, provider=fake) == OutboundMessage.State.SENT
+
+
+@pytest.mark.django_db
+def test_response_thread_explains_why_automatic_reply_needs_review(
+    client: Client,
+    owner: User,
+) -> None:
+    workspace = owner.membership.workspace
+    connection, organization, email, contact = _direct_contact_fixture(owner)
+    conversation = Conversation.objects.create(
+        workspace=workspace,
+        contact=contact,
+        connection=connection,
+        gmail_thread_id="review-reason-thread",
+        subject="Consulta por envíos",
+    )
+    inbound = InboundMessage.objects.create(
+        connection=connection,
+        organization=organization,
+        contact=contact,
+        conversation=conversation,
+        gmail_message_id="review-reason-inbound",
+        gmail_thread_id=conversation.gmail_thread_id,
+        message_id="<review-reason-inbound@example.invalid>",
+        sender=email.original_email,
+        recipients=[connection.email],
+        subject="Envíos a Córdoba",
+        external_at=timezone.now(),
+        received_at=timezone.now(),
+        body_text="Hola, ¿hacen envíos a Córdoba?",
+        classification=InboundMessage.Classification.INTERESTED,
+        classification_confidence="0.900",
+        is_human=True,
+    )
+    decision = ReplyDecision.objects.create(
+        workspace=workspace,
+        inbound=inbound,
+        contact=contact,
+        conversation=conversation,
+        mode="LIVE",
+        provider="fake",
+        model="fake",
+        policy_version="reply-policy-v1",
+        classification="INTERESTED",
+        intent="APPROVED_PRODUCT_INFORMATION",
+        action="REPLY",
+        confidence="0.900",
+        human_reason="HUMAN_TASK_OPEN",
+        context_manifest={},
+        context_hash="a" * 64,
+        state=ReplyDecision.State.REJECTED_POLICY,
+        error="Hay una revisión humana pendiente para este contacto.",
+    )
+    HumanTask.objects.create(
+        workspace=workspace,
+        contact=contact,
+        conversation=conversation,
+        inbound=inbound,
+        decision=decision,
+        kind="REPLY_REVIEW",
+        reason="HUMAN_TASK_OPEN",
+        status=HumanTask.Status.OPEN,
+        friendly_summary="Hay una revisión humana pendiente para este contacto.",
+        opened_at=timezone.now(),
+    )
+
+    client.force_login(owner)
+    thread = client.get(reverse("response-thread", args=(inbound.pk,)))
+
+    page = thread.content.decode()
+    assert thread.status_code == 200
+    assert "Ya hay una revisión abierta para este contacto" in page
+    assert "Hay una revisión humana pendiente para este contacto." in page
+    assert "Resolvé la tarea pendiente" in page
 
 
 @pytest.mark.django_db

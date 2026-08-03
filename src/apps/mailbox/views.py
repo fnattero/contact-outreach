@@ -21,6 +21,8 @@ from apps.accounts.permissions import (
     require_capability,
     workspace_for_user,
 )
+from apps.automation.models import HumanTask, ReplyDecision
+from apps.automation.presentation import review_reason_for_decision, review_reason_for_task
 from apps.campaigns.models import OutboundMessage
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.dashboard.csv_export import csv_download
@@ -372,6 +374,18 @@ def response_thread(request: HttpRequest, inbound_id: uuid.UUID) -> HttpResponse
         for item in outbound_items
     )
     chronology.sort(key=lambda item: item.date)
+    review_task = (
+        HumanTask.objects.filter(workspace=workspace, inbound=inbound)
+        .select_related("decision")
+        .order_by("-opened_at")
+        .first()
+    )
+    automation_review = review_reason_for_task(review_task) if review_task is not None else None
+    if automation_review is None:
+        decision = ReplyDecision.objects.filter(workspace=workspace, inbound=inbound).first()
+        if decision is not None:
+            automation_review = review_reason_for_decision(decision)
+    can_reply = has_capability(owner, Capability.SEND_REPLIES)
     form = ManualReplyForm(initial={"idempotency_key": uuid.uuid4()})
     return render(
         request,
@@ -380,8 +394,11 @@ def response_thread(request: HttpRequest, inbound_id: uuid.UUID) -> HttpResponse
             "inbound": inbound,
             "root": root,
             "chronology": chronology,
+            "automation_review": automation_review,
             "form": form,
-            "can_reply": has_capability(owner, Capability.SEND_REPLIES),
+            "can_reply": can_reply,
+            "show_thread_sidebar": automation_review is not None
+            or (inbound.is_human and can_reply),
         },
     )
 

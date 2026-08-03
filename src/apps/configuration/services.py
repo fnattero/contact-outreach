@@ -14,6 +14,7 @@ from apps.accounts.models import Membership
 from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.configuration.models import (
+    DEFAULT_AUTOMATIC_REPLY_PROMPT,
     DEFAULT_EMAIL_DRAFTING_PROMPT,
     BusinessProfile,
     PromptConfiguration,
@@ -25,43 +26,60 @@ from apps.configuration.models import (
 
 ConfigItem = SearchCategory | SearchZone
 MAX_EMAIL_DRAFTING_PROMPT_LENGTH = 4000
+MAX_AUTOMATIC_REPLY_PROMPT_LENGTH = 4000
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimePromptConfiguration:
     email_drafting_prompt: str
+    automatic_reply_prompt: str
     revision: int
 
 
-def _clean_email_drafting_prompt(value: str) -> str:
+def _clean_prompt(value: str, *, label: str, max_length: int) -> str:
     prompt = value.replace("\r\n", "\n").strip()
     if "\x00" in prompt:
-        raise ValidationError("El prompt de redacción contiene un carácter no permitido.")
-    if len(prompt) > MAX_EMAIL_DRAFTING_PROMPT_LENGTH:
-        raise ValidationError(
-            "El prompt de redacción no puede superar "
-            f"{MAX_EMAIL_DRAFTING_PROMPT_LENGTH} caracteres."
-        )
+        raise ValidationError(f"{label} contiene un carácter no permitido.")
+    if len(prompt) > max_length:
+        raise ValidationError(f"{label} no puede superar {max_length} caracteres.")
     return prompt
 
 
-def runtime_prompt_configuration(owner_id: int) -> RuntimePromptConfiguration:
+def _clean_email_drafting_prompt(value: str) -> str:
+    return _clean_prompt(
+        value,
+        label="El prompt de redacción",
+        max_length=MAX_EMAIL_DRAFTING_PROMPT_LENGTH,
+    )
+
+
+def _clean_automatic_reply_prompt(value: str) -> str:
+    return _clean_prompt(
+        value,
+        label="Las instrucciones de respuesta automática",
+        max_length=MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
+    )
+
+
+def runtime_prompt_configuration(owner_id: int | None) -> RuntimePromptConfiguration:
+    default = RuntimePromptConfiguration(
+        email_drafting_prompt=DEFAULT_EMAIL_DRAFTING_PROMPT,
+        automatic_reply_prompt=DEFAULT_AUTOMATIC_REPLY_PROMPT,
+        revision=0,
+    )
+    if owner_id is None:
+        return default
     workspace_id = (
         Membership.objects.filter(user_id=owner_id).values_list("workspace_id", flat=True).first()
     )
     if workspace_id is None:
-        return RuntimePromptConfiguration(
-            email_drafting_prompt=DEFAULT_EMAIL_DRAFTING_PROMPT,
-            revision=0,
-        )
+        return default
     configured = PromptConfiguration.objects.filter(workspace_id=workspace_id).first()
     if configured is None:
-        return RuntimePromptConfiguration(
-            email_drafting_prompt=DEFAULT_EMAIL_DRAFTING_PROMPT,
-            revision=0,
-        )
+        return default
     return RuntimePromptConfiguration(
         email_drafting_prompt=_clean_email_drafting_prompt(configured.email_drafting_prompt),
+        automatic_reply_prompt=_clean_automatic_reply_prompt(configured.automatic_reply_prompt),
         revision=configured.revision,
     )
 
@@ -72,6 +90,9 @@ def _prompt_audit_state(configuration: PromptConfiguration) -> dict[str, object]
         "email_drafting_prompt_sha256": hashlib.sha256(
             configuration.email_drafting_prompt.encode("utf-8")
         ).hexdigest(),
+        "automatic_reply_prompt_sha256": hashlib.sha256(
+            configuration.automatic_reply_prompt.encode("utf-8")
+        ).hexdigest(),
     }
 
 
@@ -80,6 +101,7 @@ def save_prompt_configuration(
     *,
     owner: User,
     email_drafting_prompt: str,
+    automatic_reply_prompt: str | None = None,
 ) -> PromptConfiguration:
     membership = require_user_capability(owner, Capability.MANAGE_CONFIGURATION)
     clean_email_prompt = _clean_email_drafting_prompt(email_drafting_prompt)
@@ -97,6 +119,42 @@ def save_prompt_configuration(
         configuration.revision += 1
         action = "prompt_configuration.updated"
     configuration.email_drafting_prompt = clean_email_prompt
+    if automatic_reply_prompt is not None:
+        configuration.automatic_reply_prompt = _clean_automatic_reply_prompt(automatic_reply_prompt)
+    configuration.full_clean()
+    configuration.save()
+    record_event(
+        action=action,
+        entity=configuration,
+        actor=owner,
+        before=before,
+        after=_prompt_audit_state(configuration),
+    )
+    return configuration
+
+
+@transaction.atomic
+def save_automatic_reply_prompt(
+    *,
+    owner: User,
+    automatic_reply_prompt: str,
+) -> PromptConfiguration:
+    membership = require_user_capability(owner, Capability.MANAGE_AUTOMATION)
+    clean_prompt = _clean_automatic_reply_prompt(automatic_reply_prompt)
+    configuration = (
+        PromptConfiguration.objects.select_for_update()
+        .filter(workspace=membership.workspace)
+        .first()
+    )
+    before: dict[str, object] = {}
+    if configuration is None:
+        configuration = PromptConfiguration(owner=owner, workspace=membership.workspace)
+        action = "prompt_configuration.created"
+    else:
+        before = _prompt_audit_state(configuration)
+        configuration.revision += 1
+        action = "prompt_configuration.updated"
+    configuration.automatic_reply_prompt = clean_prompt
     configuration.full_clean()
     configuration.save()
     record_event(

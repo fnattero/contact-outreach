@@ -22,7 +22,7 @@ from apps.automation.candidates import (
     extract_mailto_literals,
     split_inbound_regions,
 )
-from apps.automation.context import build_bounded_reply_context
+from apps.automation.context import build_bounded_reply_context, direct_contact_profile_context_text
 from apps.automation.memory import verified_conversation_memory_text
 from apps.automation.models import (
     AutomaticActionReservation,
@@ -34,6 +34,7 @@ from apps.automation.models import (
     ReplyAutomationConfiguration,
     ReplyDecision,
     ScheduledContactAttempt,
+    WorkspaceKnowledgeContextRevision,
 )
 from apps.campaigns.content import REDIRECT_ACK_BODY, freeze_message_content
 from apps.campaigns.models import Campaign, OutboundAttachment, OutboundMessage
@@ -41,6 +42,8 @@ from apps.catalogs.services import verify_catalog
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
 from apps.configuration.integrations import redact_provider_error
+from apps.configuration.models import IntegrationConfiguration
+from apps.configuration.services import runtime_prompt_configuration
 from apps.contacts.models import CommunicationRestriction, Contact, Conversation, EmailAddress
 from apps.integrations.contracts import (
     AmbiguousProviderError,
@@ -155,6 +158,16 @@ def _manifest_block_text(block: dict[str, Any]) -> str | None:
         if memory is None:
             return None
         return verified_conversation_memory_text(memory)
+    if provenance == "CONTACT_RECORD":
+        contact = (
+            Contact.objects.select_related("organization", "preferred_email")
+            .filter(pk=source_id)
+            .first()
+        )
+        return direct_contact_profile_context_text(contact) if contact is not None else None
+    if provenance == "GLOBAL_APPROVED_CONTEXT":
+        revision = WorkspaceKnowledgeContextRevision.objects.filter(pk=source_id).first()
+        return revision.context_text if revision is not None else None
     if str(block.get("role", "")) == "CLIENT":
         inbound = InboundMessage.objects.filter(pk=source_id).first()
         if inbound is None:
@@ -249,9 +262,7 @@ def _new_context_since_decision(
     return outbound.exists()
 
 
-def _live_qualification_error(decision: ReplyDecision) -> str:
-    from apps.automation.services import qualification_snapshot
-
+def _live_mode_error(decision: ReplyDecision) -> str:
     configuration = ReplyAutomationConfiguration.objects.filter(
         workspace_id=decision.workspace_id
     ).first()
@@ -265,9 +276,30 @@ def _live_qualification_error(decision: ReplyDecision) -> str:
         return "Las respuestas automáticas no están habilitadas en modo activo."
     if configuration.policy_version != decision.policy_version:
         return "La política cambió desde que se preparó la respuesta."
-    if not qualification_snapshot(decision.workspace).qualified:
-        return "El modo activo ya no cumple la evaluación mínima de seguridad."
     return ""
+
+
+def _writing_instructions_for_decision(decision: ReplyDecision) -> str:
+    manifest = decision.context_manifest
+    if not isinstance(manifest, dict):
+        return ""
+    request_metadata = manifest.get("request")
+    if not isinstance(request_metadata, dict):
+        return ""
+    if not request_metadata.get("writing_instructions_sha256"):
+        return ""
+    root = decision.inbound.related_outbound
+    campaign = root.campaign if root is not None else None
+    owner_id: int | None
+    if campaign is not None:
+        owner_id = campaign.created_by_id
+    else:
+        owner_id = (
+            IntegrationConfiguration.objects.filter(workspace_id=decision.workspace_id)
+            .values_list("owner_id", flat=True)
+            .first()
+        )
+    return runtime_prompt_configuration(owner_id).automatic_reply_prompt
 
 
 def _decision_policy_error(
@@ -281,7 +313,7 @@ def _decision_policy_error(
         return "El envío en vivo está desactivado por la configuración general."
     if settings.AUTO_REPLY_KILL_SWITCH:
         return "El bloqueo independiente de respuestas automáticas está activado."
-    if error := _live_qualification_error(decision):
+    if error := _live_mode_error(decision):
         return error
     if not inbound.is_human or inbound.classification in {
         InboundMessage.Classification.AUTO_REPLY,
@@ -310,6 +342,7 @@ def _decision_policy_error(
             current = build_bounded_reply_context(
                 inbound,
                 policy_version=decision.policy_version,
+                writing_instructions=_writing_instructions_for_decision(decision),
             )
         except ValidationError:
             return "El contexto actual ya no cabe en el límite seguro."
@@ -629,7 +662,7 @@ def _create_semantic_outbound(values: dict[str, Any]) -> tuple[OutboundMessage, 
 @transaction.atomic
 def authorize_reply_decision(decision_id: uuid.UUID | str) -> OutboundMessage | str:
     decision = (
-        ReplyDecision.objects.select_for_update()
+        ReplyDecision.objects.select_for_update(of=("self",))
         .select_related(
             "workspace",
             "contact__organization",
@@ -1203,7 +1236,7 @@ def _authorize_redirect_proposal_locked(decision: ReplyDecision) -> OutboundMess
 @transaction.atomic
 def authorize_redirect_ack(decision_id: uuid.UUID | str) -> OutboundMessage | str:
     decision = (
-        ReplyDecision.objects.select_for_update()
+        ReplyDecision.objects.select_for_update(of=("self",))
         .select_related(
             "workspace",
             "contact__organization",
@@ -1396,10 +1429,6 @@ def _scheduled_message_error(message: OutboundMessage) -> str:
             or configuration.live_enabled_by_id is None
         ):
             return "La automatización ya no está habilitada en modo activo."
-        from apps.automation.services import qualification_snapshot
-
-        if not qualification_snapshot(contact.workspace).qualified:
-            return "El modo activo ya no cumple la evaluación mínima de seguridad."
         reservation = AutomaticActionReservation.objects.filter(
             scheduled_attempt=attempt,
             workspace_id=contact.workspace_id,
@@ -1551,7 +1580,7 @@ def _build_effect(message: OutboundMessage, connection: GmailConnection) -> Outb
 @transaction.atomic
 def _prepare_outbound_effect(message_id: uuid.UUID | str) -> OutboundEffect | str:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "campaign",
             "contact__organization",
@@ -1583,7 +1612,7 @@ def _prepare_outbound_effect(message_id: uuid.UUID | str) -> OutboundEffect | st
             message.save(update_fields=("state", "error", "updated_at"))
             return message.state
         decision = (
-            ReplyDecision.objects.select_for_update()
+            ReplyDecision.objects.select_for_update(of=("self",))
             .select_related(
                 "workspace",
                 "contact__organization",
@@ -1780,7 +1809,7 @@ def _confirm_outbound_sent(
     now: datetime,
 ) -> str:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("contact__workspace", "conversation", "parent_inbound__connection")
         .get(pk=message_id)
     )
@@ -1915,7 +1944,7 @@ def _record_outbound_error(
     ambiguous: bool,
 ) -> str:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "parent_inbound__connection",
             "contact",

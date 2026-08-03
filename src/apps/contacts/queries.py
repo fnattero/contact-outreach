@@ -98,6 +98,7 @@ def attention_queryset(*, workspace_id: UUID | str) -> QuerySet[HumanTask]:
             "contact__preferred_email",
             "conversation",
             "inbound",
+            "decision",
         )
         .order_by("-opened_at")
     )

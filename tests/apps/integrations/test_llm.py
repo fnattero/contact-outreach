@@ -75,6 +75,7 @@ def _decision_request() -> ReplyDecisionRequest:
         correlation_id="correlation",
         idempotency_key="decision-key",
         policy_version="2026-07",
+        writing_instructions="Respondé en un tono humano y no copies tarjetas completas.",
     )
 
 
@@ -162,8 +163,41 @@ def test_reply_schema_is_scoped_to_candidate_and_fact_ids() -> None:
 
     candidate_options = schema["properties"]["candidate_id"]["anyOf"]
     fact_items = schema["properties"]["fact_revision_ids"]["items"]
-    assert candidate_options == [{"enum": ["candidate-1"]}, {"type": "null"}]
-    assert fact_items == {"enum": ["fact-1"]}
+    assert candidate_options == [
+        {"type": "string", "enum": ["candidate-1"]},
+        {"type": "null"},
+    ]
+    assert fact_items == {"type": "string", "enum": ["fact-1"]}
+    assert set(schema["required"]) == set(schema["properties"])
+
+
+def test_openai_strict_schemas_strip_unsupported_keywords() -> None:
+    unsupported = {
+        "default",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minimum",
+        "pattern",
+        "title",
+    }
+    schemas = [
+        analysis_json_schema(("prospect.category",)),
+        reply_decision_json_schema(_decision_request()),
+    ]
+
+    def assert_supported(value: Any) -> None:
+        if isinstance(value, dict):
+            assert not unsupported & set(value)
+            for nested in value.values():
+                assert_supported(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                assert_supported(nested)
+
+    for schema in schemas:
+        assert set(schema["required"]) == set(schema["properties"])
+        assert_supported(schema)
 
 
 def test_reply_decision_rejects_unknown_ids_and_wrong_candidate_region() -> None:
@@ -228,9 +262,14 @@ def test_openai_compatible_decision_uses_bounded_context_and_strict_schema() -> 
     assert call["payload"]["response_format"]["json_schema"]["name"] == "reply_decision"
     messages = call["payload"]["messages"]
     assert "UNTRUSTED_DATA" in messages[1]["content"]
+    assert "ADMIN_WRITING_INSTRUCTIONS" in messages[1]["content"]
+    assert "tono humano" in messages[1]["content"]
     assert "candidate-1" in messages[1]["content"]
+    assert "may_be_irrelevant" in messages[1]["content"]
+    assert "may_be_irrelevant=true" in messages[0]["content"]
     assert "sólo puede afirmar hechos incluidos" in messages[0]["content"]
     assert "no agregues precios" in messages[0]["content"]
+    assert "No pegues tarjetas completas" in messages[0]["content"]
 
 
 def test_reply_provider_rejects_oversized_serialized_input_before_transport() -> None:

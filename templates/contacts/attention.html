@@ -9,7 +9,7 @@
 <div class="attention-list" aria-label="Tareas abiertas">
   {% for row in attention_rows %}<article class="panel attention-card">
     <div class="panel__body">
-      <div class="attention-card__copy"><span class="badge badge--warning">Necesita que lo revises</span><h2>{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</h2><p>{{ row.reason_label }}</p><p class="muted">{{ row.task.conversation.subject|default:"Conversación sin asunto" }} · Desde {{ row.task.opened_at|date:"d M Y · H:i" }}</p></div>
+      <div class="attention-card__copy"><span class="badge badge--warning">Necesita que lo revises</span><h2>{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</h2><p>{{ row.review_reason.title }}</p><p class="muted">{{ row.review_reason.summary }}</p><p class="muted">{{ row.task.conversation.subject|default:"Conversación sin asunto" }} · Desde {{ row.task.opened_at|date:"d M Y · H:i" }}</p></div>
       <div class="actions"><a class="button button--secondary" href="{% url 'contact-detail' row.task.contact_id %}#attention">Ver contacto y conversación</a></div>
     </div>
   </article>{% endfor %}

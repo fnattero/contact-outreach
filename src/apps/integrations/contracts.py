@@ -222,6 +222,9 @@ class FactRevisionRef:
     revision_id: str
     version: int
     text: str
+    similarity: float | None = None
+    retrieval_status: str = "SELECTED"
+    may_be_irrelevant: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +252,7 @@ class ReplyDecisionRequest:
     correlation_id: str
     idempotency_key: str
     policy_version: str
+    writing_instructions: str = ""
     schema_version: str = "1"
     timeout_seconds: float = 30.0
 

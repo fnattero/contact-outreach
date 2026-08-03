@@ -42,7 +42,7 @@ El LLM nunca tiene GmailProvider ni tool calling. `decide_reply` sólo propone u
 servicios de dominio validan IDs/policy, crean OutboundMessage durable y recién un worker separado
 ejecuta `send`/`reply`. No se incorpora LangGraph: estado, retries, compensación e idempotencia
 viven explícitamente en PostgreSQL.
-`draft_scheduled_contact` también sólo propone asunto/cuerpo y cita IDs de revisiones aprobadas:
+`draft_scheduled_contact` también sólo propone asunto/cuerpo y cita IDs de revisiones activas:
 el scheduler fija fecha, Contacto y destinatario, y el executor conserva toda autoridad de envío.
 
 Tests sólo construyen fakes e impiden sockets/HTTP/DNS/Gmail/Overture/LLM reales.
@@ -112,9 +112,10 @@ Embeddings:
 
 La app usa embeddings sólo para buscar facts puntuales aprobados antes de construir el request LLM.
 El proveedor de embeddings no recibe Gmail ni puede ejecutar acciones; si falla, devuelve dimensión
-inválida o la selección queda baja/ambigua, la automatización no inventa una respuesta. A escala
-mayor se puede reemplazar el cache relacional por un vector store sin cambiar el contrato de
-dominio.
+inválida o la selección queda baja/ambigua, la automatización no inventa una respuesta. En selección
+baja/ambigua los tres facts mejor rankeados pueden pasar como contexto sugerido con
+`may_be_irrelevant=true`, y el LLM debe ignorarlos si no coinciden claro. A escala mayor se puede
+reemplazar el cache relacional por un vector store sin cambiar el contrato de dominio.
 
 ### 4.1 Campañas nuevas y compatibilidad
 
@@ -127,25 +128,28 @@ read-only y nunca se regenera para enviar una campaña completada.
 
 La aplicación construye, en este orden, hasta 24.000 caracteres:
 
-1. completos y obligatorios: texto recién escrito del inbound, mensaje INITIAL o
-   REFERRED_PROPOSAL original, padre directo y contexto general aprobado vigente;
-2. hasta seis mensajes recientes relevantes del Contacto, incluso de otros threads;
-3. `ConversationMemory` estructurada con IDs fuente para historia anterior;
-4. hasta tres `KnowledgeFactRevision` aprobadas, elegidas por embeddings según la consulta.
+1. instrucciones admin de redacción como `ADMIN_WRITING_INSTRUCTIONS`;
+2. completos y obligatorios: texto recién escrito del inbound, mensaje INITIAL o
+   REFERRED_PROPOSAL original, padre directo cuando existen y contexto general vigente;
+3. hasta seis mensajes recientes relevantes del Contacto, incluso de otros threads;
+4. `ConversationMemory` estructurada con IDs fuente para historia anterior;
+5. hasta tres `KnowledgeFactRevision` activas, elegidas por embeddings según la consulta.
 
 PDFs y HTML crudo quedan fuera. Si el bloque obligatorio no entra no se invoca proveedor y se abre
-HumanTask. Si la consulta no encuentra facts claros —similitud baja o empate ambiguo— no se agregan
-facts puntuales y la política debe pedir humano cuando una respuesta segura depende de esos datos.
-El contexto cruzado no es “todo el hilo”: el selector preserva causalidad sin saturar.
+HumanTask. Si la consulta no encuentra facts claros —similitud baja o empate ambiguo— los mejores
+matches pueden agregarse como sugerencias (`may_be_irrelevant=true`); la política debe pedir humano
+cuando el LLM no puede vincularlos claramente con la consulta. El contexto cruzado no es “todo el
+hilo”: el selector preserva causalidad sin saturar.
 
 El request incluye:
 
 - inbound/contact/conversation IDs opacos y versión de policy;
-- bloques rotulados por rol/proveniencia como untrusted data;
+- bloques rotulados por rol/proveniencia: `NEW_INBOUND` entra como `UNTRUSTED_DATA` y el contexto
+  general vigente entra como `APPROVED_GLOBAL_CONTEXT`;
 - lista de `EmailCandidateRef(id, normalized, region, validation_state)`;
 - lista de `FactRevisionRef(id, version, text)` aprobada y seleccionada para esta consulta;
 - enums dinámicos de candidate/fact IDs y actions/intents;
-- instrucciones de que reuniones, precios y demás categorías de riesgo deben pedir humano.
+- instrucciones fijas de que reuniones, precios y demás categorías de riesgo deben pedir humano.
 
 El hash canónico cubre IDs/versiones/orden/textos efectivos. DB persiste sólo manifest con IDs,
 versiones, char counts, estado de retrieval, scores redondeados y hashes; el cuerpo ya vive en sus
@@ -208,6 +212,8 @@ exige <=24 MiB. Un fallo aborta todo el efecto.
 subject, In-Reply-To y References para REMINDER, MANUAL_REPLY, AUTOMATIC_REPLY y REDIRECT_ACK.
 El contexto visto por LLM no se confunde con headers: parent/original se resuelven y guardan antes
 de formar reply.
+Cuando un `MANUAL_REPLY` queda `SENT`, se resuelven las tareas `REPLY_REVIEW` abiertas para el
+inbound padre; estados fallidos o ambiguos no cierran la revisión.
 
 Toda llamada parte de OutboundMessage `SENDING`. Éxito persiste gmail IDs/`SENT`. Timeout queda
 `RECONCILING`; `find_by_message_id` debe concluir aceptación/ausencia antes de retry. Proposal y ACK

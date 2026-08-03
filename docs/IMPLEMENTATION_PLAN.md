@@ -165,22 +165,25 @@ sin DNS en request, restriction UI, Spanish labels/accessibility/cache.
 
 **Objetivo:** analizar respuestas de forma medible sin autorizar Gmail.
 
-- Crear contexto general versionado, KnowledgeFact/Revision con approval y área “Información para
-  responder consultas”; no parsear PDFs.
+- Crear contexto general versionado, KnowledgeFact/Revision activos al guardar y área “Información
+  para responder consultas”; no parsear PDFs.
 - Crear `EmbeddingProvider`, configuración de proveedor/modelo/dimensiones, embeddings cacheados de
-  facts aprobados y búsqueda semántica que selecciona hasta tres facts o escala por baja/ambigua.
+  facts activos y búsqueda semántica que selecciona hasta tres facts; baja/ambigua entra como
+  sugerencia marcada para que el LLM la ignore si no aplica.
 - Persistir Gmail/deterministic effects y publicar LLM on_commit fuera del sync lock.
 - Extraer <=10 EmailCandidates literales/regionales y resolver sintaxis/MX/restricción/ownership.
 - Crear ConversationMemory source-linked y bounded context builder de 24k con mandatory/global
   context/recent/memory/RAG facts rules. Overflow mandatory crea HumanTask.
+- Agregar instrucciones admin de redacción para respuestas automáticas como input editable y
+  limitado por policy fija.
 - Extender LLMProvider con strict `decide_reply`; dynamic candidate/fact/action enums, manifest/hash
   y no raw invalid output.
 - Crear ReplyDecision, feedback admin y OFF/SHADOW(default)/LIVE setting; SHADOW cero Gmail.
-- Calcular gate >=30/>=10/>=90%/cero unsafe y exigir reauth para enable LIVE.
+- Exigir reauth admin para enable LIVE.
 
 **Pruebas:** candidates/IDN/quoted/obfuscated, embeddings/RAG low/ambiguous/cache/provider,
 prompt injection, cross-thread bounded context, unknown IDs/schema, zero SHADOW effects,
-qualification boundaries.
+LIVE reauth boundaries.
 
 **Terminado:** admins pueden revisar qué habría hecho, facts usados y exactitud con trazabilidad
 acotada.
@@ -192,6 +195,8 @@ acotada.
 - Implementar policy engine y intent matrix; confidence >=0.90 necesaria. No-action para polite ack
   y not interested; HumanTask para toda categoría riesgosa/fallo.
 - HumanTask OPEN suspende Conversation; admin resolve/dismiss, vendedor read-only.
+- Respuesta manual confirmada resuelve la tarea `REPLY_REVIEW` del inbound; fallo o reconciliación
+  conserva la alerta.
 - Reutilizar executor durable Gmail para AUTOMATIC_REPLY con context/original/parent guarantees,
   pre-send rechecks y `AUTO_REPLY_KILL_SWITCH`.
 - Implementar redirect saga candidate lock -> EmailAddress same Contact -> REFERRED_PROPOSAL new
@@ -276,7 +281,7 @@ Internet go-live. Todas las automatizaciones conservan kill switches independien
 | FR-09 One reminder | 5 | scheduling, cancellation y completion |
 | FR-10 Gmail/promotion | 2, 5, 7 | sync on_commit, Contact/Conversation, reminder cancellation |
 | FR-11 Knowledge/candidates/context | 7 | global context, revisions, embeddings/RAG, extractor, memory, manifests |
-| FR-12 Decisions/SHADOW/LIVE gate | 7, 8 | provider schema, feedback, qualification/policy |
+| FR-12 Decisions/SHADOW/LIVE mode | 7, 8 | provider schema, feedback, reauth/policy |
 | FR-13 Auto/redirect/human tasks | 8 | policy, saga, rate limits y suspension |
 | FR-14 Human alerts | 8 | task badge y NotificationDelivery |
 | FR-15 Scheduled Contacts | 9 | follow-up topics, approvals, attempts, scheduler/executor |
@@ -296,7 +301,7 @@ Internet go-live. Todas las automatizaciones conservan kill switches independien
 2. Bypass de roles, TOTP/lockout/proxy defectuoso o último admin no protegido.
 3. Restricción/contact exclusion/same-day/reminder/idempotency defectuosos.
 4. PDF parcial/tamper o reconciliación Gmail que permita duplicados/false ACK.
-5. SHADOW gate incompleto, task suspension/rate limits/kill switch defectuosos.
+5. Reauth LIVE, task suspension/rate limits/kill switch defectuosos.
 6. Secrets/PII/prompt bodies en logs, alerts o vistas indebidas.
 7. Backup/restore no probado o revisión legal/deliverability ausente.
 8. Para exposición pública: proxy TLS/certificados/monitoring/runbook aún no implementados.

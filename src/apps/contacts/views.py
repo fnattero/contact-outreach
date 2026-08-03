@@ -28,6 +28,7 @@ from apps.automation.models import (
     ReplyAutomationConfiguration,
     ScheduledContactAttempt,
 )
+from apps.automation.presentation import review_reason_for_task
 from apps.automation.scheduled import (
     approve_contact_follow_up_topic,
     authorize_scheduled_contact_attempt,
@@ -79,23 +80,6 @@ RESTRICTION_SOURCE_LABELS = {
     "gmail_bounce": "Rebote informado por Gmail",
     "legacy_suppression": "Importada del historial anterior",
     "legacy_email_invalidity": "Email marcado como inválido anteriormente",
-}
-TASK_REASON_LABELS = {
-    "MEETING_OR_DATE": "Quiere coordinar una reunión o una fecha",
-    "PRICING_OR_QUOTE": "Consulta por precio o presupuesto",
-    "NEGOTIATION": "Requiere una decisión comercial",
-    "COMPLAINT": "Hay un reclamo que debe revisar una persona",
-    "LEGAL_OR_PRIVACY": "Consulta legal o de privacidad",
-    "UNSUPPORTED_TECHNICAL_ADVICE": "Consulta técnica que no se puede responder con seguridad",
-    "MULTIPLE_INTENTS": "El mensaje contiene varios pedidos",
-    "AMBIGUOUS_CANDIDATE": "No está claro a qué email enviar la propuesta",
-    "OWNERSHIP_CONFLICT": "El email indicado aparece asociado a otra empresa",
-    "INSUFFICIENT_CONTEXT": "Falta información para responder con seguridad",
-    "PROVIDER_OR_SCHEMA_FAILURE": "No se pudo analizar la respuesta",
-    "MANDATORY_CONTEXT_OVERFLOW": "La conversación necesita una revisión completa",
-    "AUTOMATIC_MODE_NOT_AVAILABLE": "El envío automático todavía no está habilitado",
-    "SCHEDULED_CONTEXT_OR_PROVIDER_FAILURE": ("No se pudo preparar un contacto programado seguro"),
-    "SCHEDULED_DELIVERY_FAILED": "No se pudo enviar el contacto programado",
 }
 
 
@@ -266,16 +250,13 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
         enrollments = enrollments.exclude(campaign__state=Campaign.State.DRAFT)
     tasks = list(
         HumanTask.objects.filter(contact=contact)
-        .select_related("conversation", "inbound", "resolved_by")
+        .select_related("conversation", "inbound", "decision", "resolved_by")
         .order_by("-opened_at")
     )
     task_rows = [
         {
             "task": task,
-            "reason_label": TASK_REASON_LABELS.get(
-                task.reason,
-                task.friendly_summary or "Esta conversación necesita revisión",
-            ),
+            "review_reason": review_reason_for_task(task),
         }
         for task in tasks
     ]
@@ -611,10 +592,7 @@ def attention_list(request: HttpRequest) -> HttpResponse:
     rows = [
         {
             "task": task,
-            "reason_label": TASK_REASON_LABELS.get(
-                task.reason,
-                task.friendly_summary or "Esta conversación necesita revisión",
-            ),
+            "review_reason": review_reason_for_task(task),
         }
         for task in page.object_list
     ]

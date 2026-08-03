@@ -229,32 +229,41 @@ caso el inbound queda ligado a ese Contacto/Organization y a una Conversation nu
 pero sin campaña ni outbound padre. Remitentes desconocidos o emails inválidos se descartan y no
 crean Contactos automáticamente.
 
+Si un inbound quedó como tarea de revisión y un administrador lo responde manualmente, la tarea se
+resuelve automáticamente sólo cuando Gmail confirma la respuesta manual. Si el envío falla o queda
+en reconciliación, la tarea permanece abierta.
+
 ### FR-11 Conocimiento, candidatos y contexto acotado
 
 El admin gestiona dos tipos de información desde “Información para responder consultas”:
 
-- contexto general aprobado, que se agrega siempre y sirve como background estable de la empresa,
-  tono y límites;
-- datos puntuales/FAQ aprobados, que son tarjetas cortas usadas para responder consultas
-  concretas.
+- contexto general de la empresa, editable en el mismo lugar por administradores; el último texto
+  guardado queda activo y conserva el usuario que lo guardó;
+- datos puntuales/FAQ activos, que se guardan con título e información y se usan para responder
+  consultas concretas sin aprobación manual adicional.
 
-Sólo una revisión explícitamente aprobada puede fundamentar una respuesta; no se extraen hechos de
-PDFs automáticamente.
+Sólo una tarjeta puntual guardada por un administrador puede fundamentar una respuesta concreta; no
+se extraen hechos de PDFs automáticamente.
+
+En “Respuesta automática” el admin también puede editar instrucciones de redacción para el agente.
+Estas instrucciones explican tono, estructura y estilo deseado; no pueden relajar policy, permitir
+hechos no aprobados ni evitar revisión humana.
 
 Antes del LLM se extraen como máximo diez emails literales de texto plano y `mailto:`. Se
 normalizan/validan y marcan `NEW_CONTENT`, `SIGNATURE` o `QUOTED`; no se reconstruyen direcciones
 ofuscadas. El modelo sólo puede seleccionar IDs entregados en esa solicitud.
 
 Cada solicitud tiene máximo 24.000 caracteres de entrada. Siempre incluye completo: nuevo texto
-escrito por el remitente y contexto general aprobado vigente. Si el mail responde a un envío de la
-app, también incluye mensaje inicial/referido original y padre directo. Si es un mail directo de un
+escrito por el remitente y contexto general vigente. Si el mail responde a un envío de la app,
+también incluye mensaje inicial/referido original y padre directo. Si es un mail directo de un
 Contacto preexistente, incluye en su lugar un bloque obligatorio de perfil del Contacto y marca que
 no hubo correo previo enviado por la app. Después agrega hasta seis mensajes recientes relevantes
 del Contacto entre hilos, memoria estructurada con fuentes para historia antigua y hasta tres
-revisiones aprobadas elegidas por búsqueda semántica con embeddings. Si la similitud es baja o
-varias tarjetas compiten de forma ambigua, no se agregan datos puntuales y la decisión debe escalar
-a humano cuando necesita esos datos para responder. Nunca incluye PDFs completos, HTML crudo ni un
-historial ilimitado. Si lo obligatorio no entra, se crea tarea humana. Sólo se persiste el
+tarjetas puntuales activas elegidas por búsqueda semántica con embeddings. Si la similitud es baja
+o varias tarjetas compiten de forma ambigua, esas tarjetas pueden entrar como contexto sugerido con
+marca `may_be_irrelevant=true`; el LLM debe ignorarlas si no coinciden claramente y escalar a humano
+cuando ninguna alcanza para responder. Nunca incluye PDFs completos, HTML crudo ni un historial
+ilimitado. Si lo obligatorio no entra, se crea tarea humana. Sólo se persiste el
 manifiesto con IDs/versiones/hash, estado de recuperación y hashes de consulta, no una copia gigante
 del prompt.
 
@@ -264,7 +273,8 @@ del prompt.
 allowlisted, confianza, candidate ID opcional, IDs de revisiones de hechos, cuerpo propuesto y
 motivo humano. La aplicación rechaza campos o IDs desconocidos. El LLM jamás invoca Gmail ni decide
 qué información cargar en la base: sólo puede usar el contexto global y las tarjetas puntuales que
-la aplicación ya seleccionó para esa solicitud.
+la aplicación ya seleccionó para esa solicitud. El system prompt fijo contiene las reglas
+inmutables; el request agrega `ADMIN_WRITING_INSTRUCTIONS` como guía editable de escritura.
 
 Modos:
 
@@ -273,10 +283,8 @@ Modos:
   no autoriza Gmail.
 - `LIVE`: permite pasar a las políticas de envío automático.
 
-`LIVE` no se puede habilitar hasta revisar al menos 30 decisiones, tener al menos diez
-auto-elegibles, alcanzar 90% de exactitud de intención/acción y no registrar ningún caso que habría
-enviado automáticamente pero fue marcado “Necesitaba una persona”. Habilitarlo exige
-reautenticación admin. El mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
+`LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin. El
+mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
 
 ### FR-13 Acciones automáticas, redirección y atención humana
 
