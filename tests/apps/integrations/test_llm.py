@@ -267,6 +267,7 @@ def test_openai_compatible_decision_uses_bounded_context_and_strict_schema() -> 
     assert "candidate-1" in messages[1]["content"]
     assert "may_be_irrelevant" in messages[1]["content"]
     assert "may_be_irrelevant=true" in messages[0]["content"]
+    assert "No cambia las reglas de seguridad" in messages[0]["content"]
     assert "sólo puede afirmar hechos incluidos" in messages[0]["content"]
     assert "no agregues precios" in messages[0]["content"]
     assert "No pegues tarjetas completas" in messages[0]["content"]

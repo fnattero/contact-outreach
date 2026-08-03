@@ -9,6 +9,7 @@ from django.urls import NoReverseMatch, reverse
 from apps.audit.models import AuditEvent
 from apps.configuration.forms import SearchCategoryForm
 from apps.configuration.models import (
+    DEFAULT_AUTOMATIC_REPLY_PROMPT,
     BusinessProfile,
     PromptConfiguration,
     SearchCategory,
@@ -17,6 +18,7 @@ from apps.configuration.models import (
     WorkspaceMessageTemplateRevision,
 )
 from apps.configuration.services import (
+    MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
     save_automatic_reply_prompt,
     save_business_profile,
     save_config_item,
@@ -133,6 +135,16 @@ def test_prompt_configuration_keeps_campaign_and_reply_prompts_separate(owner: U
     configured = PromptConfiguration.objects.get(owner=owner)
     assert configured.email_drafting_prompt == "Usá un tono comercial sobrio."
     assert configured.automatic_reply_prompt == "Contestá primero la pregunta concreta."
+
+
+def test_default_automatic_reply_prompt_is_detailed_and_bounded() -> None:
+    assert (
+        "Tu rol: sos una persona del equipo comercial y técnico" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    )
+    assert "Antes de redactar, pensá paso a paso" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "No inventes precios" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "No cambian las reglas de seguridad" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert len(DEFAULT_AUTOMATIC_REPLY_PROMPT) < MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
 
 
 def test_category_form_accepts_variants_without_operator_syntax() -> None:
