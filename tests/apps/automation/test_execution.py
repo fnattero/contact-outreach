@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from email import policy
 from email.parser import BytesParser
@@ -455,6 +456,97 @@ def test_safe_reply_is_durable_idempotent_and_stays_in_original_thread(
     parsed = BytesParser(policy=policy.default).parsebytes(bytes(fake.raw_message))
     assert parsed["In-Reply-To"] == scenario.inbound.message_id
     assert parsed.get_content().strip() == scenario.decision.proposed_body
+
+
+@pytest.mark.django_db
+@override_settings(
+    SEND_MODE="live",
+    SEND_KILL_SWITCH=False,
+    AUTO_REPLY_KILL_SWITCH=False,
+)
+def test_cross_thread_automatic_reply_after_decision_does_not_stale_policy_recheck(
+    owner,
+    private_catalog_dir,
+    monkeypatch,
+) -> None:
+    scenario = _scenario(owner, private_catalog_dir=private_catalog_dir)
+    assert scenario.contact.preferred_email is not None
+    cutoff = scenario.decision.created_at
+    other_conversation = Conversation.objects.create(
+        workspace=scenario.contact.workspace,
+        contact=scenario.contact,
+        connection=scenario.inbound.connection,
+        gmail_thread_id="thread-other-automatic",
+        subject="Consulta repetida",
+        last_message_at=cutoff - timedelta(seconds=1),
+    )
+    other_inbound = InboundMessage.objects.create(
+        connection=scenario.inbound.connection,
+        organization=scenario.contact.organization,
+        campaign_enrollment=scenario.inbound.campaign_enrollment,
+        contact=scenario.contact,
+        conversation=other_conversation,
+        related_outbound=None,
+        gmail_message_id="gmail-other-automatic-inbound",
+        gmail_thread_id=other_conversation.gmail_thread_id,
+        message_id="<other-automatic-inbound@example.com>",
+        sender="Cliente <cliente@example.com>",
+        recipients=[scenario.inbound.connection.email],
+        subject="Consulta repetida",
+        external_at=cutoff - timedelta(minutes=1),
+        received_at=cutoff - timedelta(minutes=1),
+        body_text=scenario.inbound.body_text,
+        classification=InboundMessage.Classification.INTERESTED,
+        classification_confidence=Decimal("0.990"),
+        is_human=True,
+    )
+    InboundMessage.objects.filter(pk=other_inbound.pk).update(
+        created_at=cutoff - timedelta(seconds=1),
+        updated_at=cutoff - timedelta(seconds=1),
+    )
+    context_with_other_inbound = build_bounded_reply_context(scenario.inbound)
+    scenario.decision.context_manifest = context_with_other_inbound.manifest
+    scenario.decision.context_hash = context_with_other_inbound.context_hash
+    scenario.decision.save(update_fields=("context_manifest", "context_hash", "updated_at"))
+
+    later_reply = OutboundMessage.objects.create(
+        kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
+        campaign=scenario.campaign,
+        organization=scenario.contact.organization,
+        campaign_enrollment=scenario.inbound.campaign_enrollment,
+        contact=scenario.contact,
+        conversation=other_conversation,
+        email_address=scenario.contact.preferred_email,
+        parent_inbound=other_inbound,
+        recipient=scenario.contact.preferred_email.original_email,
+        recipient_normalized=scenario.contact.preferred_email.normalized_email,
+        subject="Re: Consulta repetida",
+        body_text="Respuesta automática posterior en otro hilo.",
+        state=OutboundMessage.State.SENT,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        idempotency_key="other-thread-automatic-reply",
+        semantic_action_key="other-thread-automatic-reply",
+        message_id="<other-thread-automatic-reply@example.invalid>",
+        gmail_message_id="gmail-other-thread-automatic-reply",
+        gmail_thread_id=other_conversation.gmail_thread_id,
+        sent_at=cutoff + timedelta(seconds=2),
+    )
+    OutboundMessage.objects.filter(pk=later_reply.pk).update(
+        created_at=cutoff + timedelta(seconds=1),
+        updated_at=cutoff + timedelta(seconds=1),
+    )
+    assert build_bounded_reply_context(scenario.inbound).context_hash != (
+        scenario.decision.context_hash
+    )
+    _allow_test_live_gate(monkeypatch)
+
+    assert (
+        execute_reply_decision(
+            scenario.decision.pk,
+            provider=FakeGmailProvider(persist=True),
+        )
+        == ReplyDecision.State.COMPLETED
+    )
 
 
 @pytest.mark.django_db

@@ -172,6 +172,8 @@ nunca sustituye negativos.
   only when no other task remains; Gmail failure/reconciliation leaves the task open.
 - Limits: fourth automatic in Conversation rolling 24h and 21st Workspace/day blocked; concurrent
   reservations; AUTO_REPLY_KILL_SWITCH checked immediately pre-send.
+- Recheck regression: an automatic reply sent later in another thread for the same Contact does
+  not stale an already prepared decision, while later human/manual context still blocks.
 
 ## 11. Redirect E2E y alerts
 

@@ -316,8 +316,12 @@ el contenido y PDFs aprobados de esa campaña. Para redirección:
 
 Propuesta y confirmación usan claves idempotentes distintas y sólo hay una acción semántica por
 Gmail ID entrante. Justo antes de ejecutar se revalidan headers automáticos, restricciones,
-contexto, modo y `AUTO_REPLY_KILL_SWITCH`. Límites: tres respuestas automáticas por Conversation en
-24 horas móviles y veinte por Workspace/día.
+contexto, modo y `AUTO_REPLY_KILL_SWITCH`. El recheck conserva estabilidad frente a respuestas
+automáticas posteriores de otros hilos del mismo Contacto; esos efectos no son contexto humano
+nuevo y no deben invalidar una decisión previa. Sí cancelan el efecto los mensajes humanos,
+respuestas manuales, cambios de contexto obligatorio/facts/política o cambios dentro del mismo
+hilo. Límites: tres respuestas automáticas por Conversation en 24 horas móviles y veinte por
+Workspace/día.
 
 ### FR-14 Alertas humanas
 

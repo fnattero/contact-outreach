@@ -146,7 +146,9 @@ Confianza >=0,90 es necesaria, nunca suficiente. IDs no incluidos o campos extra
 `HUMAN_REQUIRED/FAILED`, no fallback. El contexto válido incluye contexto global vigente y, para
 respuestas fundamentadas, facts puntuales activos seleccionados por embeddings; si llegan por
 similitud baja o selección ambigua se marcan como posibles y no autorizan una respuesta por sí
-solos. Una Conversation `SUSPENDED_HUMAN` impide nuevas autorizaciones automáticas.
+solos. El recheck de una decisión previa no considera respuestas automáticas posteriores de otros
+hilos del mismo Contacto como contexto humano nuevo. Una Conversation `SUSPENDED_HUMAN` impide
+nuevas autorizaciones automáticas.
 
 ### Saga de redirección
 

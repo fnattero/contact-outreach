@@ -9,6 +9,7 @@ from hashlib import sha256
 from typing import Any
 
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 from apps.automation.candidates import split_inbound_regions
 from apps.automation.memory import verified_conversation_memory_text
@@ -196,6 +197,8 @@ def _mandatory_blocks(inbound: InboundMessage) -> list[ReplyContextBlock]:
 def _recent_blocks(
     inbound: InboundMessage,
     excluded_ids: set[str],
+    *,
+    decision_created_at: datetime | None = None,
 ) -> list[ReplyContextBlock]:
     if inbound.contact_id is None:
         return []
@@ -227,14 +230,25 @@ def _recent_blocks(
                 ),
             )
         )
-    for outbound_message in (
+    outbound_queryset = (
         OutboundMessage.objects.filter(
             contact_id=inbound.contact_id,
             state=OutboundMessage.State.SENT,
         )
         .exclude(pk__in=excluded_ids)
-        .order_by("-sent_at", "-created_at")[: MAX_RECENT_MESSAGES * 2]
-    ):
+        .order_by("-sent_at", "-created_at")
+    )
+    if decision_created_at is not None:
+        automatic_reply_kinds = (
+            OutboundMessage.Kind.AUTOMATIC_REPLY,
+            OutboundMessage.Kind.REDIRECT_ACK,
+            OutboundMessage.Kind.REFERRED_PROPOSAL,
+        )
+        outbound_queryset = outbound_queryset.exclude(
+            Q(kind__in=automatic_reply_kinds, created_at__gt=decision_created_at)
+            & ~Q(conversation_id=inbound.conversation_id)
+        )
+    for outbound_message in outbound_queryset[: MAX_RECENT_MESSAGES * 2]:
         source_id = str(outbound_message.pk)
         if source_id in excluded_ids:
             continue
@@ -254,14 +268,21 @@ def _recent_blocks(
     return [block for _, block in recent[:MAX_RECENT_MESSAGES]]
 
 
-def _memory_blocks(inbound: InboundMessage) -> list[ReplyContextBlock]:
+def _memory_blocks(
+    inbound: InboundMessage,
+    *,
+    decision_created_at: datetime | None = None,
+) -> list[ReplyContextBlock]:
     if inbound.contact_id is None:
         return []
-    memory = (
-        ConversationMemory.objects.filter(contact_id=inbound.contact_id, superseded_at__isnull=True)
-        .order_by("-version")
-        .first()
-    )
+    queryset = ConversationMemory.objects.filter(contact_id=inbound.contact_id)
+    if decision_created_at is None:
+        queryset = queryset.filter(superseded_at__isnull=True)
+    else:
+        queryset = queryset.filter(created_at__lte=decision_created_at).filter(
+            Q(superseded_at__isnull=True) | Q(superseded_at__gt=decision_created_at)
+        )
+    memory = queryset.order_by("-version").first()
     if memory is None:
         return []
     text = verified_conversation_memory_text(memory)
@@ -353,6 +374,7 @@ def build_bounded_reply_context(
     schema_version: str = "1",
     writing_instructions: str = "",
     max_characters: int = MAX_REPLY_CONTEXT_CHARS,
+    decision_created_at: datetime | None = None,
 ) -> BoundedReplyContext:
     if inbound.contact_id is None or inbound.conversation_id is None:
         raise ValidationError("La respuesta todavía no está vinculada a un Contacto.")
@@ -385,7 +407,11 @@ def build_bounded_reply_context(
 
     blocks = list(mandatory)
     excluded_ids = {block.source_id for block in mandatory}
-    optional = _recent_blocks(inbound, excluded_ids) + _memory_blocks(inbound)
+    optional = _recent_blocks(
+        inbound,
+        excluded_ids,
+        decision_created_at=decision_created_at,
+    ) + _memory_blocks(inbound, decision_created_at=decision_created_at)
     for block in optional:
         candidate_blocks = [*blocks, block]
         if input_count(candidate_blocks, []) > max_characters:

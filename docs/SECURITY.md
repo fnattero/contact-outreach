@@ -117,7 +117,9 @@ tareas humanas. Comunicación programada usa temas globales aprobados por contac
 
 Estas barreras se comprueban al preparar/autorizar/encolar y **otra vez inmediatamente antes de
 Gmail**. DB authorization nunca reemplaza la barrera externa. Headers de auto submitted/bulk/list,
-unsubscribe, bounce, restricción, HumanTask abierto o cambio de contexto cancelan el efecto.
+unsubscribe, bounce, restricción, HumanTask abierto o cambio de contexto humano/obligatorio cancelan
+el efecto. Una respuesta automática posterior en otro hilo del mismo Contacto no cuenta como cambio
+humano nuevo para invalidar una decisión ya preparada.
 Una respuesta manual sólo limpia la tarea de revisión asociada después de confirmación Gmail
 `SENT`; si falla o queda ambigua, la alerta no se oculta.
 

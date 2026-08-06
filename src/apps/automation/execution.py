@@ -259,6 +259,10 @@ def _new_context_since_decision(
     )
     if allowed_outbound_ids:
         outbound = outbound.exclude(pk__in=allowed_outbound_ids)
+    outbound = outbound.exclude(
+        Q(kind__in=AUTOMATIC_KINDS, created_at__gt=decision.created_at)
+        & ~Q(conversation_id=decision.conversation_id)
+    )
     return outbound.exists()
 
 
@@ -343,6 +347,7 @@ def _decision_policy_error(
                 inbound,
                 policy_version=decision.policy_version,
                 writing_instructions=_writing_instructions_for_decision(decision),
+                decision_created_at=decision.created_at,
             )
         except ValidationError:
             return "El contexto actual ya no cabe en el límite seguro."
