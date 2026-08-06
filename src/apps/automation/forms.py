@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django import forms
 
-from apps.automation.models import FollowUpTopic, ReplyAutomationConfiguration, ReplyDecision
+from apps.automation.models import FollowUpTopic, ReplyAutomationConfiguration
 from apps.configuration.services import MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
 
 
@@ -91,20 +91,6 @@ class KnowledgeSearchPreviewForm(forms.Form):
             "Pegá una pregunta parecida a la que podría mandar un cliente. Te mostramos qué "
             "datos encontraría el buscador antes de llamar al agente."
         ),
-    )
-
-
-class DecisionReviewForm(forms.Form):
-    outcome = forms.ChoiceField(
-        choices=ReplyDecision.ReviewOutcome.choices,
-        label="¿La decisión fue correcta?",
-        widget=forms.RadioSelect,
-    )
-    feedback = forms.CharField(
-        required=False,
-        max_length=2000,
-        label="Qué debería haber hecho",
-        widget=forms.Textarea(attrs={"rows": 3}),
     )
 
 

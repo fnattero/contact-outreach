@@ -237,26 +237,4 @@
     </div>
 </section>
 
-<section class="panel" id="decisions">
-    <div class="panel__header"><div><h2>Decisiones para revisar</h2><p class="muted">En modo observación, “Qué habría hecho” nunca significa que se envió un correo.</p></div></div>
-    <div class="panel__body section-stack">
-        {% for decision in decisions %}
-        <article class="card">
-            <div class="page-header"><div><h3>{{ decision.contact.name|default:decision.contact.organization.name|default:"Contacto sin nombre" }}</h3><p class="muted">{{ decision.inbound.external_at|date:"d/m/Y H:i" }}</p></div><span class="badge badge--{{ decision.state|lower }}">{{ decision.get_state_display }}</span></div>
-            <p><strong>Qué habría hecho:</strong> {% if decision.action == 'REPLY' %}Responder con información aprobada{% elif decision.action == 'REDIRECT_PROPOSAL' %}Enviar la propuesta a la dirección indicada{% elif decision.action == 'NO_ACTION' %}No responder automáticamente{% else %}Pedir que lo revise una persona{% endif %}.</p>
-            {% if decision.proposed_body %}<details><summary>Ver borrador propuesto</summary><div class="message-body section-gap">{{ decision.proposed_body|linebreaksbr }}</div></details>{% endif %}
-            {% if decision.selected_facts.all %}<details><summary>Ver información usada</summary><ul>{% for fact in decision.selected_facts.all %}<li>{{ fact.fact.title }} · versión {{ fact.version }}</li>{% endfor %}</ul></details>{% endif %}
-            {% if decision.reviewed_at %}<p><strong>Revisión guardada:</strong> {{ decision.get_reviewed_outcome_display }}{% if decision.feedback %} · {{ decision.feedback }}{% endif %}</p>{% else %}
-            <form method="post" action="{% url 'decision-review' decision.pk %}" class="section-stack section-gap">
-                {% csrf_token %}
-                <fieldset class="field"><legend class="field__label">¿La decisión fue correcta?</legend><div class="choice-grid">{% for value,label in review_outcomes %}<label class="checkbox-line"><input type="radio" name="outcome" value="{{ value }}" required><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
-                <div class="field"><label class="field__label" for="feedback-{{ decision.pk }}">Qué debería haber hecho</label><textarea id="feedback-{{ decision.pk }}" name="feedback" rows="2"></textarea><p class="field__help">Es obligatorio si marcás que fue incorrecta o necesitaba una persona.</p></div>
-                <button class="button button--secondary button--small" type="submit">Guardar revisión</button>
-            </form>{% endif %}
-            <details><summary>Detalles técnicos</summary><dl><dt>Proveedor y modelo</dt><dd>{{ decision.provider }} · {{ decision.model }}</dd><dt>Confianza</dt><dd>{{ decision.confidence }}</dd><dt>Política</dt><dd>{{ decision.policy_version }}</dd><dt>Contexto</dt><dd>{{ decision.context_manifest.blocks|length }} mensajes y {{ decision.context_manifest.facts|length }} datos aprobados</dd></dl></details>
-        </article>
-        {% empty %}<div class="empty-state"><h3>Todavía no hay decisiones</h3><p>Aparecerán después de recibir respuestas humanas con el modo “Sólo observar” o “Respuestas automáticas activas”.</p></div>{% endfor %}
-    </div>
-    {% include "includes/pagination.html" with page_obj=page_obj %}
-</section>
 {% endblock %}

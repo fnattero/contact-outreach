@@ -48,6 +48,8 @@ def test_automation_settings_explains_knowledge_fields_for_non_technical_admin(
         'action="/respuesta-automatica/informacion/probar-busqueda/#knowledge-preview"' in content
     )
     assert "Temas de seguimiento" in content
+    assert "Decisiones para revisar" not in content
+    assert "Guardar revisión" not in content
 
 
 @pytest.mark.django_db

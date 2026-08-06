@@ -65,46 +65,6 @@ MIN_AUTOMATIC_CONFIDENCE = 0.90
 
 
 @transaction.atomic
-def review_reply_decision(
-    decision: ReplyDecision,
-    *,
-    actor: User,
-    outcome: str,
-    feedback: str = "",
-) -> ReplyDecision:
-    locked = ReplyDecision.objects.select_for_update().get(pk=decision.pk)
-    require_user_capability(
-        actor,
-        Capability.MANAGE_AUTOMATION,
-        workspace_id=locked.workspace_id,
-    )
-    if outcome not in ReplyDecision.ReviewOutcome.values:
-        raise ValidationError("Elegí si la decisión fue correcta o necesitaba un cambio.")
-    if outcome != ReplyDecision.ReviewOutcome.CORRECT and not feedback.strip():
-        raise ValidationError("Explicá brevemente qué debería haber hecho el sistema.")
-    locked.reviewed_outcome = outcome
-    locked.feedback = feedback.strip()
-    locked.reviewed_by = actor
-    locked.reviewed_at = timezone.now()
-    locked.save(
-        update_fields=(
-            "reviewed_outcome",
-            "feedback",
-            "reviewed_by",
-            "reviewed_at",
-            "updated_at",
-        )
-    )
-    record_event(
-        action="reply_decision.reviewed",
-        entity=locked,
-        actor=actor,
-        after={"outcome": outcome},
-    )
-    return locked
-
-
-@transaction.atomic
 def set_non_live_mode(
     *,
     workspace: Workspace,

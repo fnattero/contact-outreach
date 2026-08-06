@@ -273,9 +273,10 @@ almacena reconstrucciones.
 
 OneToOne o versión por inbound: mode `OFF|SHADOW|LIVE`, provider/model/schema/policy versions,
 classification, allowlisted intent/action, confidence, candidate FK opcional, proposed body,
-human reason enum, context manifest JSON/hash, selected fact revision M2M, state, reviewed result,
-review actor/date and feedback. Check constraints validan action/candidate. Output crudo inválido no
-se persiste; manifiesto contiene IDs/versiones, no cuerpos duplicados.
+human reason enum, context manifest JSON/hash, selected fact revision M2M y state. Los campos de
+revisión histórica se conservan por compatibilidad con datos existentes, pero no forman parte del
+flujo visible de configuración. Check constraints validan action/candidate. Output crudo inválido
+no se persiste; manifiesto contiene IDs/versiones, no cuerpos duplicados.
 
 ### HumanTask
 

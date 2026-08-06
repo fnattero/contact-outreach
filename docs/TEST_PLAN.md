@@ -158,8 +158,8 @@ nunca sustituye negativos.
 
 - Strict output validates classification/intent/action/confidence/candidate/fact/body/reason and
   rejects extra/unknown IDs, wrong region, stale revision or incompatibility.
-- OFF and SHADOW create zero Gmail authorizations/calls under all provider outputs; SHADOW shows
-  draft/friendly facts/feedback.
+- OFF and SHADOW create zero Gmail authorizations/calls under all provider outputs; SHADOW only
+  persists the proposal and facts used.
 - LIVE enable requires admin reauth and audit. Confidence 0.899/0.90 cannot override intent policy.
 - Auto allowlist only product/company/simple clarification with approved facts and explicit
   redirect. Polite ack/not interested no reply.

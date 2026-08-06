@@ -178,15 +178,15 @@ sin DNS en request, restriction UI, Spanish labels/accessibility/cache.
   limitado por policy fija.
 - Extender LLMProvider con strict `decide_reply`; dynamic candidate/fact/action enums, manifest/hash
   y no raw invalid output.
-- Crear ReplyDecision, feedback admin y OFF/SHADOW(default)/LIVE setting; SHADOW cero Gmail.
+- Crear ReplyDecision y OFF/SHADOW(default)/LIVE setting; SHADOW cero Gmail.
 - Exigir reauth admin para enable LIVE.
 
 **Pruebas:** candidates/IDN/quoted/obfuscated, embeddings/RAG low/ambiguous/cache/provider,
 prompt injection, cross-thread bounded context, unknown IDs/schema, zero SHADOW effects,
 LIVE reauth boundaries.
 
-**Terminado:** admins pueden revisar qué habría hecho, facts usados y exactitud con trazabilidad
-acotada.
+**Terminado:** las decisiones SHADOW quedan persistidas con trazabilidad acotada y sin efectos
+Gmail.
 
 ## Fase 8 — Acciones automáticas, redirects y tareas/alertas
 

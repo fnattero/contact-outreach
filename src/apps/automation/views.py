@@ -3,7 +3,6 @@ from __future__ import annotations
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,7 +14,6 @@ from apps.accounts.permissions import Capability, require_capability, workspace_
 from apps.automation.forms import (
     AutomaticReplyPromptForm,
     AutomationModeForm,
-    DecisionReviewForm,
     FollowUpTopicForm,
     GlobalKnowledgeContextForm,
     KnowledgeRevisionForm,
@@ -25,7 +23,6 @@ from apps.automation.models import (
     FollowUpTopic,
     KnowledgeFactRevision,
     ReplyAutomationConfiguration,
-    ReplyDecision,
     WorkspaceKnowledgeContextRevision,
 )
 from apps.automation.retrieval import retrieve_relevant_fact_revisions
@@ -33,7 +30,6 @@ from apps.automation.scheduled import save_follow_up_topic
 from apps.automation.services import (
     approve_global_knowledge_context_revision,
     approve_knowledge_revision,
-    review_reply_decision,
     save_global_knowledge_context,
     save_knowledge_revision,
     set_live_mode,
@@ -58,12 +54,6 @@ def _automation_settings_context(
     workspace = workspace_for_user(actor, Capability.MANAGE_AUTOMATION)
     configuration, _ = ReplyAutomationConfiguration.objects.get_or_create(workspace=workspace)
     prompt_runtime = runtime_prompt_configuration(actor.pk)
-    decisions = (
-        ReplyDecision.objects.filter(workspace=workspace)
-        .select_related("contact__organization", "inbound", "reviewed_by")
-        .prefetch_related("selected_facts__fact")
-    )
-    page = Paginator(decisions, 25).get_page(request.GET.get("page"))
     revisions = (
         KnowledgeFactRevision.objects.filter(fact__workspace=workspace)
         .select_related("fact", "approved_by")
@@ -101,8 +91,6 @@ def _automation_settings_context(
     )
     return {
         "configuration": configuration,
-        "decisions": page,
-        "page_obj": page,
         "revisions": revisions,
         "global_context_form": GlobalKnowledgeContextForm(
             initial={
@@ -119,7 +107,6 @@ def _automation_settings_context(
         ),
         "automatic_reply_prompt_revision": prompt_runtime.revision,
         "mode_form": AutomationModeForm(initial={"mode": configuration.mode}),
-        "review_outcomes": ReplyDecision.ReviewOutcome.choices,
         "follow_up_topics": topics.order_by("-active", "name"),
         "selected_follow_up_topic": selected_topic,
         "follow_up_topic_form": FollowUpTopicForm(initial=topic_initial),
@@ -338,26 +325,6 @@ def knowledge_search_preview(request: HttpRequest) -> HttpResponse:
         "automation/settings.html",
         _automation_settings_context(request, knowledge_preview=preview),
     )
-
-
-@require_capability(Capability.MANAGE_AUTOMATION)
-@require_POST
-def decision_review(request: HttpRequest, decision_id: str) -> HttpResponse:
-    actor = request.user
-    assert isinstance(actor, User)
-    workspace = workspace_for_user(actor, Capability.MANAGE_AUTOMATION)
-    decision = get_object_or_404(ReplyDecision, pk=decision_id, workspace=workspace)
-    form = DecisionReviewForm(request.POST)
-    if form.is_valid():
-        try:
-            review_reply_decision(decision, actor=actor, **form.cleaned_data)
-        except ValidationError as exc:
-            messages.error(request, "; ".join(exc.messages))
-        else:
-            messages.success(request, "Revisión guardada. Ayuda a validar el modo automático.")
-    else:
-        messages.error(request, "Elegí un resultado y explicá cualquier corrección.")
-    return redirect(_automation_settings_url("decisions"))
 
 
 @require_capability(Capability.MANAGE_AUTOMATION)

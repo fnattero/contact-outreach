@@ -279,8 +279,8 @@ inmutables; el request agrega `ADMIN_WRITING_INSTRUCTIONS` como guía editable d
 Modos:
 
 - `OFF`: sólo efectos determinísticos.
-- `SHADOW` (default): muestra “Qué habría hecho el sistema”, borrador, hechos usados y feedback;
-  no autoriza Gmail.
+- `SHADOW` (default): registra qué habría hecho el sistema, el borrador y los hechos usados;
+  no autoriza Gmail ni ofrece una aprobación posterior desde la configuración.
 - `LIVE`: permite pasar a las políticas de envío automático.
 
 `LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin. El
