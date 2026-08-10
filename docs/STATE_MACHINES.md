@@ -116,6 +116,7 @@ HUMAN_REQUIRED|FAILED`.
 | UNSUBSCRIBE humano | Lo anterior + restricción irreversible y estado “Baja solicitada” |
 | BOUNCE | Invalidar sólo EmailAddress; cancelar reminder; no crear Contact por sí solo |
 | AUTO_REPLY | Persistir evento; no Contact, no respuesta humana, no cancelar reminder |
+| Gmail `SENT` que responde un inbound conocido | Persistir `MANUAL_REPLY` `SENT`, resolver `REPLY_REVIEW` y cancelar automáticos en cola |
 
 La transacción termina antes de publicar `DECISION_PENDING` con `on_commit`. Un reintento sobre el
 mismo Gmail ID reutiliza mensaje, candidatos, Contact y task/decision existentes.
@@ -127,7 +128,7 @@ retrocede. Una restricción manual reversible no elimina Contact.
 ## 7. ReplyDecision y automatización
 
 Estados: `PENDING`, `SHADOW_RECORDED`, `NO_ACTION`, `AUTO_ELIGIBLE`, `AUTHORIZED`, `EXECUTING`,
-`COMPLETED`, `HUMAN_REQUIRED`, `REJECTED_POLICY`, `FAILED`.
+`COMPLETED`, `MANUAL_REPLY_RECORDED`, `HUMAN_REQUIRED`, `REJECTED_POLICY`, `FAILED`.
 
 | Desde | Hacia | Condición |
 | --- | --- | --- |
@@ -139,6 +140,7 @@ Estados: `PENDING`, `SHADOW_RECORDED`, `NO_ACTION`, `AUTO_ELIGIBLE`, `AUTHORIZED
 | AUTO_ELIGIBLE | AUTHORIZED | LIVE calificado y policy/rechecks completos |
 | AUTHORIZED | EXECUTING | Outbound durable creado y worker reclama lock |
 | EXECUTING | COMPLETED | Efecto(s) Gmail confirmados/reconciliados |
+| PENDING/AUTO_ELIGIBLE/AUTHORIZED/EXECUTING | MANUAL_REPLY_RECORDED | Sync confirma una respuesta escrita directamente en Gmail |
 | EXECUTING | HUMAN_REQUIRED | Fallo o ambigüedad requiere intervención |
 | PENDING/AUTO_ELIGIBLE/AUTHORIZED/EXECUTING | FAILED | Error persistido; sin reclamo de éxito |
 
@@ -166,8 +168,9 @@ descartar puede restaurar `ACTIVE` sólo si no queda otro task abierto; no dispa
 acción admin separada y explícita.
 
 Una respuesta manual confirmada (`MANUAL_REPLY -> SENT`) resuelve automáticamente las tareas
-`REPLY_REVIEW` abiertas para ese inbound, usando como actor al usuario que autorizó la respuesta.
-Si el envío manual falla o queda `RECONCILING`, la tarea sigue `OPEN`.
+`REPLY_REVIEW` abiertas para ese inbound. Si la respuesta fue escrita directamente en Gmail, el
+sync usa el dueño de la conexión como actor de auditoría. Si el envío manual de la aplicación falla
+o queda `RECONCILING`, la tarea sigue `OPEN`.
 
 NotificationDelivery: `PENDING -> SENDING -> SENT|RECONCILING|FAILED`; `RECONCILING -> SENT|PENDING|
 FAILED`. El task sigue OPEN aunque todas las notificaciones fallen.

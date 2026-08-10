@@ -354,6 +354,7 @@ class GmailInboundMessage:
     body_html: str
     received_at: datetime
     headers: dict[str, str]
+    is_sent: bool = False
 
 
 @dataclass(frozen=True, slots=True)

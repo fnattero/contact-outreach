@@ -32,6 +32,7 @@ from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
     GmailReplyRequest,
+    GmailSendRequest,
     GmailSendResult,
     LLMProvider,
     ReplyDecisionResult,
@@ -561,6 +562,150 @@ def test_human_reply_analysis_is_enqueued_only_after_commit(
     queued.assert_called_once_with(str(inbound.pk))
     assert inbound.contact_id is not None
     assert inbound.conversation_id is not None
+
+
+@pytest.mark.django_db
+def test_sync_imports_manual_gmail_reply_into_contact_and_closes_attention_task(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    _, root = _thread_fixture(owner, suffix="manual-gmail-import")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=root.recipient,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Quisiera coordinar una llamada.",
+        in_reply_to=root.message_id,
+        rfc_message_id="<manual-gmail-inbound@example.com>",
+    )
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+    inbound = InboundMessage.objects.get(gmail_message_id__startswith="fake-inbound-")
+    assert inbound.contact_id is not None
+    assert inbound.conversation_id is not None
+    task = HumanTask.objects.create(
+        workspace=connection.workspace,
+        contact=inbound.contact,
+        conversation=inbound.conversation,
+        inbound=inbound,
+        kind="REPLY_REVIEW",
+        reason="MEETING_OR_DATE",
+        status=HumanTask.Status.OPEN,
+        friendly_summary="La respuesta necesita una revisión.",
+        opened_at=timezone.now(),
+    )
+    inbound.conversation.automation_suspended = True
+    inbound.conversation.save(update_fields=("automation_suspended", "updated_at"))
+    decision = ReplyDecision.objects.create(
+        workspace=connection.workspace,
+        inbound=inbound,
+        contact=inbound.contact,
+        conversation=inbound.conversation,
+        mode="LIVE",
+        provider="fake",
+        model="fake",
+        policy_version="reply-policy-v1",
+        classification="INTERESTED",
+        intent="APPROVED_PRODUCT_INFORMATION",
+        action="REPLY",
+        confidence="0.990",
+        proposed_body="Respuesta preparada.",
+        context_manifest={},
+        context_hash="a" * 64,
+        state=ReplyDecision.State.AUTO_ELIGIBLE,
+    )
+    automatic = OutboundMessage.objects.create(
+        kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
+        campaign=root.campaign,
+        organization=inbound.organization,
+        campaign_enrollment=inbound.campaign_enrollment,
+        contact=inbound.contact,
+        conversation=inbound.conversation,
+        email_address=inbound.contact.preferred_email,
+        parent_inbound=inbound,
+        recipient=root.recipient,
+        recipient_normalized=root.recipient_normalized,
+        subject=root.subject,
+        body_text="Respuesta automática que no debe salir.",
+        state=OutboundMessage.State.QUEUED,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        idempotency_key="automatic-before-manual-gmail",
+        semantic_action_key="automatic-before-manual-gmail",
+        message_id="<automatic-before-manual-gmail@example.invalid>",
+        gmail_thread_id=root.gmail_thread_id,
+    )
+    fake.inject_sent(
+        thread_id=root.gmail_thread_id,
+        recipient=root.recipient,
+        subject=root.subject,
+        body_text="Perfecto, te llamo mañana.",
+        in_reply_to=inbound.message_id,
+        references=(root.message_id, inbound.message_id),
+        rfc_message_id="<manual-gmail-reply@example.com>",
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+
+    manual = OutboundMessage.objects.get(
+        kind=OutboundMessage.Kind.MANUAL_REPLY,
+        parent_inbound=inbound,
+    )
+    assert manual.state == OutboundMessage.State.SENT
+    assert manual.body_text == "Perfecto, te llamo mañana."
+    assert manual.gmail_thread_id == root.gmail_thread_id
+    assert manual.contact_id == inbound.contact_id
+    decision.refresh_from_db()
+    automatic.refresh_from_db()
+    assert decision.state == ReplyDecision.State.MANUAL_REPLY_RECORDED
+    assert automatic.state == OutboundMessage.State.CANCELLED
+    assert "respuesta manual" in automatic.error
+    task.refresh_from_db()
+    inbound.conversation.refresh_from_db()
+    assert task.status == HumanTask.Status.RESOLVED
+    assert task.resolution_note == "Respondida manualmente."
+    assert task.resolved_by == owner
+    assert not inbound.conversation.automation_suspended
+
+    from apps.contacts.queries import conversation_timelines
+
+    timeline = conversation_timelines(inbound.contact, include_simulations=False)
+    assert any(
+        item.body == "Perfecto, te llamo mañana."
+        for conversation in timeline
+        for item in conversation.items
+    )
+    assert any(
+        conversation.automation_label == "Respondido manualmente" for conversation in timeline
+    )
+    provider = Mock(spec=LLMProvider)
+    assert process_inbound_reply(inbound.pk, provider=provider) == inbound.classification
+    provider.decide_reply.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_sync_does_not_reimport_an_outbound_message_already_owned_by_the_app(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    del private_catalog_dir
+    _, root = _thread_fixture(owner, suffix="manual-gmail-dedupe")
+    connection = _connection(owner)
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.send(
+        GmailSendRequest(
+            recipient=root.recipient,
+            raw_message=b"app-owned-message",
+            message_id=root.message_id,
+            correlation_id="test",
+            idempotency_key="app-owned-message",
+        )
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 0
+    assert not InboundMessage.objects.exists()
 
 
 @pytest.mark.django_db

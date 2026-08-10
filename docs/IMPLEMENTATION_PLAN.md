@@ -194,9 +194,14 @@ Gmail.
 
 - Implementar policy engine y intent matrix; confidence >=0.90 necesaria. No-action para polite ack
   y not interested; HumanTask para toda categoría riesgosa/fallo.
+- Reforzar la instrucción de coordinación humana y añadir fallback determinístico acotado para
+  llamada/reunión más coordinación o disponibilidad, con regresiones que preserven consultas
+  informativas de horarios/teléfono.
 - HumanTask OPEN suspende Conversation; admin resolve/dismiss, vendedor read-only.
-- Respuesta manual confirmada resuelve la tarea `REPLY_REVIEW` del inbound; fallo o reconciliación
-  conserva la alerta.
+- Respuesta manual confirmada, desde la app o detectada en Gmail, resuelve la tarea `REPLY_REVIEW`
+  del inbound; fallo o reconciliación de un envío de la app conserva la alerta.
+- Una `REPLY` LIVE envía el `proposed_body` validado por el LLM; los facts seleccionados quedan como
+  evidencia y no se concatenan como cuerpo sustituto.
 - Reutilizar executor durable Gmail para AUTOMATIC_REPLY con context/original/parent guarantees,
   pre-send rechecks y `AUTO_REPLY_KILL_SWITCH`.
 - Implementar redirect saga candidate lock -> EmailAddress same Contact -> REFERRED_PROPOSAL new
@@ -279,9 +284,9 @@ Internet go-live. Todas las automatizaciones conservan kill switches independien
 | FR-07 Multiple PDFs | 4, 8 | attachment snapshots, MIME y redirect |
 | FR-08 Sending/same-day | 4, 5, 8 | reservations, executor/reconciliation/barriers |
 | FR-09 One reminder | 5 | scheduling, cancellation y completion |
-| FR-10 Gmail/promotion | 2, 5, 7 | sync on_commit, Contact/Conversation, reminder cancellation |
+| FR-10 Gmail/promotion | 2, 5, 7, 8 | sync on_commit, manual Gmail reply projection, Contact/Conversation, task resolution and cancellation |
 | FR-11 Knowledge/candidates/context | 7 | global context, revisions, embeddings/RAG, extractor, memory, manifests |
-| FR-12 Decisions/SHADOW/LIVE mode | 7, 8 | provider schema, feedback, reauth/policy |
+| FR-12 Decisions/SHADOW/LIVE mode | 7, 8 | provider schema, proposed_body validado, feedback, reauth/policy |
 | FR-13 Auto/redirect/human tasks | 8 | policy, saga, rate limits y suspension |
 | FR-14 Human alerts | 8 | task badge y NotificationDelivery |
 | FR-15 Scheduled Contacts | 9 | follow-up topics, approvals, attempts, scheduler/executor |

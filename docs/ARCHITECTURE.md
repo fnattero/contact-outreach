@@ -131,8 +131,11 @@ Un lock por conexión serializa sync. La transacción importa únicamente thread
 mails directos cuyo remitente coincide con un EmailAddress válido de un Contacto existente,
 actualiza cursor y ejecuta primero baja, bounce y auto-reply determinísticos. Una respuesta humana
 de campaña promueve Organization a Contact, crea/vincula Conversation y cancela recordatorios. Un
-mail directo vincula el Contacto existente y queda sin campaña/outbound padre. Al commit se publica
-una task de decisión. El lock ya está liberado antes de LLM.
+mail directo vincula el Contacto existente y queda sin campaña/outbound padre. Los mensajes Gmail con
+marca `SENT` que responden a un inbound conocido se persisten como `MANUAL_REPLY` confirmado, se
+agregan a la misma Conversation, resuelven la tarea `REPLY_REVIEW` y cancelan efectos automáticos
+que todavía estén en cola. Al commit se publica una task de decisión sólo si no existe esa respuesta
+manual. El lock ya está liberado antes de LLM.
 
 El análisis trabaja sobre un snapshot de contexto acotado. Extrae emails literales antes del LLM,
 inyecta el contexto general vigente, usa `EmbeddingProvider` para elegir hasta tres facts
@@ -142,6 +145,9 @@ pueden entrar como candidatos con `may_be_irrelevant=true`; el LLM debe ignorar 
 y el policy deriva a HumanTask cuando no hay fundamento suficiente. Si falla o falta contexto
 obligatorio, crea HumanTask. Las instrucciones admin de redacción entran como
 `ADMIN_WRITING_INSTRUCTIONS` y sólo gobiernan estilo; nunca reconstruye prompts desde logs.
+La policy también detecta señales claras de coordinación humana (canal de llamada/reunión más
+coordinación o disponibilidad) si el LLM las clasifica erróneamente; no convierte menciones
+informativas de horarios o teléfonos en tareas por sí solas.
 
 ### 4.5 Decisión y efecto automático
 
@@ -163,7 +169,9 @@ persist inbound -> deterministic effects -> build bounded context -> decide_repl
 ```
 
 En SHADOW, la última rama sólo persiste qué habría hecho. En LIVE, un executor común revalida
-modo, kill switch, headers, restricción, límite y suspensión inmediatamente antes de Gmail.
+modo, kill switch, headers, restricción, límite y suspensión inmediatamente antes de Gmail. Para
+`REPLY`, el executor conserva y envía el `proposed_body` validado de `ReplyDecision`; los facts
+seleccionados sólo fundamentan la decisión y no reemplazan su redacción.
 
 La redirección es una saga explícita:
 
@@ -183,9 +191,10 @@ la fuente durable de la alerta. Después del commit se crean `NotificationDelive
 activo; cada una usa Gmail con asunto genérico y link generado desde `PUBLIC_BASE_URL`. Fallar el
 canal secundario nunca cambia el task.
 
-Cuando una respuesta manual `MANUAL_REPLY` llega a `SENT`, el servicio de dominio resuelve las
-tareas `REPLY_REVIEW` abiertas para ese inbound y reactiva la Conversation sólo si no quedan otras
-tareas abiertas. Una autorización manual en cola o fallida no limpia la alerta.
+Cuando una respuesta manual `MANUAL_REPLY` llega a `SENT`, ya sea desde la aplicación o detectada en
+Gmail, el servicio de dominio resuelve las tareas `REPLY_REVIEW` abiertas para ese inbound y reactiva
+la Conversation sólo si no quedan otras tareas abiertas. Una autorización manual en cola o fallida
+no limpia la alerta.
 
 ### 4.7 Comunicación programada
 

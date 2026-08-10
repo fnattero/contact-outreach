@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import secrets
+import unicodedata
 import uuid
 from functools import partial
 from hashlib import sha256
@@ -27,6 +29,7 @@ from apps.automation.models import (
     ReplyDecision,
     WorkspaceKnowledgeContextRevision,
 )
+from apps.campaigns.models import OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import IntegrationConfiguration
@@ -62,6 +65,35 @@ HUMAN_REQUIRED_INTENT_REASONS = {
     "INSUFFICIENT_CONTEXT": "INSUFFICIENT_CONTEXT",
 }
 MIN_AUTOMATIC_CONFIDENCE = 0.90
+_SCHEDULING_CHANNEL_RE = re.compile(
+    r"\b(?:llamada(?:s)?|videollamada(?:s)?|reuni[oó]n(?:es)?|reunir(?:nos)?|"
+    r"hablar\s+por\s+(?:tel[eé]fono|tel)|conversar)\b"
+)
+_SCHEDULING_REQUEST_RE = re.compile(
+    r"\b(?:coordinar|coordinemos|agendar|programar|concertar|organizar)\b"
+)
+_SCHEDULING_AVAILABILITY_RE = re.compile(
+    r"\b(?:disponib\w*|horario\w*|hora\w*|fecha\w*|d[ií]a\w*|cu[aá]ndo)\b"
+)
+
+
+def _normalized_reply_text(value: str) -> str:
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKD", value.casefold())
+        if not unicodedata.combining(character)
+    )
+
+
+def _explicit_scheduling_request(text: str) -> bool:
+    """Catch clear requests to schedule a human conversation, not generic hours questions."""
+
+    normalized = _normalized_reply_text(text)
+    if not _SCHEDULING_CHANNEL_RE.search(normalized):
+        return False
+    return bool(
+        _SCHEDULING_REQUEST_RE.search(normalized) or _SCHEDULING_AVAILABILITY_RE.search(normalized)
+    )
 
 
 @transaction.atomic
@@ -536,7 +568,10 @@ def _policy_result(
     result: ReplyDecisionResult,
     *,
     candidates: tuple[EmailCandidate, ...],
+    inbound_text: str = "",
 ) -> tuple[str, str]:
+    if _explicit_scheduling_request(inbound_text):
+        return ReplyDecision.State.HUMAN_REQUIRED, "MEETING_OR_DATE"
     if result.intent in HUMAN_REQUIRED_INTENT_REASONS:
         return (
             ReplyDecision.State.HUMAN_REQUIRED,
@@ -668,6 +703,17 @@ def process_inbound_decision(
         return None
     if conversation is None:
         return None
+    if OutboundMessage.objects.filter(
+        parent_inbound_id=inbound.pk,
+        kind=OutboundMessage.Kind.MANUAL_REPLY,
+        state__in=(
+            OutboundMessage.State.QUEUED,
+            OutboundMessage.State.SENDING,
+            OutboundMessage.State.RECONCILING,
+            OutboundMessage.State.SENT,
+        ),
+    ).exists():
+        return None
     configuration, _ = ReplyAutomationConfiguration.objects.get_or_create(
         workspace=contact.workspace
     )
@@ -736,7 +782,11 @@ def process_inbound_decision(
             error=exc,
         )
 
-    policy_state, human_reason = _policy_result(result, candidates=candidates)
+    policy_state, human_reason = _policy_result(
+        result,
+        candidates=candidates,
+        inbound_text=inbound.body_text,
+    )
     state = (
         ReplyDecision.State.SHADOW_RECORDED
         if configuration.mode == ReplyAutomationConfiguration.Mode.SHADOW

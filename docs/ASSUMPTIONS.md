@@ -36,10 +36,12 @@ seguridad no se relajan desde el dashboard.
 | A-029 | Respuesta humana, Contact manual, unsubscribe o bounce cancelan reminder; auto-reply no. | Estado |
 | A-030 | Gmail sync corre cada minuto por default y nunca sostiene su lock durante LLM; publica análisis con transaction.on_commit. | Operación |
 | A-056 | Gmail sync importa mails directos sólo si el remitente coincide con un EmailAddress válido de un Contacto existente; no crea contactos desde desconocidos. | Seguridad / producto |
+| A-057 | Gmail sync identifica la etiqueta `SENT`; una respuesta enviada directamente en Gmail sólo se proyecta como `MANUAL_REPLY` si responde a un inbound conocido, resuelve su `REPLY_REVIEW` y bloquea automáticos en cola. | Integridad / seguridad |
 | A-031 | Se extraen máximo diez emails literales inbound de plain text/mailto, con NEW_CONTENT/SIGNATURE/QUOTED; no se reconstruyen ofuscados. | Seguridad |
 | A-032 | Input LLM máximo 24.000 caracteres; instrucciones admin, inbound authored, original/padre cuando existen y contexto general vigente son obligatorios; luego hasta seis recientes, memoria con fuentes y tres facts activos elegidos por embeddings. | Costo / seguridad |
 | A-033 | No entran PDFs ni raw HTML al LLM; sólo se persiste manifest de IDs/versiones/retrieval/hash, no prompts gigantes duplicados. | Privacidad |
 | A-034 | El conocimiento sólo usa revisiones guardadas/activas por administradores; no hay extracción automática desde catálogos. Embeddings selecciona facts, no autoriza respuestas. | Integridad |
+| A-058 | En `LIVE`, una `REPLY` envía el `proposed_body` validado por el LLM; los facts seleccionados son evidencia autorizada y nunca reemplazan la redacción final. | Seguridad / UX |
 | A-055 | Embeddings default `fake`; OpenAI-compatible usa modelo `text-embedding-3-small` y dimensiones configurables desde Integraciones. Similitud baja o selección ambigua inyecta hasta tres facts como sugerencias `may_be_irrelevant=true`, no como autorización automática. | Integración IA |
 | A-035 | No se usa LangGraph. `decide_reply` produce JSON estructurado; policy/domain services ejecutan efectos sin tools para el modelo. | Arquitectura |
 | A-036 | Modos de respuesta: OFF, SHADOW default y LIVE. SHADOW produce cero autorizaciones Gmail. | Seguridad |
@@ -95,3 +97,6 @@ denominación local. Un nombre repetido bajo otra provincia no se deduplica por 
    historia reciente, memoria source-linked y RAG de hasta tres facts entran por presupuesto fijo.
 6. **Automático vs. humano:** policy por intención domina confidence; reuniones, precios y riesgo
    siempre crean tarea.
+7. **Coordinación explícita:** el prompt pide `HUMAN` para coordinar llamadas/reuniones y un
+   fallback determinístico estrecho corrige sólo esa combinación clara; consultas informativas
+   sobre horarios o teléfono no se bloquean automáticamente.

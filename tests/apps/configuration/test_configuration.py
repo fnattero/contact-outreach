@@ -143,6 +143,8 @@ def test_default_automatic_reply_prompt_is_detailed_and_bounded() -> None:
     )
     assert "Antes de redactar, pensá paso a paso" in DEFAULT_AUTOMATIC_REPLY_PROMPT
     assert "No inventes precios" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "la acción debe ser HUMAN con intent MEETING_OR_DATE" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "No respondas pidiendo los horarios del cliente" in DEFAULT_AUTOMATIC_REPLY_PROMPT
     assert "No cambian las reglas de seguridad" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
     assert len(DEFAULT_AUTOMATIC_REPLY_PROMPT) < MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
 

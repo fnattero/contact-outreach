@@ -135,7 +135,9 @@ nunca sustituye negativos.
 
 - Gmail baseline, paginated history, cursor after commit, duplicate events, 404 fallback bounded,
   unrelated inbox ignored, direct inbound from existing Contact imported, unknown sender ignored,
-  auth degradation and per-connection lock.
+  manual Gmail `SENT` reply projected into Contact timeline, own outbound deduplicated, task closed,
+  queued automatic reply cancelled and no new decision/send; auth degradation and per-connection
+  lock.
 - Prove decide_reply starts after commit/lock release; LLM failure preserves inbound/cursor.
 - Deterministic unsubscribe/bounce/auto precedence prevents LLM effect.
 - Candidate extraction: plain/mailto, punctuation, Unicode/IDN, dedupe, maximum ten,
@@ -160,12 +162,17 @@ nunca sustituye negativos.
   rejects extra/unknown IDs, wrong region, stale revision or incompatibility.
 - OFF and SHADOW create zero Gmail authorizations/calls under all provider outputs; SHADOW only
   persists the proposal and facts used.
+- LIVE sends the validated LLM `proposed_body` as the final reply body, while selected approved
+  facts remain required evidence and are never concatenated as replacement paragraphs.
 - LIVE enable requires admin reauth and audit. Confidence 0.899/0.90 cannot override intent policy.
 - Auto allowlist only product/company/simple clarification with approved facts and explicit
   redirect. Polite ack/not interested no reply.
 - Every meeting/date, pricing, negotiation, complaint, legal/privacy, unsupported technical,
   multiple intent, ambiguous candidate, ownership conflict, insufficient context and
   provider/schema failure opens task.
+- Prompt regression requires explicit call/meeting coordination to return `HUMAN`; policy regression
+  overrides a misclassified automatic reply for that case while leaving general attention-hours
+  and phone-information questions eligible for normal policy evaluation.
 - HumanTask opens once under double processing, suspends Conversation, prevents subsequent auto,
   vendor view-only; resolve/dismiss only admin and resumes only when no open task.
 - Manual reply success resolves the inbound's open `REPLY_REVIEW` task and resumes the Conversation

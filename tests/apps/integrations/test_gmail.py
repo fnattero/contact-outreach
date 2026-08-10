@@ -188,6 +188,7 @@ def test_gmail_api_incremental_sync_maps_allowed_headers_and_bodies() -> None:
                     "id": "incoming-1",
                     "threadId": "thread-1",
                     "internalDate": "1784203200000",
+                    "labelIds": ["SENT"],
                     "payload": {
                         "mimeType": "multipart/mixed",
                         "headers": [
@@ -234,6 +235,7 @@ def test_gmail_api_incremental_sync_maps_allowed_headers_and_bodies() -> None:
     assert message.body_text == "Hola, me interesa\nTexto grande separado"
     assert message.in_reply_to == "<root@example.com>"
     assert message.references == ("<root@example.com>",)
+    assert message.is_sent is True
     assert "X-Untrusted-Secret" not in message.headers
     assert "startHistoryId=10" in str(transport.calls[0]["url"])
     assert str(transport.calls[2]["url"]).endswith("/messages/incoming-1/attachments/detached-text")
@@ -302,6 +304,9 @@ def test_http_transport_serializes_and_translates_errors(monkeypatch: pytest.Mon
     ):
         with pytest.raises(error_type):
             GmailHTTPTransport._raise_http(status, {}, "invalid")
+
+    with pytest.raises(ValidationProviderError, match="invalid_grant"):
+        GmailHTTPTransport._raise_http(400, {"error": "invalid_grant"}, None)
 
     monkeypatch.setattr(
         "apps.integrations.gmail.urlopen",

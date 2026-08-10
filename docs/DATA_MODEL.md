@@ -237,7 +237,9 @@ Message-ID, Gmail message/thread ID, parent inbound, In-Reply-To/References, att
 scheduled/sent/simulated timestamps, MIME hash/size and error.
 
 Idempotency key, Message-ID y Gmail ID son únicos. `AUTOMATIC_REPLY|REDIRECT_ACK` tienen a lo sumo
-una acción semántica por inbound. Enviar/reintentar modifica la misma fila.
+una acción semántica por inbound. Una respuesta escrita directamente en Gmail se proyecta como
+`MANUAL_REPLY` `SENT`, conserva sus Gmail/RFC IDs y usa el inbound respondido como `parent_inbound`.
+Enviarla/reintentarla desde la aplicación modifica la misma fila.
 
 ### CampaignDeliveryReservation
 

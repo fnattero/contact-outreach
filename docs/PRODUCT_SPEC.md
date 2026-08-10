@@ -230,8 +230,10 @@ pero sin campaña ni outbound padre. Remitentes desconocidos o emails inválidos
 crean Contactos automáticamente.
 
 Si un inbound quedó como tarea de revisión y un administrador lo responde manualmente, la tarea se
-resuelve automáticamente sólo cuando Gmail confirma la respuesta manual. Si el envío falla o queda
-en reconciliación, la tarea permanece abierta.
+resuelve automáticamente sólo cuando Gmail confirma la respuesta manual. La sincronización también
+reconoce una respuesta escrita directamente en Gmail: la guarda en el hilo de Contactos como
+`MANUAL_REPLY`, resuelve la tarea asociada y bloquea cualquier respuesta automática pendiente. Si el
+envío manual de la aplicación falla o queda en reconciliación, la tarea permanece abierta.
 
 ### FR-11 Conocimiento, candidatos y contexto acotado
 
@@ -274,7 +276,9 @@ allowlisted, confianza, candidate ID opcional, IDs de revisiones de hechos, cuer
 motivo humano. La aplicación rechaza campos o IDs desconocidos. El LLM jamás invoca Gmail ni decide
 qué información cargar en la base: sólo puede usar el contexto global y las tarjetas puntuales que
 la aplicación ya seleccionó para esa solicitud. El system prompt fijo contiene las reglas
-inmutables; el request agrega `ADMIN_WRITING_INSTRUCTIONS` como guía editable de escritura.
+inmutables; el request agrega `ADMIN_WRITING_INSTRUCTIONS` como guía editable de escritura. Para una
+acción `REPLY` autorizada, `proposed_body` es el cuerpo final que se envía: los facts seleccionados
+son evidencia autorizada y no se pegan como párrafos en lugar de la redacción del LLM.
 
 Modos:
 
@@ -298,6 +302,11 @@ legal/privacidad, consejo técnico no soportado, intenciones múltiples, candida
 conflicto de organización, contexto insuficiente o fallo de proveedor/schema. Una `HumanTask`
 suspende automatización de la Conversation hasta que un admin resuelva o descarte; vendedores sólo
 leen.
+
+La instrucción al LLM refuerza esta clasificación y el policy agrega una protección acotada para
+pedidos explícitos de coordinar/agendar una llamada o reunión junto con día, horario o
+disponibilidad. No se bloquean por sí solas consultas informativas como horario de atención,
+teléfono, zonas de envío o retiros.
 
 Una respuesta segura usa el hilo original y recibe inbound actual más contexto obligatorio. En
 mails directos de Contactos preexistentes puede autorizar una respuesta normal si supera policy,

@@ -93,11 +93,19 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
 - El LLM no recibe Gmail, HTTP, calendario, filesystem ni tool calling. Sólo devuelve JSON.
 - El schema enumera en cada request candidate IDs, fact revision IDs, intents y actions exactos.
   Campos/IDs extra, conflicto, multi-intent o output inválido fallan hacia HumanTask.
+- Pedidos explícitos de coordinar/agendar una llamada o reunión junto con día, horario o
+  disponibilidad fuerzan `MEETING_OR_DATE`/`HumanTask` aunque el LLM devuelva una acción automática;
+  el detector es deliberadamente estrecho y no bloquea consultas generales de horarios, teléfono,
+  envíos o retiros.
 - Los hechos sólo provienen de revisiones guardadas/activas por administradores. El contexto global
   vigente se inyecta siempre como orientación, y los facts puntuales se recuperan con embeddings
   hasta un máximo pequeño; si la búsqueda es baja o ambigua, pueden llegar marcados como
   `may_be_irrelevant=true` y sólo pueden fundamentar una respuesta si el LLM los juzga claramente
   aplicables. No se extraen PDFs ni se inventan claims.
+- En una respuesta `REPLY`, el executor envía el `proposed_body` validado por el servicio y conserva
+  los facts seleccionados como evidencia de fundamento; nunca sustituye la redacción final por la
+  concatenación literal de tarjetas. Si la propuesta no tiene facts autorizados o falla cualquier
+  recheck, no se envía.
 - Contexto máximo 24.000 caracteres: mandatory completo o HumanTask. Se limita historia y no se
   persiste prompt gigante/cuerpos duplicados en logs.
 - Emails candidatos se extraen literalmente, máximo diez, con región. No se reconstruyen
@@ -121,7 +129,9 @@ unsubscribe, bounce, restricción, HumanTask abierto o cambio de contexto humano
 el efecto. Una respuesta automática posterior en otro hilo del mismo Contacto no cuenta como cambio
 humano nuevo para invalidar una decisión ya preparada.
 Una respuesta manual sólo limpia la tarea de revisión asociada después de confirmación Gmail
-`SENT`; si falla o queda ambigua, la alerta no se oculta.
+`SENT`; esto incluye una respuesta escrita directamente en Gmail que el sync identifica por la
+marca `SENT` y por sus headers de hilo. Esa respuesta cancela efectos automáticos que aún estén en
+cola. Si falla o queda ambigua, la alerta no se oculta.
 
 Límites automáticos: tres replies por Conversation en 24 h móviles y veinte por Workspace/día,
 reservados transaccionalmente. Meeting/dates, price/quote, negotiation, complaints, legal/privacy,
@@ -137,9 +147,10 @@ No hay override de unsubscribe ni Contact exclusion.
 - INITIAL/REMINDER reservan email/fecha local para evitar dos campañas el mismo día.
 - Timeout ambiguo pasa a RECONCILING y busca Message-ID antes de retry.
 - Sync sólo persiste mensajes ligados a threads/headers propios o a remitentes que coinciden con
-  EmailAddress válido de un Contacto existente. No importa desconocidos ni crea Contactos desde un
-  remitente nuevo. `gmail.readonly` conserva riesgo potencial de acceso amplio y puede exigir
-  verificación Google.
+  EmailAddress válido de un Contacto existente. También proyecta un mensaje con marca `SENT` como
+  respuesta manual sólo cuando responde a un inbound conocido; no importa envíos propios no
+  relacionados ni crea Contactos desde un remitente nuevo. `gmail.readonly` conserva riesgo
+  potencial de acceso amplio y puede exigir verificación Google.
 - Un email de alerta humana usa asunto genérico y link seguro; nunca inbound body, subject, contact
   name o dirección. Dashboard task persiste aunque notification falle.
 - Unsubscribe se aplica antes de IA, es irreversible y bloquea todo efecto al scope aplicable.

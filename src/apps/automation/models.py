@@ -385,6 +385,7 @@ class ReplyDecision(TimestampedUUIDModel):
         AUTHORIZED = "AUTHORIZED", "Autorizada"
         EXECUTING = "EXECUTING", "Enviando"
         COMPLETED = "COMPLETED", "Respondido automáticamente"
+        MANUAL_REPLY_RECORDED = "MANUAL_REPLY_RECORDED", "Respondido manualmente"
         HUMAN_REQUIRED = "HUMAN_REQUIRED", "Necesita que lo revises"
         REJECTED_POLICY = "REJECTED_POLICY", "No autorizada por seguridad"
         FAILED = "FAILED", "No se pudo analizar"

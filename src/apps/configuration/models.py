@@ -45,6 +45,13 @@ DEFAULT_AUTOMATIC_REPLY_PROMPT = "\n\n".join(
         "datos sean relevantes para esa consulta. Si el cliente pregunta por envíos, "
         "respondé si se hacen envíos y pedí ubicación/datos de entrega sólo si hace falta "
         "para seguir.",
+        "Regla especial para coordinación humana: si el mail nuevo pide coordinar, agendar, "
+        "programar o confirmar una llamada o reunión, o pregunta qué día/horario tiene "
+        "disponible el equipo, la acción debe ser HUMAN con intent MEETING_OR_DATE y sin "
+        "proposed_body. No respondas pidiendo los horarios del cliente ni prometas ajustar "
+        "la agenda del equipo. Esta regla no aplica a consultas informativas generales, "
+        "como horario de atención, teléfono, zonas de envío o cómo retirar mercadería, "
+        "que sólo se responden si hay información aprobada.",
         "No inventes precios, disponibilidad, plazos, condiciones comerciales, reuniones, "
         "garantías, capacidades técnicas ni datos de productos que no estén en la "
         "información aprobada. No prometas que algo se puede fabricar, conseguir, entregar "

@@ -37,6 +37,7 @@ from apps.automation.notifications import (
     reconcile_notification,
 )
 from apps.automation.services import (
+    _policy_result,
     approve_global_knowledge_context_revision,
     create_global_knowledge_context_revision,
     process_inbound_decision,
@@ -93,6 +94,21 @@ class _RiskyNoActionProvider:
             candidate_id=None,
             fact_revision_ids=(),
             proposed_body=None,
+            human_reason=None,
+        )
+
+
+class _MisclassifiedSchedulingProvider:
+    def decide_reply(self, request: ReplyDecisionRequest) -> ReplyDecisionResult:
+        fact = request.facts[0]
+        return ReplyDecisionResult(
+            classification="INTERESTED",
+            intent="APPROVED_PRODUCT_INFORMATION",
+            action="REPLY",
+            confidence=0.99,
+            candidate_id=None,
+            fact_revision_ids=(fact.revision_id,),
+            proposed_body="Podemos coordinar una llamada y ajustar nuestra agenda.",
             human_reason=None,
         )
 
@@ -365,6 +381,82 @@ def test_reply_decision_uses_configured_writing_instructions(
     assert "evitá listar tarjetas" not in str(decision.context_manifest)
 
 
+@pytest.mark.parametrize(
+    ("body", "requires_human"),
+    (
+        (
+            "Me gustaría coordinar una llamada. ¿Qué día y horario tienen disponibles?",
+            True,
+        ),
+        ("¿Podemos agendar una reunión para conversar sobre la compra?", True),
+        ("¿Cuál es el horario de atención para retirar mercadería?", False),
+        ("¿Tienen un teléfono para llamar?", False),
+    ),
+)
+def test_scheduling_guardrail_only_matches_explicit_human_coordination(
+    body: str,
+    requires_human: bool,
+) -> None:
+    state, reason = _policy_result(
+        ReplyDecisionResult(
+            classification="INTERESTED",
+            intent="APPROVED_PRODUCT_INFORMATION",
+            action="REPLY",
+            confidence=0.99,
+            candidate_id=None,
+            fact_revision_ids=("fact-1",),
+            proposed_body="Respuesta basada en un dato aprobado.",
+            human_reason=None,
+        ),
+        candidates=(),
+        inbound_text=body,
+    )
+
+    assert (state == ReplyDecision.State.HUMAN_REQUIRED) is requires_human
+    assert reason == ("MEETING_OR_DATE" if requires_human else "")
+
+
+@pytest.mark.django_db
+def test_clear_scheduling_request_overrides_misclassified_llm_action(
+    owner,
+    private_catalog_dir,
+    django_capture_on_commit_callbacks,
+    monkeypatch,
+) -> None:
+    scenario = _scenario(
+        owner,
+        private_catalog_dir=private_catalog_dir,
+        inbound_body=(
+            "Me gustaría coordinar una llamada para conversar sobre su experiencia. "
+            "¿Qué día y horario tienen disponibles?"
+        ),
+    )
+    scenario.decision.delete()
+    queued: list[str] = []
+    monkeypatch.setattr(
+        "apps.automation.tasks.execute_reply_decision_task.delay",
+        lambda value: queued.append(value),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        decision = process_inbound_decision(
+            scenario.inbound.pk,
+            provider=_MisclassifiedSchedulingProvider(),
+            resolver=MockMXResolver(),
+        )
+
+    assert decision is not None
+    assert decision.action == "REPLY"
+    assert decision.state == ReplyDecision.State.HUMAN_REQUIRED
+    assert decision.human_reason == "MEETING_OR_DATE"
+    assert queued == []
+    assert HumanTask.objects.filter(
+        decision=decision,
+        reason="MEETING_OR_DATE",
+        status=HumanTask.Status.OPEN,
+    ).exists()
+
+
 @pytest.mark.django_db
 def test_shadow_decision_never_enqueues_a_gmail_effect(
     owner,
@@ -555,7 +647,7 @@ def test_cross_thread_automatic_reply_after_decision_does_not_stale_policy_reche
     SEND_KILL_SWITCH=False,
     AUTO_REPLY_KILL_SWITCH=False,
 )
-def test_live_reply_sends_only_selected_approved_fact_text_not_llm_extra_claims(
+def test_live_reply_sends_llm_proposed_body_after_selected_fact_validation(
     owner,
     private_catalog_dir,
     monkeypatch,
@@ -563,7 +655,10 @@ def test_live_reply_sends_only_selected_approved_fact_text_not_llm_extra_claims(
     scenario = _scenario(
         owner,
         private_catalog_dir=private_catalog_dir,
-        proposed_body="Tenemos veinte años de experiencia. Además, tenemos precios especiales.",
+        proposed_body=(
+            "Tenemos veinte años de experiencia. Quedamos a disposición para ampliar la "
+            "información."
+        ),
     )
     _allow_test_live_gate(monkeypatch)
     provider = FakeGmailProvider(persist=True)
@@ -575,8 +670,7 @@ def test_live_reply_sends_only_selected_approved_fact_text_not_llm_extra_claims(
     message = OutboundMessage.objects.get(kind=OutboundMessage.Kind.AUTOMATIC_REPLY)
     fake = FakeGmailMessage.objects.get(rfc_message_id=message.message_id)
     parsed = BytesParser(policy=policy.default).parsebytes(bytes(fake.raw_message))
-    assert parsed.get_content().strip() == "Tenemos veinte años de experiencia."
-    assert "precios especiales" not in parsed.get_content()
+    assert parsed.get_content().strip() == scenario.decision.proposed_body
 
 
 @pytest.mark.django_db

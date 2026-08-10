@@ -5,6 +5,7 @@ import uuid
 from decimal import Decimal
 from email.utils import getaddresses
 from functools import partial
+from hashlib import sha256
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -12,7 +13,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.audit.services import record_event
-from apps.campaigns.models import OutboundMessage
+from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.services import normalize_email
 from apps.configuration.integrations import redact_provider_error
 from apps.contacts.models import EmailAddress
@@ -99,6 +100,191 @@ def _related_outbound(
     )
 
 
+def _related_inbound(
+    connection: GmailConnection,
+    candidate: GmailInboundMessage,
+) -> InboundMessage | None:
+    """Find the inbound that a manual Gmail reply answers."""
+
+    referenced = normalize_references((candidate.in_reply_to, *candidate.references))
+    if referenced:
+        parent = (
+            InboundMessage.objects.filter(
+                connection=connection,
+                contact__isnull=False,
+                conversation__isnull=False,
+                message_id__in=referenced,
+            )
+            .order_by("-external_at", "-created_at")
+            .first()
+        )
+        if parent is not None:
+            return parent
+    return (
+        InboundMessage.objects.filter(
+            connection=connection,
+            contact__isnull=False,
+            conversation__isnull=False,
+            gmail_thread_id=candidate.thread_id,
+        )
+        .order_by("-external_at", "-created_at")
+        .first()
+    )
+
+
+def _manual_reply_recipient(
+    connection: GmailConnection,
+    candidate: GmailInboundMessage,
+    parent: InboundMessage,
+) -> tuple[str, str] | None:
+    account_email = normalize_email(connection.email)
+    values = [value for item in candidate.recipients for value in getaddresses([item])]
+    values.extend(getaddresses([parent.sender]))
+    for _, literal in values:
+        try:
+            normalized = normalize_email(literal)
+        except ValidationError:
+            continue
+        if normalized != account_email:
+            return literal.strip() or normalized, normalized
+    return None
+
+
+def _apply_manual_gmail_reply_effect(
+    *,
+    message: OutboundMessage,
+    parent: InboundMessage,
+    connection: GmailConnection,
+) -> None:
+    """Make an externally sent Gmail reply authoritative for the parent inbound."""
+
+    from apps.automation.models import ReplyDecision
+    from apps.automation.services import resolve_reply_review_tasks_for_manual_reply
+
+    pending_states = (
+        OutboundMessage.State.PREPARED,
+        OutboundMessage.State.REVIEW_READY,
+        OutboundMessage.State.QUEUED,
+    )
+    OutboundMessage.objects.filter(
+        parent_inbound=parent,
+        kind__in=(
+            OutboundMessage.Kind.AUTOMATIC_REPLY,
+            OutboundMessage.Kind.REFERRED_PROPOSAL,
+            OutboundMessage.Kind.REDIRECT_ACK,
+        ),
+        state__in=pending_states,
+    ).update(
+        state=OutboundMessage.State.CANCELLED,
+        next_attempt_at=None,
+        error="Se canceló porque ya había una respuesta manual en Gmail.",
+        updated_at=timezone.now(),
+    )
+
+    decision = ReplyDecision.objects.select_for_update().filter(inbound=parent).first()
+    if decision is not None and decision.state not in {
+        ReplyDecision.State.COMPLETED,
+        ReplyDecision.State.MANUAL_REPLY_RECORDED,
+    }:
+        decision.state = ReplyDecision.State.MANUAL_REPLY_RECORDED
+        decision.human_reason = "MANUAL_REPLY_GMAIL"
+        decision.error = "La conversación ya fue respondida manualmente desde Gmail."
+        decision.save(update_fields=("state", "human_reason", "error", "updated_at"))
+
+    resolve_reply_review_tasks_for_manual_reply(
+        inbound_id=parent.pk,
+        workspace_id=connection.workspace_id,
+        actor=connection.owner,
+    )
+    record_event(
+        action="gmail.manual_reply_imported",
+        entity=message,
+        actor=connection.owner,
+        after={
+            "inbound_id": str(parent.pk),
+            "cancelled_automatic": True,
+        },
+    )
+
+
+def _persist_manual_sent_candidate(
+    *,
+    connection: GmailConnection,
+    candidate: GmailInboundMessage,
+) -> OutboundMessage | None:
+    """Persist a manual Gmail send only when it answers a known inbound."""
+
+    rfc_message_id = normalize_message_id(candidate.rfc_message_id)
+    if InboundMessage.objects.filter(gmail_message_id=candidate.message_id).exists():
+        return None
+    known_outbound = Q(gmail_message_id=candidate.message_id)
+    if rfc_message_id:
+        known_outbound |= Q(message_id=rfc_message_id)
+    if OutboundMessage.objects.filter(known_outbound).exists():
+        return None
+    parent = _related_inbound(connection, candidate)
+    if parent is None or parent.contact_id is None or parent.conversation_id is None:
+        return None
+    recipient_data = _manual_reply_recipient(connection, candidate, parent)
+    if recipient_data is None:
+        return None
+    recipient, normalized_recipient = recipient_data
+    root = parent.related_outbound
+    email_address = EmailAddress.objects.filter(
+        workspace_id=connection.workspace_id,
+        normalized_email=normalized_recipient,
+    ).first()
+    body_text = candidate.body_text.strip() or "(Mensaje enviado sin cuerpo de texto legible)"
+    references = normalize_references((candidate.in_reply_to, *candidate.references))
+    key_digest = sha256(candidate.message_id.encode("utf-8")).hexdigest()
+    try:
+        message = OutboundMessage.objects.create(
+            kind=OutboundMessage.Kind.MANUAL_REPLY,
+            campaign=root.campaign if root is not None else None,
+            organization=parent.organization,
+            campaign_enrollment=(root.campaign_enrollment if root is not None else None),
+            contact=parent.contact,
+            conversation=parent.conversation,
+            prospect=root.prospect if root is not None else None,
+            prospect_email=root.prospect_email if root is not None else None,
+            email_address=email_address,
+            parent_inbound=parent,
+            recipient=recipient[:320],
+            recipient_normalized=normalized_recipient,
+            subject=(candidate.subject or (root.subject if root is not None else parent.subject))[
+                :255
+            ],
+            body_text=body_text,
+            content_hash=sha256(body_text.encode("utf-8")).hexdigest(),
+            state=OutboundMessage.State.SENT,
+            delivery_mode=(root.delivery_mode if root is not None else Campaign.DeliveryMode.LIVE),
+            idempotency_key=f"manual-gmail:{key_digest}",
+            message_id=rfc_message_id,
+            in_reply_to=normalize_message_id(candidate.in_reply_to),
+            references=list(references),
+            gmail_message_id=candidate.message_id,
+            gmail_thread_id=candidate.thread_id,
+            sent_at=candidate.received_at,
+        )
+    except IntegrityError:
+        return None
+
+    from apps.contacts.models import Contact, Conversation
+
+    Contact.objects.filter(pk=parent.contact_id).filter(
+        Q(last_interaction_at__isnull=True) | Q(last_interaction_at__lt=candidate.received_at)
+    ).update(last_interaction_at=candidate.received_at, updated_at=timezone.now())
+    Conversation.objects.filter(pk=parent.conversation_id).filter(
+        Q(last_message_at__isnull=True) | Q(last_message_at__lt=candidate.received_at)
+    ).update(last_message_at=candidate.received_at, updated_at=timezone.now())
+    _apply_manual_gmail_reply_effect(
+        message=message,
+        parent=parent,
+        connection=connection,
+    )
+    return message
+
+
 def _direct_contact_sender(
     connection: GmailConnection,
     sender: str,
@@ -133,7 +319,9 @@ def _persist_candidate(
     *,
     connection: GmailConnection,
     candidate: GmailInboundMessage,
-) -> InboundMessage | None:
+) -> InboundMessage | OutboundMessage | None:
+    if candidate.is_sent:
+        return _persist_manual_sent_candidate(connection=connection, candidate=candidate)
     if InboundMessage.objects.filter(gmail_message_id=candidate.message_id).exists():
         return None
     if OutboundMessage.objects.filter(gmail_message_id=candidate.message_id).exists():

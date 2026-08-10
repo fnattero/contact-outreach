@@ -224,19 +224,10 @@ def _selected_facts_error(decision: ReplyDecision) -> str:
     return ""
 
 
-def _grounded_reply_body(decision: ReplyDecision) -> str:
-    """Render LIVE copy from approved fact text only; LLM prose remains review evidence."""
+def _proposed_reply_body(decision: ReplyDecision) -> str:
+    """Use the LLM's validated, fact-grounded prose as the LIVE reply body."""
 
-    selected = {str(revision.pk): revision for revision in decision.selected_facts.all()}
-    ordered_ids = [
-        str(item.get("revision_id"))
-        for item in decision.context_manifest.get("facts", [])
-        if isinstance(item, dict)
-    ]
-    texts = [
-        selected[revision_id].text.strip() for revision_id in ordered_ids if revision_id in selected
-    ]
-    return "\n\n".join(text for text in texts if text)
+    return decision.proposed_body.strip()
 
 
 def _new_context_since_decision(
@@ -689,6 +680,7 @@ def authorize_reply_decision(decision_id: uuid.UUID | str) -> OutboundMessage | 
         ReplyDecision.State.FAILED,
         ReplyDecision.State.NO_ACTION,
         ReplyDecision.State.SHADOW_RECORDED,
+        ReplyDecision.State.MANUAL_REPLY_RECORDED,
     }:
         return decision.state
     existing = (
@@ -795,7 +787,7 @@ def authorize_reply_decision(decision_id: uuid.UUID | str) -> OutboundMessage | 
             kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
             email=email,
             subject=root.subject if root is not None else decision.inbound.subject,
-            body_text=_grounded_reply_body(decision),
+            body_text=_proposed_reply_body(decision),
             semantic_key=semantic_key,
         )
         values.update(
@@ -1108,7 +1100,7 @@ def _automatic_outbound_integrity_error(
     if message.kind == OutboundMessage.Kind.AUTOMATIC_REPLY:
         if (
             message.subject != (root.subject if root is not None else decision.inbound.subject)
-            or message.body_text != _grounded_reply_body(decision)
+            or message.body_text != _proposed_reply_body(decision)
             or message.signature_snapshot
             or message.content_hash
         ):

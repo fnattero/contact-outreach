@@ -108,9 +108,12 @@ def _conversation_automation_label(
     conversation: Conversation | None,
     decisions: list[ReplyDecision],
     open_tasks: int,
+    manual_reply_recorded: bool = False,
 ) -> str:
     if open_tasks:
         return "Necesita que lo revises"
+    if manual_reply_recorded:
+        return "Respondido manualmente"
     if conversation is not None and conversation.automation_suspended:
         return "Respuesta automática pausada"
     if not decisions:
@@ -118,6 +121,8 @@ def _conversation_automation_label(
     decision = max(decisions, key=lambda item: item.created_at)
     if decision.state == ReplyDecision.State.COMPLETED:
         return "Respondido automáticamente"
+    if decision.state == ReplyDecision.State.MANUAL_REPLY_RECORDED:
+        return "Respondido manualmente"
     if decision.state == ReplyDecision.State.SHADOW_RECORDED:
         return "Modo de observación: se preparó una sugerencia y no se envió"
     if decision.state == ReplyDecision.State.NO_ACTION:
@@ -211,6 +216,8 @@ def conversation_timelines(
                 simulated=outbound.state == OutboundMessage.State.DRY_RUN_COMPLETED,
             )
         )
+        if outbound.kind == OutboundMessage.Kind.MANUAL_REPLY:
+            group["manual_reply_recorded"] = True
     for inbound in inbound_messages:
         group = group_for(inbound.conversation_id, inbound.gmail_thread_id, inbound.subject)
         root = inbound.related_outbound
@@ -261,6 +268,7 @@ def conversation_timelines(
                     conversation,
                     group_decisions,
                     group_task_count,
+                    bool(group.get("manual_reply_recorded")),
                 ),
                 open_task_count=group_task_count,
             )

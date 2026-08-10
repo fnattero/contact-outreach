@@ -150,6 +150,8 @@ El request incluye:
 - lista de `FactRevisionRef(id, version, text)` aprobada y seleccionada para esta consulta;
 - enums dinámicos de candidate/fact IDs y actions/intents;
 - instrucciones fijas de que reuniones, precios y demás categorías de riesgo deben pedir humano.
+  La instrucción distingue una coordinación explícita de una consulta informativa general; además,
+  el dominio aplica un fallback estrecho para llamada/reunión más coordinación o disponibilidad.
 
 El hash canónico cubre IDs/versiones/orden/textos efectivos. DB persiste sólo manifest con IDs,
 versiones, char counts, estado de retrieval, scores redondeados y hashes; el cuerpo ya vive en sus
@@ -172,8 +174,10 @@ human_reason | null
 
 El servicio rechaza candidate/fact IDs no presentes, duplicados, region no permitida, body cuando
 la acción no lo admite, ausencia de fact para respuestas fundamentadas, intent/action
-incompatibles y confidence fuera de rango. El raw inválido no se almacena como decisión válida; el
-error se redacta. Reintentos técnicos son acotados y no convierten un fallo en respuesta genérica.
+incompatibles y confidence fuera de rango. Para `REPLY`, el `proposed_body` validado se conserva y
+se usa como cuerpo final; los `fact_revision_ids` prueban el fundamento y no se renderizan como
+texto final. El raw inválido no se almacena como decisión válida; el error se redacta. Reintentos
+técnicos son acotados y no convierten un fallo en respuesta genérica.
 
 Allowlist auto: `APPROVED_PRODUCT_INFORMATION`, `APPROVED_COMPANY_FACT`,
 `GROUNDED_SIMPLE_CLARIFICATION`, `EXPLICIT_PROPOSAL_REDIRECTION`. `POLITE_ACKNOWLEDGEMENT` y
@@ -241,8 +245,12 @@ se importan adjuntos no textuales. Gmail/Message IDs hacen sync repetible. En la
 4. promover Contact humano, Conversation y cancelar reminders;
 5. actualizar cursor.
 
-Sólo `transaction.on_commit` encola candidate extraction/decision. Fallar LLM no revierte inbound
-ni cursor.
+Los adaptadores marcan `GmailInboundMessage.is_sent` desde la etiqueta Gmail `SENT`. Un mensaje
+enviado por la cuenta se ignora si ya coincide con un `OutboundMessage` propio; si sus headers o
+thread responden a un inbound conocido de un Contacto, se persiste como `MANUAL_REPLY` `SENT`, se
+resuelve la tarea `REPLY_REVIEW` del inbound y se cancelan respuestas automáticas aún en cola. Sólo
+`transaction.on_commit` encola candidate extraction/decision para inbounds sin una respuesta
+manual confirmada. Fallar LLM no revierte inbound ni cursor.
 
 ## 8. Alertas por Gmail
 

@@ -310,7 +310,7 @@ class FakeGmailProvider:
             current = int(cursor.history_id) if cursor is not None else -1
         except ValueError as exc:
             raise GmailHistoryExpired("El historyId fake ya no es válido.") from exc
-        queryset = FakeGmailMessage.objects.filter(direction=FakeGmailMessage.Direction.INBOUND)
+        queryset = FakeGmailMessage.objects.all()
         if cursor is not None:
             queryset = queryset.filter(history_id__gt=current)
         records = list(queryset.order_by("history_id")[:1000])
@@ -329,6 +329,7 @@ class FakeGmailProvider:
                 body_html=item.body_html,
                 received_at=item.received_at or item.created_at or timezone.now(),
                 headers={str(key): str(value) for key, value in item.headers.items()},
+                is_sent=item.direction == FakeGmailMessage.Direction.OUTBOUND,
             )
             for item in records
         )
@@ -393,6 +394,63 @@ class FakeGmailProvider:
             body_html=body_html,
             received_at=record.received_at or timezone.now(),
             headers={str(key): str(value) for key, value in headers.items()},
+        )
+
+    def inject_sent(
+        self,
+        *,
+        thread_id: str,
+        recipient: str,
+        subject: str,
+        body_text: str,
+        in_reply_to: str = "",
+        references: tuple[str, ...] = (),
+        body_html: str = "",
+        rfc_message_id: str = "",
+    ) -> GmailInboundMessage:
+        """Add a manual Gmail reply to the durable fake mailbox."""
+        if not self.persist:
+            raise ValueError("La inyección fake durable requiere persist=True.")
+        from django.utils import timezone
+
+        from apps.mailbox.models import FakeGmailMessage
+
+        history_id = int(self._current_history_id()) + 1
+        stable_rfc_id = rfc_message_id or f"<fake-sent-{history_id}@example.invalid>"
+        digest = sha256(stable_rfc_id.encode()).hexdigest()[:16]
+        headers: dict[str, object] = {
+            "Message-ID": stable_rfc_id,
+            "In-Reply-To": in_reply_to,
+            "References": list(references),
+        }
+        record = FakeGmailMessage.objects.create(
+            rfc_message_id=stable_rfc_id,
+            gmail_message_id=f"fake-sent-{digest}",
+            gmail_thread_id=thread_id,
+            direction=FakeGmailMessage.Direction.OUTBOUND,
+            sender=self.account_email,
+            recipient=recipient,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            headers=headers,
+            received_at=timezone.now(),
+            history_id=history_id,
+        )
+        return GmailInboundMessage(
+            message_id=record.gmail_message_id,
+            thread_id=record.gmail_thread_id,
+            rfc_message_id=record.rfc_message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            sender=record.sender,
+            recipients=(recipient,),
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            received_at=record.received_at or timezone.now(),
+            headers={str(key): str(value) for key, value in headers.items()},
+            is_sent=True,
         )
 
 

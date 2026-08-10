@@ -108,8 +108,17 @@ class GmailHTTPTransport:
         raise AssertionError("unreachable")
 
     @staticmethod
-    def _raise_http(status: int, payload: dict[str, Any], retry_after: str | None) -> None:
-        message = str(payload.get("error", {}).get("message", "Error Gmail"))[:300]
+    def _raise_http(status: int, payload: dict[str, Any] | Any, retry_after: str | None) -> None:
+        error = payload.get("error") if isinstance(payload, dict) else payload
+        if isinstance(error, dict):
+            message = str(
+                error.get("message")
+                or error.get("error_description")
+                or error.get("status")
+                or "Error Gmail"
+            )[:300]
+        else:
+            message = str(error or "Error Gmail")[:300]
         if status in {401, 403}:
             if status == 401:
                 raise AuthenticationError(message)
@@ -395,6 +404,7 @@ class GmailAPIProvider(GmailProvider):
         thread_id = str(response.payload.get("threadId", ""))
         if not gmail_message_id or not thread_id:
             raise ValidationProviderError("Gmail devolvió un mensaje sin IDs.")
+        label_ids = response.payload.get("labelIds", [])
         return GmailInboundMessage(
             message_id=gmail_message_id,
             thread_id=thread_id,
@@ -410,6 +420,7 @@ class GmailAPIProvider(GmailProvider):
             body_html="\n".join(html_parts),
             received_at=received_at,
             headers=headers,
+            is_sent=isinstance(label_ids, list) and "SENT" in label_ids,
         )
 
     def _get_text_attachment(self, message_id: str, attachment_id: str) -> str:

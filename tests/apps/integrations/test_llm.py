@@ -27,6 +27,7 @@ from apps.integrations.llm import (
     reply_decision_json_schema,
     validate_llm_base_url,
 )
+from apps.integrations.llm_inputs import reply_decision_messages
 
 
 def _raw_output() -> dict[str, Any]:
@@ -271,6 +272,14 @@ def test_openai_compatible_decision_uses_bounded_context_and_strict_schema() -> 
     assert "sólo puede afirmar hechos incluidos" in messages[0]["content"]
     assert "no agregues precios" in messages[0]["content"]
     assert "No pegues tarjetas completas" in messages[0]["content"]
+
+
+def test_reply_prompt_routes_explicit_scheduling_to_human() -> None:
+    system_prompt = reply_decision_messages(_decision_request())[0]["content"]
+
+    assert "coordinar, agendar, programar" in system_prompt
+    assert "HUMAN con intent MEETING_OR_DATE" in system_prompt
+    assert "No respondas pidiendo la disponibilidad del cliente" in system_prompt
 
 
 def test_reply_provider_rejects_oversized_serialized_input_before_transport() -> None:
