@@ -98,12 +98,13 @@ redirección HTTPS, proxy confiable, HSTS gradual, CSP sin scripts inline, prote
 referrer y tipos de contenido. Los detalles de integraciones y salud degradada son sólo para
 administradores; liveness y readiness públicas no revelan diagnósticos.
 
-Esto no constituye por sí solo un despliegue público: Compose mantiene `HOST_BIND=127.0.0.1` por
-defecto y este alcance no aprovisiona DNS, certificado TLS ni reverse proxy. Antes de publicar debe
-aprobarse un plan HTTPS separado. Como mínimo, ese despliegue deberá definir `APP_ENV=production`,
-`PUBLIC_BASE_URL=https://…`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, cookies y
-redirección seguras; `DJANGO_PROXY_HTTPS=true` sólo se admite junto con la IP o red CIDR exacta del
-proxy en `DJANGO_TRUSTED_PROXY_IPS`. Validar luego con `python src/manage.py check --deploy`.
+Compose mantiene `HOST_BIND=127.0.0.1` por defecto. Para Railway, seguir
+[`docs/RAILWAY_DEPLOYMENT.md`](docs/RAILWAY_DEPLOYMENT.md): usa el `PORT` inyectado, `DATABASE_URL`,
+Redis interno, servicios separados para web/Celery/beat, migración pre-deploy y un volumen privado.
+En el servicio web público configurar `APP_ENV=production`, `PUBLIC_BASE_URL=https://…`, hosts y
+orígenes exactos, cookies/redirect seguras, `DJANGO_PROXY_HTTPS=true` y
+`DJANGO_RAILWAY_PROXY=true`. Validar con `python src/manage.py check --deploy` y primero desplegar
+en staging con todos los kill switches activos.
 
 ## Datos de demostración
 

@@ -22,6 +22,21 @@ def _trusted_proxy(remote_address: str) -> bool:
     return False
 
 
+def _trusted_railway_proxy(request: HttpRequest) -> bool:
+    """Trust only Railway's forwarded HTTPS marker when explicitly configured.
+
+    Railway's public proxy always sends X-Forwarded-Proto=https and a
+    X-Railway-Request-Id. The opt-in is intentionally separate from the CIDR
+    allowlist because Railway edge addresses are not a customer-configurable
+    static range.
+    """
+    return bool(
+        getattr(settings, "TRUST_RAILWAY_PROXY_HEADERS", False)
+        and request.META.get("HTTP_X_RAILWAY_REQUEST_ID")
+        and request.META.get("HTTP_X_FORWARDED_PROTO") == "https"
+    )
+
+
 class TrustedProxySecurityMiddleware:
     """Honor forwarded HTTPS only when the immediate peer is explicitly trusted."""
 
@@ -29,8 +44,16 @@ class TrustedProxySecurityMiddleware:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        if not _trusted_proxy(request.META.get("REMOTE_ADDR", "")):
+        trusted_by_cidr = _trusted_proxy(request.META.get("REMOTE_ADDR", ""))
+        trusted_by_railway = _trusted_railway_proxy(request)
+        if not trusted_by_cidr and not trusted_by_railway:
             request.META.pop("HTTP_X_FORWARDED_PROTO", None)
+            request.META.pop("HTTP_X_FORWARDED_HOST", None)
+            request.META.pop("HTTP_X_FORWARDED_FOR", None)
+        elif trusted_by_railway and not trusted_by_cidr:
+            # The Railway marker is only used to establish HTTPS. Do not
+            # accept client-address or host forwarding without a CIDR trust
+            # boundary, because those values influence auditing and throttles.
             request.META.pop("HTTP_X_FORWARDED_HOST", None)
             request.META.pop("HTTP_X_FORWARDED_FOR", None)
         return self.get_response(request)

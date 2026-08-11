@@ -198,7 +198,8 @@ separado; restore prueba descifrado e integridad sin imprimir valores.
 - Matriz anonymous/ADMIN/VENDEDOR y service-level authorization aprobada.
 - Lockout quinto intento/IP spray, TOTP/recovery, last-admin y session invalidation aprobados.
 - Hosts/orígenes/proxy confiable/cookies/redirect/HSTS/CSP/headers y `check --deploy` aprobados.
-- Proxy TLS/certificados/monitoreo/runbook externos implementados; hasta entonces loopback.
+- Proxy Railway/TLS/certificados/monitoreo/runbook externos implementados y validados en staging;
+  hasta entonces no habilitar tráfico público ni `SEND_MODE=live`. Ver `docs/RAILWAY_DEPLOYMENT.md`.
 - Secrets scan, backup/restore y health privado aprobados.
 - Gmail scopes/app/refresh token, reconciliación y límites aprobados.
 - PDFs/contenido/firma/cobertura Overture y same-day guard aprobados.

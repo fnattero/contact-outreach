@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -25,14 +25,100 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [part.strip() for part in os.getenv(name, default).split(",") if part.strip()]
 
 
+def _database_from_url(database_url: str) -> dict[str, object]:
+    """Translate a Railway/Django PostgreSQL URL into Django settings."""
+    try:
+        parsed = urlsplit(database_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ImproperlyConfigured("DATABASE_URL has an invalid port") from exc
+
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured("DATABASE_URL must use postgres:// or postgresql://")
+    if not parsed.hostname or not parsed.path.strip("/"):
+        raise ImproperlyConfigured("DATABASE_URL must include a host and database name")
+    if parsed.fragment:
+        raise ImproperlyConfigured("DATABASE_URL must not contain a fragment")
+    if APP_ENV == "production" and (not parsed.username or not parsed.password):
+        raise ImproperlyConfigured("DATABASE_URL must include a database user and password")
+
+    database: dict[str, object] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": unquote(parsed.path.lstrip("/")),
+        "USER": unquote(parsed.username or ""),
+        "PASSWORD": unquote(parsed.password or ""),
+        "HOST": parsed.hostname,
+        "PORT": port or 5432,
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
+    }
+    options = {
+        key: values[-1]
+        for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+        if key in {"sslmode", "sslrootcert", "sslcert", "sslkey", "gssencmode"} and values
+    }
+    if options:
+        database["OPTIONS"] = options
+    return database
+
+
+def _database_from_environment() -> dict[str, object]:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        return _database_from_url(database_url)
+
+    host = os.getenv("PGHOST", os.getenv("POSTGRES_HOST", "postgres"))
+    name = os.getenv("PGDATABASE", os.getenv("POSTGRES_DB", "contact_outreach"))
+    user = os.getenv("PGUSER", os.getenv("POSTGRES_USER", "contact_outreach"))
+    password = os.getenv("PGPASSWORD", os.getenv("POSTGRES_PASSWORD", ""))
+    port = int(os.getenv("PGPORT", os.getenv("POSTGRES_PORT", "5432")))
+    if APP_ENV == "production":
+        if not os.getenv("PGHOST") and not os.getenv("POSTGRES_HOST"):
+            raise ImproperlyConfigured(
+                "DATABASE_URL or an explicit PGHOST/POSTGRES_HOST is required in production"
+            )
+        if not password:
+            raise ImproperlyConfigured(
+                "DATABASE_URL or PGPASSWORD/POSTGRES_PASSWORD is required in production"
+            )
+
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": name,
+        "USER": user,
+        "PASSWORD": password,
+        "HOST": host,
+        "PORT": port,
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
+    }
+
+
+def _validate_redis_url(redis_url: str) -> str:
+    if not redis_url:
+        raise ImproperlyConfigured("REDIS_URL is required in production")
+    parsed = urlsplit(redis_url)
+    if parsed.scheme not in {"redis", "rediss"} or not parsed.hostname:
+        raise ImproperlyConfigured("REDIS_URL must use redis:// or rediss:// with a host")
+    return redis_url
+
+
 APP_ENV = os.getenv("APP_ENV", "development")
 DEBUG = env_bool("DJANGO_DEBUG", APP_ENV == "development")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "development-only-change-me")
 
-if APP_ENV == "production" and SECRET_KEY == "development-only-change-me":
-    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set outside development")
+if APP_ENV == "production":
+    if DEBUG:
+        raise ImproperlyConfigured("DJANGO_DEBUG must be false in production")
+    if SECRET_KEY == "development-only-change-me" or len(SECRET_KEY) < 50:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be a long, randomly generated production secret"
+        )
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+railway_public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+if railway_public_domain and railway_public_domain not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(railway_public_domain)
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 if APP_ENV == "production":
     if not ALLOWED_HOSTS or any(
@@ -136,7 +222,10 @@ WSGI_APPLICATION = "contact_outreach.wsgi.application"
 ASGI_APPLICATION = "contact_outreach.asgi.application"
 
 DATABASES: dict[str, dict[str, object]]
-if os.getenv("DATABASE_ENGINE", "postgresql") == "sqlite":
+database_engine = os.getenv("DATABASE_ENGINE", "postgresql")
+if database_engine == "sqlite":
+    if APP_ENV == "production":
+        raise ImproperlyConfigured("SQLite is not supported in production")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -144,20 +233,12 @@ if os.getenv("DATABASE_ENGINE", "postgresql") == "sqlite":
         }
     }
 else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("POSTGRES_DB", "contact_outreach"),
-            "USER": os.getenv("POSTGRES_USER", "contact_outreach"),
-            "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
-            "HOST": os.getenv("POSTGRES_HOST", "postgres"),
-            "PORT": int(os.getenv("POSTGRES_PORT", "5432")),
-            "CONN_MAX_AGE": 60,
-            "CONN_HEALTH_CHECKS": True,
-        }
-    }
+    DATABASES = {"default": _database_from_environment()}
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+redis_url_environment = os.getenv("REDIS_URL", "").strip()
+REDIS_URL = redis_url_environment or "redis://redis:6379/0"
+if APP_ENV == "production":
+    REDIS_URL = _validate_redis_url(redis_url_environment)
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
@@ -204,6 +285,33 @@ LOGOUT_REDIRECT_URL = "login"
 
 TRUSTED_PROXY_IPS = env_list("DJANGO_TRUSTED_PROXY_IPS")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+PROXY_HTTPS = env_bool("DJANGO_PROXY_HTTPS", False)
+TRUST_RAILWAY_PROXY_HEADERS = env_bool("DJANGO_RAILWAY_PROXY", False)
+if TRUST_RAILWAY_PROXY_HEADERS and "healthcheck.railway.app" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("healthcheck.railway.app")
+if APP_ENV == "production":
+    try:
+        public_url = urlsplit(PUBLIC_BASE_URL)
+    except ValueError as exc:
+        raise ImproperlyConfigured("PUBLIC_BASE_URL is invalid") from exc
+    if (
+        public_url.scheme != "https"
+        or not public_url.hostname
+        or public_url.path not in {"", "/"}
+        or public_url.username
+        or public_url.password
+        or public_url.query
+        or public_url.fragment
+    ):
+        raise ImproperlyConfigured("PUBLIC_BASE_URL must be an exact HTTPS origin")
+    if public_url.hostname not in {host.split(":", 1)[0] for host in ALLOWED_HOSTS}:
+        raise ImproperlyConfigured("PUBLIC_BASE_URL host must be included in DJANGO_ALLOWED_HOSTS")
+    if not PROXY_HTTPS:
+        raise ImproperlyConfigured("DJANGO_PROXY_HTTPS=true is required in production")
+    if not TRUSTED_PROXY_IPS and not TRUST_RAILWAY_PROXY_HEADERS:
+        raise ImproperlyConfigured(
+            "Configure DJANGO_TRUSTED_PROXY_IPS or explicitly enable DJANGO_RAILWAY_PROXY"
+        )
 MFA_ENFORCEMENT_ENABLED = True
 
 SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE", "604800"))
@@ -222,10 +330,17 @@ SECURE_HSTS_SECONDS = int(
 )
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_HSTS_INCLUDE_SUBDOMAINS", False)
 SECURE_HSTS_PRELOAD = env_bool("DJANGO_HSTS_PRELOAD", False)
+if APP_ENV == "production" and (
+    not SESSION_COOKIE_SECURE
+    or not CSRF_COOKIE_SECURE
+    or not SECURE_SSL_REDIRECT
+    or SECURE_HSTS_SECONDS <= 0
+):
+    raise ImproperlyConfigured(
+        "Production requires secure cookies, HTTPS redirect, and a positive HSTS duration"
+    )
 USE_X_FORWARDED_HOST = False
-if env_bool("DJANGO_PROXY_HTTPS", False):
-    if not TRUSTED_PROXY_IPS:
-        raise ImproperlyConfigured("DJANGO_TRUSTED_PROXY_IPS is required for proxy HTTPS")
+if PROXY_HTTPS:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CSRF_FAILURE_VIEW = "apps.core.views.csrf_failure"
 
@@ -264,6 +379,10 @@ GMAIL_OAUTH_CLIENT_SECRET = os.getenv("GMAIL_OAUTH_CLIENT_SECRET", "")
 GMAIL_OAUTH_REDIRECT_URI = os.getenv("GMAIL_OAUTH_REDIRECT_URI", "")
 GMAIL_FAKE_ACCOUNT_EMAIL = os.getenv("GMAIL_FAKE_ACCOUNT_EMAIL", "owner@example.invalid")
 FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
+if APP_ENV == "production" and len(FIELD_ENCRYPTION_KEY) < 32:
+    raise ImproperlyConfigured(
+        "FIELD_ENCRYPTION_KEY must be a long, randomly generated production secret"
+    )
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL

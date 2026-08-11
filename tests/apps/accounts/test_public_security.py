@@ -60,6 +60,28 @@ def test_forwarded_https_is_honored_from_an_explicit_trusted_proxy_network() -> 
     assert response["Forwarded-Present"] == "True"
 
 
+@override_settings(
+    SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+    TRUST_RAILWAY_PROXY_HEADERS=True,
+    TRUSTED_PROXY_IPS=[],
+)
+def test_railway_proxy_honors_only_its_marked_https_header() -> None:
+    request = RequestFactory().get(
+        "/",
+        REMOTE_ADDR="198.51.100.8",
+        HTTP_X_RAILWAY_REQUEST_ID="request-1",
+        HTTP_X_FORWARDED_PROTO="https",
+        HTTP_X_FORWARDED_FOR="203.0.113.7",
+        HTTP_X_FORWARDED_HOST="evil.example",
+    )
+
+    response = TrustedProxySecurityMiddleware(_security_probe)(request)
+
+    assert response.content == b"secure"
+    assert response["Forwarded-Present"] == "False"
+    assert "HTTP_X_FORWARDED_HOST" not in request.META
+
+
 def test_browser_security_headers_are_applied_to_public_pages(client: Client) -> None:
     response = client.get(reverse("login"))
 
@@ -98,8 +120,12 @@ def test_production_settings_require_exact_https_origins_and_enable_hardening() 
             ),
             "DJANGO_ALLOWED_HOSTS": "outreach.example",
             "DJANGO_CSRF_TRUSTED_ORIGINS": "https://outreach.example",
+            "PUBLIC_BASE_URL": "https://outreach.example",
             "DJANGO_PROXY_HTTPS": "true",
             "DJANGO_TRUSTED_PROXY_IPS": "10.20.0.0/16",
+            "DATABASE_URL": "postgresql://app:password@postgres.railway.internal:5432/railway",
+            "REDIS_URL": "redis://redis.railway.internal:6379/0",
+            "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
         }
     )
     source_path = str(Path.cwd() / "src")

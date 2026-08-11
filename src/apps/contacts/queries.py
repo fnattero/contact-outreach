@@ -273,4 +273,6 @@ def conversation_timelines(
                 open_task_count=group_task_count,
             )
         )
-    return tuple(sorted(timelines, key=lambda item: item.first_at))
+    # Gmail-style views put the most recently active thread first so the next
+    # conversation to review is always visible without scrolling.
+    return tuple(sorted(timelines, key=lambda item: item.last_at, reverse=True))

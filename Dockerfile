@@ -11,7 +11,7 @@ RUN addgroup --system app && adduser --system --ingroup app --home /app app
 
 COPY pyproject.toml README.md ./
 RUN mkdir -p src \
-    && pip install --no-cache-dir ".[dev]" \
+    && pip install --no-cache-dir . \
     && rm -rf /app/build /app/src
 
 COPY --chown=app:app . .

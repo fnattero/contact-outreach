@@ -314,9 +314,21 @@ def test_admin_contactos_navigation_timeline_and_plain_language(
 
     assert 'aria-label="Mapa de relación"' in detail_page
     assert 'class="contact-overview-grid"' in detail_page
-    assert 'class="conversation-timeline"' in detail_page
-    assert 'class="task-card task-card--open"' in detail_page
-    assert 'class="follow-up-topic-grid section-gap"' in detail_page
+    assert 'class="conversation-list"' in detail_page
+    assert 'class="conversation-list__table"' in detail_page
+    assert "Último mensaje" not in detail_page
+    assert detail_page.count('class="conversation-list__conversation"') >= 2
+    assert 'aria-label="Conversación: Propuesta comercial"' in detail_page
+    assert 'aria-label="Conversación: Propuesta enviada a la dirección indicada"' in detail_page
+    assert 'class="conversation-list__conversation" open' not in detail_page
+    assert detail_page.index(
+        'aria-label="Conversación: Propuesta enviada a la dirección indicada"'
+    ) < detail_page.index('aria-label="Conversación: Propuesta comercial"')
+    assert 'class="compact-list attention-list"' in detail_page
+    assert 'class="compact-list follow-up-list section-gap"' in detail_page
+    assert 'class="panel__body compact-list restriction-list"' in detail_page
+    assert 'class="compact-list campaign-list"' in detail_page
+    assert 'class="panel__body compact-list contact-email-list"' in detail_page
     assert detail_page.index('id="plan-heading"') < detail_page.index(
         'aria-label="Información y controles del contacto"'
     )
