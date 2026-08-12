@@ -315,6 +315,68 @@ def test_incremental_sync_imports_direct_email_from_existing_contact(
 
 
 @pytest.mark.django_db
+def test_sync_imports_reply_to_campaignless_contact_message(
+    owner: User,
+) -> None:
+    workspace = owner.membership.workspace
+    connection = _connection(owner)
+    organization = Organization.objects.create(
+        workspace=workspace,
+        name="Cliente con seguimiento",
+        normalized_name="cliente con seguimiento",
+    )
+    email = EmailAddress.objects.create(
+        workspace=workspace,
+        organization=organization,
+        original_email="cliente-seguimiento@example.com",
+        normalized_email="cliente-seguimiento@example.com",
+        domain="example.com",
+        is_preferred=True,
+        validity=EmailAddress.Validity.VALID,
+    )
+    contact = Contact.objects.create(
+        workspace=workspace,
+        organization=organization,
+        preferred_email=email,
+        name="Cliente con seguimiento",
+        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
+        created_by=owner,
+    )
+    root = OutboundMessage.objects.create(
+        kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
+        organization=organization,
+        contact=contact,
+        email_address=email,
+        recipient=email.original_email,
+        recipient_normalized=email.normalized_email,
+        subject="Localidades",
+        body_text="Llegamos a todo el país.",
+        state=OutboundMessage.State.SENT,
+        delivery_mode=Campaign.DeliveryMode.LIVE,
+        idempotency_key="automatic-contact-follow-up",
+        message_id="<automatic-contact-follow-up@example.invalid>",
+        gmail_message_id="automatic-contact-follow-up",
+        gmail_thread_id="contact-follow-up-thread",
+        sent_at=timezone.now() - timedelta(minutes=5),
+    )
+    fake = FakeGmailProvider(account_email=connection.email, persist=True)
+    fake.inject_inbound(
+        thread_id=root.gmail_thread_id,
+        sender=email.original_email,
+        recipient=connection.email,
+        subject=root.subject,
+        body_text="Gracias, quería consultar otra cosa.",
+        in_reply_to=root.message_id,
+    )
+
+    assert sync_gmail_connection(connection.pk, provider=fake) == 1
+
+    inbound = InboundMessage.objects.get(related_outbound=root)
+    assert inbound.contact == contact
+    assert inbound.conversation is not None
+
+
+@pytest.mark.django_db
 def test_sync_preserves_the_direct_parent_inside_a_multi_message_thread(
     owner: User,
     private_catalog_dir: Path,

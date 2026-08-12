@@ -971,7 +971,7 @@ def _apply_established_contact_inbound(
             "El mensaje sin campaña no tiene un contacto y una organización vinculados."
         )
     contact = (
-        Contact.objects.select_for_update()
+        Contact.objects.select_for_update(of=("self",))
         .select_related("organization", "preferred_email")
         .get(pk=related.contact_id, organization_id=related.organization_id)
     )
