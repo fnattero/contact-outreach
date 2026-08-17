@@ -51,7 +51,6 @@ def _history_fixture(
         email="ventas@cliente.example",
         organization_name="Motores del Sur",
         contact_name="Ana Pérez",
-        notes="Prefiere recibir novedades por email.",
     )
     primary = contact.preferred_email
     assert primary is not None
@@ -349,7 +348,6 @@ def test_admin_contactos_navigation_timeline_and_plain_language(
     assert "Dirección desde la que respondió" in detail_page
     assert "Rebote informado por Gmail" in detail_page
     assert "Campaña Talleres" in detail_page
-    assert "Prefiere recibir novedades por email" in detail_page
     assert "Modo de observación" in detail_page
     assert "No hay un próximo contacto programado" not in detail_page
     assert "CUERPO-DE-SIMULACION-SOLO-ADMIN" in detail_page
@@ -406,7 +404,6 @@ def test_vendedor_reads_contactos_without_controls_simulations_or_technical_deta
 
     forbidden = (
         (reverse("contact-create"), {}),
-        (reverse("contact-notes", args=(contact.pk,)), {"notes": "No autorizado"}),
         (
             reverse("contact-email-add", args=(contact.pk,)),
             {"email": "otro@cliente.example"},
@@ -509,7 +506,7 @@ def test_admin_can_resolve_human_task_from_contactos_and_resume_conversation(
 
 
 @pytest.mark.django_db
-def test_admin_manual_contact_channels_notes_and_restrictions(
+def test_admin_manual_contact_channels_and_restrictions(
     client: Client,
     owner: User,
     monkeypatch: pytest.MonkeyPatch,
@@ -522,7 +519,6 @@ def test_admin_manual_contact_channels_notes_and_restrictions(
             "email": "cliente-manual@example.com",
             "organization_name": "Cliente manual",
             "contact_name": "Laura",
-            "notes": "Contacto cargado por el equipo.",
         },
     )
     contact = Contact.objects.get(name="Laura")
@@ -558,16 +554,6 @@ def test_admin_manual_contact_channels_notes_and_restrictions(
 
     assert (
         client.post(
-            reverse("contact-notes", args=(contact.pk,)),
-            {"notes": "Llamar únicamente por la tarde."},
-        ).status_code
-        == 302
-    )
-    contact.refresh_from_db()
-    assert contact.notes == "Llamar únicamente por la tarde."
-
-    assert (
-        client.post(
             reverse("contact-email-restrict", args=(contact.pk, secondary.pk)),
             {"reason": "Pidió usar solamente el email de ventas."},
         ).status_code
@@ -599,7 +585,6 @@ def test_admin_manual_contact_channels_notes_and_restrictions(
     contact.refresh_from_db()
     assert contact.status == Contact.Status.DO_NOT_CONTACT
     page = client.get(reverse("contact-detail", args=(contact.pk,))).content.decode()
-    assert "Llamar únicamente por la tarde" in page
     assert "La clienta confirmó que vuelve a usar Compras" in page
     assert "Pausa solicitada por la clienta" in page
 
@@ -732,24 +717,6 @@ def test_human_task_close_rejects_unknown_outcomes_and_surfaces_service_errors(
     assert any("Contanos brevemente" in m for m in _messages(service_error))
     task.refresh_from_db()
     assert task.status == HumanTask.Status.OPEN
-
-
-@pytest.mark.django_db
-def test_contact_notes_rejects_a_form_that_is_too_long(
-    client: Client,
-    owner: User,
-) -> None:
-    contact = create_manual_contact(actor=owner, email="notas@cliente.example")
-    client.force_login(owner)
-
-    response = client.post(
-        reverse("contact-notes", args=(contact.pk,)),
-        {"notes": "x" * 5001},
-    )
-    assert response.status_code == 302
-    assert any("Revisá las notas" in m for m in _messages(response))
-    contact.refresh_from_db()
-    assert contact.notes == ""
 
 
 @pytest.mark.django_db

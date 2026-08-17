@@ -45,13 +45,6 @@ class ManualContactForm(forms.Form):
         max_length=200,
         help_text="Dejalo vacío si todavía no lo conocés.",
     )
-    notes = forms.CharField(
-        required=False,
-        label="Notas internas",
-        max_length=5000,
-        widget=forms.Textarea(attrs={"rows": 5}),
-        help_text="Sólo las personas con acceso al panel pueden leerlas.",
-    )
 
 
 class ContactEmailForm(forms.Form):
@@ -71,16 +64,6 @@ class ContactEmailForm(forms.Form):
         required=False,
         label="Usar como email preferido",
         help_text="Será el canal sugerido para próximos contactos.",
-    )
-
-
-class ContactNotesForm(forms.Form):
-    notes = forms.CharField(
-        required=False,
-        label="Notas internas",
-        max_length=5000,
-        widget=forms.Textarea(attrs={"rows": 6}),
-        help_text="Guardá contexto útil para el equipo. No incluyas contraseñas ni secretos.",
     )
 
 

@@ -150,7 +150,7 @@ un reminder por initial.
 - Lista con display/company, preferred email, friendly status, last interaction, next contact y
   task badge.
 - Detalle cronológico agrupado por thread: emails/provenance, campaigns, restrictions/history,
-  notes, automation, tasks y plan.
+  automation, tasks y plan.
 - Agregar Contact manual, edición de canales/preferencia, validación MX asíncrona con retry visible,
   no-contact controls y restricciones en el contexto del Contact.
 - VENDEDOR obtiene timeline sin controls/technical details. Admin ve sección técnica colapsada.

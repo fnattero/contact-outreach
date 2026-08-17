@@ -205,7 +205,6 @@ class Contact(TimestampedUUIDModel):
         on_delete=models.PROTECT,
         related_name="created_contacts",
     )
-    notes = models.TextField(blank=True)
     automation_suspended = models.BooleanField(default=False)
     last_interaction_at = models.DateTimeField(blank=True, null=True)
 

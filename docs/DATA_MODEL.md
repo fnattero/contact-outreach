@@ -163,7 +163,7 @@ entre Organizations requiere resolución admin auditada.
 ### Contact
 
 OneToOne Organization: `created_reason=HUMAN_REPLY|MANUAL|MANUAL_RESTRICTION|UNSUBSCRIBE`, status
-comprensible, display name/company override opcional, preferred_email, notes, automation state,
+comprensible, display name/company override opcional, preferred_email, automation state,
 last_interaction_at y timestamps. Su mera existencia excluye toda Organization de campañas.
 
 ### CommunicationRestriction

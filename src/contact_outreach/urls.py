@@ -60,7 +60,6 @@ from apps.contacts.views import (
     contact_follow_up_topic_approve,
     contact_list,
     contact_no_contact_toggle,
-    contact_notes,
     contact_plan_save,
     contact_plan_snooze,
     contact_plan_state,
@@ -116,7 +115,6 @@ urlpatterns = [
         name="contact-no-contact-toggle",
     ),
     path("contactos/<uuid:contact_id>/", contact_detail, name="contact-detail"),
-    path("contactos/<uuid:contact_id>/notas/", contact_notes, name="contact-notes"),
     path(
         "contactos/<uuid:contact_id>/seguimiento/<uuid:topic_id>/aprobar/",
         contact_follow_up_topic_approve,

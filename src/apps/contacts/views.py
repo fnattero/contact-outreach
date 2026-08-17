@@ -42,7 +42,6 @@ from apps.campaigns.models import Campaign
 from apps.contacts.forms import (
     ContactEmailForm,
     ContactFilterForm,
-    ContactNotesForm,
     ContactPlanSnoozeForm,
     HumanTaskResolutionForm,
     ManualContactForm,
@@ -61,7 +60,6 @@ from apps.contacts.services import (
     revoke_manual_restriction,
     set_contact_no_contact,
     set_contact_preferred_email,
-    update_contact_notes,
 )
 
 EMAIL_PROVENANCE_LABELS = {
@@ -175,7 +173,6 @@ def contact_create(request: HttpRequest) -> HttpResponse:
                 email=form.cleaned_data["email"],
                 organization_name=form.cleaned_data["organization_name"],
                 contact_name=form.cleaned_data["contact_name"],
-                notes=form.cleaned_data["notes"],
             )
         except (OrganizationResolutionConflict, ValidationError) as exc:
             form.add_error(None, _validation_message(exc))
@@ -346,7 +343,6 @@ def contact_detail(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
             ),
             "automation_summary": _automation_summary(contact),
             "can_manage_contacts": can_manage,
-            "notes_form": ContactNotesForm(initial={"notes": contact.notes}),
             "email_form": ContactEmailForm(),
             "restriction_form": ManualRestrictionForm(),
             "revocation_form": RestrictionRevocationForm(),
@@ -655,23 +651,6 @@ def human_task_close(
                 ),
             )
     return redirect(f"{reverse('contact-detail', args=(contact_id,))}#tarea-{task.pk}")
-
-
-@require_capability(Capability.MANAGE_CONTACTS)
-@require_POST
-@never_cache
-def contact_notes(request: HttpRequest, contact_id: uuid.UUID) -> HttpResponse:
-    actor = request.user
-    assert isinstance(actor, User)
-    workspace = workspace_for_user(actor, Capability.MANAGE_CONTACTS)
-    _contact_or_404(contact_id, workspace_id=workspace.pk)
-    form = ContactNotesForm(request.POST)
-    if not form.is_valid():
-        messages.error(request, "Revisá las notas e intentá nuevamente.")
-    else:
-        update_contact_notes(actor=actor, contact_id=contact_id, notes=form.cleaned_data["notes"])
-        messages.success(request, "Notas guardadas.")
-    return redirect("contact-detail", contact_id=contact_id)
 
 
 @require_capability(Capability.MANAGE_CONTACTS)

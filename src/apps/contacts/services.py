@@ -832,7 +832,6 @@ def _contact_for_organization(
     inbound: InboundMessage | None = None,
     actor: User | None = None,
     name: str = "",
-    notes: str = "",
 ) -> tuple[Contact, bool]:
     organization = Organization.objects.select_for_update().get(pk=organization.pk)
     _lock_organization_channels(organization)
@@ -843,7 +842,6 @@ def _contact_for_organization(
         "created_reason": reason,
         "source_inbound_message_id": inbound.pk if inbound is not None else None,
         "created_by": actor,
-        "notes": notes,
         "last_interaction_at": inbound.external_at if inbound is not None else None,
     }
     contact, created = Contact.objects.select_for_update().get_or_create(
@@ -857,9 +855,6 @@ def _contact_for_organization(
     if name.strip() and not contact.name:
         contact.name = name.strip()[:200]
         changes.append("name")
-    if notes and not contact.notes:
-        contact.notes = notes
-        changes.append("notes")
     if inbound is not None and (
         contact.last_interaction_at is None or inbound.external_at > contact.last_interaction_at
     ):
@@ -1317,7 +1312,6 @@ def create_manual_contact(
     email: str,
     organization_name: str = "",
     contact_name: str = "",
-    notes: str = "",
 ) -> Contact:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     resolution = resolve_organization(
@@ -1338,7 +1332,6 @@ def create_manual_contact(
         reason=Contact.CreatedReason.MANUAL_ENTRY,
         actor=actor,
         name=contact_name,
-        notes=notes,
     )
     cancelled = cancel_pending_campaign_work(
         resolution.organization,
@@ -1560,30 +1553,6 @@ def set_contact_preferred_email(
         entity=contact,
         actor=actor,
         after={"email_address_id": str(email_address.pk)},
-    )
-    return contact
-
-
-@transaction.atomic
-def update_contact_notes(
-    *,
-    actor: User,
-    contact_id: uuid.UUID | str,
-    notes: str,
-) -> Contact:
-    membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
-    contact = Contact.objects.select_for_update().get(pk=contact_id)
-    if contact.workspace_id != membership.workspace_id:
-        raise PermissionDenied
-    before_present = bool(contact.notes.strip())
-    contact.notes = notes.strip()
-    contact.save(update_fields=("notes", "updated_at"))
-    record_event(
-        action="contact.notes_updated",
-        entity=contact,
-        actor=actor,
-        before={"notes_present": before_present},
-        after={"notes_present": bool(contact.notes)},
     )
     return contact
 

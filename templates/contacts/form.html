@@ -13,7 +13,6 @@
         {% include "includes/field.html" with field=form.email %}
         {% include "includes/field.html" with field=form.organization_name %}
         {% include "includes/field.html" with field=form.contact_name %}
-        {% include "includes/field.html" with field=form.notes %}
       </fieldset>
       <div class="actions"><button class="button" type="submit">Guardar contacto</button><a class="button button--secondary" href="{% url 'contacts' %}">Cancelar</a></div>
     </form>

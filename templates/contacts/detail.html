@@ -443,26 +443,6 @@
       {% endif %}
     </section>
 
-    <section class="panel contact-side-panel">
-      <div class="panel__header">
-        <div>
-          <h2>Notas internas</h2>
-          <p class="muted">Contexto compartido por el equipo.</p>
-        </div>
-      </div>
-      {% if can_manage_contacts %}
-        <div class="panel__body">
-          <form method="post" action="{% url 'contact-notes' contact.pk %}">
-            {% csrf_token %}
-            {% include "includes/field.html" with field=notes_form.notes %}
-            <button class="button button--small" type="submit">Guardar notas</button>
-          </form>
-        </div>
-      {% else %}
-        <div class="panel__body"><p class="email-body flush">{{ contact.notes|default:"No hay notas registradas." }}</p></div>
-      {% endif %}
-    </section>
-
   </aside>
 </div>
 {% endblock %}
