@@ -38,6 +38,13 @@ from apps.api.contacts import (
     RestrictionRevokeView,
 )
 from apps.api.dashboard import DashboardSummaryView
+from apps.api.gmail import (
+    GmailConnectionView,
+    GmailDisconnectView,
+    GmailOAuthCallbackView,
+    GmailOAuthStartView,
+    GmailTestView,
+)
 from apps.api.health import DegradedHealthView
 from apps.api.integrations import IntegrationStatusView
 from apps.api.mailbox import (
@@ -86,6 +93,27 @@ urlpatterns = [
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
     path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
+    path(
+        "integrations/gmail/connection/",
+        GmailConnectionView.as_view(),
+        name="api-gmail-connection",
+    ),
+    path(
+        "integrations/gmail/oauth/start/",
+        GmailOAuthStartView.as_view(),
+        name="api-gmail-oauth-start",
+    ),
+    path(
+        "integrations/gmail/oauth/callback/",
+        GmailOAuthCallbackView.as_view(),
+        name="api-gmail-oauth-callback",
+    ),
+    path("integrations/gmail/test/", GmailTestView.as_view(), name="api-gmail-test"),
+    path(
+        "integrations/gmail/disconnect/",
+        GmailDisconnectView.as_view(),
+        name="api-gmail-disconnect",
+    ),
     path("search-categories/", SearchCategoryListView.as_view(), name="api-search-categories"),
     path(
         "search-categories/<uuid:category_id>/rules/",
