@@ -97,6 +97,63 @@ export type OutboundMessage = {
   error?: string | null;
 };
 
+export type Contact = {
+  id: string;
+  name: string;
+  organization_name: string;
+  preferred_email: string | null;
+  status: string;
+  last_interaction_at: string | null;
+  open_task_count: number;
+  next_follow_up_at: string | null;
+};
+
+export type ContactEmail = {
+  id: string;
+  original_email: string;
+  label: string;
+  is_preferred: boolean;
+  validity: string;
+  validated_at: string | null;
+  invalid_reason: string;
+  active_restriction_count: number;
+};
+
+export type ContactRestriction = {
+  id: string;
+  scope: string;
+  kind: string;
+  evidence: string;
+  revoked_at: string | null;
+  created_at: string;
+};
+
+export type ContactTimeline = {
+  subject: string;
+  first_at: string;
+  last_at: string;
+  automation_label: string;
+  open_task_count: number;
+  items: Array<{
+    direction: string;
+    happened_at: string;
+    sender: string;
+    recipient: string;
+    subject: string;
+    body: string;
+    outcome: string;
+    simulated: boolean;
+    needs_attention: boolean;
+  }>;
+};
+
+export type ContactDetail = Contact & {
+  organization_id: string;
+  emails: ContactEmail[];
+  restrictions: ContactRestriction[];
+  timelines: ContactTimeline[];
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -262,6 +319,32 @@ export function getOutboundMessages(): Promise<ApiPage<OutboundMessage[]>> {
 
 export function getOutboundMessage(id: string): Promise<OutboundMessage> {
   return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/`);
+}
+
+export function getContacts(): Promise<ApiPage<Contact[]>> {
+  return requestEnvelope<Contact[]>("/api/v1/contacts/") as Promise<ApiPage<Contact[]>>;
+}
+
+export function getContact(id: string): Promise<ContactDetail> {
+  return request<ContactDetail>(`/api/v1/contacts/${encodeURIComponent(id)}/`);
+}
+
+export function createContact(input: {
+  email: string;
+  organization_name?: string;
+  contact_name?: string;
+}): Promise<Contact> {
+  return request<Contact>("/api/v1/contacts/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateContact(id: string, name: string): Promise<Contact> {
+  return request<Contact>(`/api/v1/contacts/${encodeURIComponent(id)}/`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
 }
 
 export function login(username: string, password: string): Promise<UserSession> {

@@ -54,6 +54,36 @@ body {
   box-shadow: 0 20px 50px rgb(16 24 40 / 8%);
 }
 
+.message-plain-text {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .app-layout .ant-layout-sider {
+    position: fixed;
+    z-index: 20;
+    height: 100dvh;
+  }
+
+  .app-content .ant-card {
+    border-radius: 8px;
+  }
+
+  .app-content .ant-list-item {
+    align-items: flex-start;
+  }
+
+  .app-content .ant-list-item-action {
+    margin-inline-start: 0;
+  }
+
+  .app-content .ant-descriptions-view {
+    overflow-wrap: anywhere;
+  }
+}
+
 @media (max-width: 480px) {
   .centered-page {
     align-items: start;
