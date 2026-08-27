@@ -20,6 +20,16 @@ from apps.api.auth import (
     ReauthenticateView,
     SessionView,
 )
+from apps.api.catalogs import CatalogDownloadView, CatalogListView
+from apps.api.contacts import (
+    ContactDetailView,
+    ContactEmailCreateView,
+    ContactEmailValidateView,
+    ContactListView,
+    ContactPreferredEmailView,
+    ContactRestrictionView,
+    RestrictionRevokeView,
+)
 from apps.api.workspace import BusinessProfileView
 from apps.health.views import degraded, liveness, readiness
 
@@ -54,6 +64,39 @@ urlpatterns = [
         name="api-user-activation-link",
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
+    path("catalogs/", CatalogListView.as_view(), name="api-catalogs"),
+    path(
+        "catalogs/<uuid:catalog_id>/download/",
+        CatalogDownloadView.as_view(),
+        name="api-catalog-download",
+    ),
+    path("contacts/", ContactListView.as_view(), name="api-contacts"),
+    path("contacts/<uuid:contact_id>/", ContactDetailView.as_view(), name="api-contact-detail"),
+    path(
+        "contacts/<uuid:contact_id>/emails/",
+        ContactEmailCreateView.as_view(),
+        name="api-contact-emails",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/emails/<uuid:email_id>/preferred/",
+        ContactPreferredEmailView.as_view(),
+        name="api-contact-email-preferred",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/emails/<uuid:email_id>/validate/",
+        ContactEmailValidateView.as_view(),
+        name="api-contact-email-validate",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/restrictions/",
+        ContactRestrictionView.as_view(),
+        name="api-contact-restrictions",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/restrictions/<uuid:restriction_id>/revoke/",
+        RestrictionRevokeView.as_view(),
+        name="api-contact-restriction-revoke",
+    ),
     path("health/live/", liveness, name="api-health-live"),
     path("health/ready/", readiness, name="api-health-ready"),
     path("health/degraded/", degraded, name="api-health-degraded"),

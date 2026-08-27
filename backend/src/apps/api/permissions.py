@@ -34,5 +34,17 @@ class ManageConfigurationPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_CONFIGURATION
 
 
+class ViewContactsPermission(CapabilityPermission):
+    required_capability = Capability.VIEW_CONTACTS
+
+
+class ManageContactsPermission(CapabilityPermission):
+    required_capability = Capability.MANAGE_CONTACTS
+
+
+class DownloadPdfsPermission(CapabilityPermission):
+    required_capability = Capability.DOWNLOAD_PDFS
+
+
 def authenticated_user(request: Request) -> User:
     return cast(User, request.user)
