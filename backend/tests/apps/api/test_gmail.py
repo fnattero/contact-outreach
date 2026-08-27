@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
 
 from apps.mailbox.models import GmailConnection
+
+
+def _csrf(client: Client) -> str:
+    return str(client.get(reverse("api-auth-csrf")).json()["data"]["csrf_token"])
 
 
 @pytest.mark.django_db
@@ -51,3 +57,41 @@ def test_gmail_oauth_callback_rejects_missing_or_replayed_session_state(owner: U
     )
     assert response.status_code == 302
     assert response["Location"].endswith("gmail=oauth_failed")
+
+
+@pytest.mark.django_db
+def test_gmail_oauth_start_stores_one_time_session_material(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    with patch(
+        "apps.api.gmail.authorization_url",
+        return_value="https://accounts.google.example/authorize",
+    ) as authorization:
+        response = client.post(
+            reverse("api-gmail-oauth-start"),
+            data="{}",
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=_csrf(client),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["authorization_url"].startswith("https://accounts.google")
+    assert client.session.get("api_gmail_oauth_state")
+    assert client.session.get("api_gmail_oauth_verifier")
+    authorization.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_gmail_test_and_disconnect_fail_without_a_usable_connection(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf_token = _csrf(client)
+    for name in ("api-gmail-test", "api-gmail-disconnect"):
+        response = client.post(
+            reverse(name),
+            data="{}",
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == "validation_error"
