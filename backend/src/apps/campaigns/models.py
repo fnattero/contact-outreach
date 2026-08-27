@@ -300,7 +300,7 @@ class Campaign(TimestampedUUIDModel):
         return self.name
 
 
-def _lock_draft_campaigns(campaign_ids: set[object], *, using: str) -> None:
+def _lock_draft_campaigns(campaign_ids: set[Any], *, using: str) -> None:
     if not campaign_ids:
         return
     states = dict(
@@ -316,7 +316,7 @@ def _lock_draft_campaigns(campaign_ids: set[object], *, using: str) -> None:
 
 
 class DraftCampaignSelectionQuerySet(models.QuerySet[Any]):
-    def _campaign_ids(self) -> set[object]:
+    def _campaign_ids(self) -> set[Any]:
         return set(self.order_by().values_list("campaign_id", flat=True).distinct())
 
     def update(self, **kwargs: Any) -> int:

@@ -51,6 +51,10 @@ function forwardedRequestHeaders(request: Request, correlationId: string): Heade
   const publicOrigin = new URL(
     process.env.PUBLIC_APP_ORIGIN ?? request.url,
   );
+  // The upstream URL is private, but Django must validate the public browser
+  // origin as its Host. Never let the internal service name become the
+  // application host seen by Django.
+  headers.set("Host", publicOrigin.host);
   headers.set("X-Forwarded-Host", publicOrigin.host);
   headers.set("X-Forwarded-Proto", publicOrigin.protocol.replace(":", ""));
   headers.set("X-Correlation-ID", correlationId);

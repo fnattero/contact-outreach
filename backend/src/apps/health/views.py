@@ -11,6 +11,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from apps.accounts.permissions import Capability, require_capability
+from apps.catalogs.storage import private_catalog_storage
 from apps.configuration.integrations import (
     configured_integration_owner_id,
     get_gmail_oauth_client_secret,
@@ -49,6 +50,12 @@ def readiness(request: HttpRequest) -> JsonResponse:
     except Exception:
         components["redis"] = "unavailable"
 
+    try:
+        private_catalog_storage.exists("health/readiness-check")
+        components["storage"] = "ok"
+    except Exception:
+        components["storage"] = "unavailable"
+
     ready = all(value == "ok" for value in components.values())
     return JsonResponse(
         {"status": "ok" if ready else "unavailable"},
@@ -60,12 +67,21 @@ def readiness(request: HttpRequest) -> JsonResponse:
 @require_GET
 @never_cache
 def degraded(request: HttpRequest) -> JsonResponse:
-    try:
-        free_bytes = shutil.disk_usage(settings.PRIVATE_STORAGE_ROOT).free
-        storage = "ok" if free_bytes >= settings.MIN_FREE_DISK_BYTES else "degraded"
-    except OSError:
-        free_bytes = 0
-        storage = "unavailable"
+    if private_catalog_storage.is_local:
+        try:
+            local_free_bytes = shutil.disk_usage(settings.PRIVATE_STORAGE_ROOT).free
+            free_bytes: int | None = local_free_bytes
+            storage = "ok" if local_free_bytes >= settings.MIN_FREE_DISK_BYTES else "degraded"
+        except OSError:
+            free_bytes = 0
+            storage = "unavailable"
+    else:
+        free_bytes = None
+        try:
+            private_catalog_storage.exists("health/degraded-check")
+            storage = "ok"
+        except Exception:
+            storage = "unavailable"
     integration_owner_id: int | None = None
     try:
         integration_owner_id = configured_integration_owner_id()

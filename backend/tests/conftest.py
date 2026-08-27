@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from django.contrib.auth.models import User
@@ -21,8 +23,8 @@ def owner(db: None) -> User:
 
 
 @pytest.fixture
-def private_catalog_dir(tmp_path: Path) -> Path:
-    private_catalog_storage._location = tmp_path
-    private_catalog_storage.__dict__.pop("base_location", None)
-    private_catalog_storage.__dict__.pop("location", None)
-    return tmp_path
+def private_catalog_dir(tmp_path: Path, settings: Any) -> Iterator[Path]:
+    settings.PRIVATE_STORAGE_ROOT = tmp_path
+    private_catalog_storage.__dict__.pop("wrapped", None)
+    yield tmp_path
+    private_catalog_storage.__dict__.pop("wrapped", None)

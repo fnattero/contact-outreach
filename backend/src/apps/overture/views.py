@@ -67,11 +67,12 @@ def overture_datasets(request: HttpRequest) -> HttpResponse:
                 "attribution",
             )
         )
-        zone_source_counts = list(
-            active_snapshot.zones.values("source", "source_version")
+        zone_source_counts = [
+            dict(row)
+            for row in active_snapshot.zones.values("source", "source_version")
             .annotate(zone_count=Count("pk"))
             .order_by("source", "source_version")
-        )
+        ]
         license_counts = list(
             active_snapshot.places.exclude(license="")
             .values("license")

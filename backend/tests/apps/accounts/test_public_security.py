@@ -125,6 +125,9 @@ def test_production_settings_require_exact_https_origins_and_enable_hardening() 
             "DJANGO_TRUSTED_PROXY_IPS": "10.20.0.0/16",
             "DATABASE_URL": "postgresql://app:password@postgres.railway.internal:5432/railway",
             "REDIS_URL": "redis://redis.railway.internal:6379/0",
+            "S3_ACCESS_KEY_ID": "test-access-key",
+            "S3_SECRET_ACCESS_KEY": "test-secret-key",
+            "S3_BUCKET_NAME": "test-private-bucket",
             "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
         }
     )

@@ -1,0 +1,14 @@
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+build
+*.egg-info
+__pycache__
+*.py[cod]
+.venv
+.test-private
+db.sqlite3
+tests

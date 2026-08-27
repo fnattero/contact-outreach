@@ -20,13 +20,18 @@ from contact_outreach.settings import (
 )
 
 
-def test_delivery_worker_mounts_private_catalogs_read_only() -> None:
-    compose = (
-        Path(__file__).resolve().parents[2] / "infra" / "docker-compose.yml"
-    ).read_text()
-    worker_section = compose.split("  worker:\n", maxsplit=1)[1].split("  beat:\n", maxsplit=1)[0]
+def test_compose_uses_one_backend_service_and_private_object_storage() -> None:
+    compose = (Path(__file__).resolve().parents[2] / "infra" / "docker-compose.yml").read_text()
+    supervisor = (Path(__file__).resolve().parents[1] / "supervisord.conf").read_text()
 
-    assert "- private_catalogs:/app/private:ro" in worker_section
+    assert "  backend:\n" in compose
+    assert "  worker:\n" not in compose
+    assert "  maintenance:\n" not in compose
+    assert "  beat:\n" not in compose
+    assert "PRIVATE_STORAGE_BACKEND: s3" in compose
+    assert "[program:worker-general]" in supervisor
+    assert "[program:worker-maintenance]" in supervisor
+    assert "[program:beat]" in supervisor
 
 
 def test_safe_runtime_defaults_use_fake_providers() -> None:
@@ -66,6 +71,9 @@ def test_production_database_url_is_parsed_without_exposing_credentials() -> Non
             "DJANGO_TRUSTED_PROXY_IPS": "10.20.0.0/16",
             "DATABASE_URL": "postgresql://app:p%40ss@postgres.railway.internal:5432/railway?sslmode=require",
             "REDIS_URL": "rediss://:redis-secret@redis.railway.internal:6380/0",
+            "S3_ACCESS_KEY_ID": "test-access-key",
+            "S3_SECRET_ACCESS_KEY": "test-secret-key",
+            "S3_BUCKET_NAME": "test-private-bucket",
             "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
         }
     )
@@ -106,6 +114,9 @@ def test_railway_proxy_mode_honors_only_marked_https_requests() -> None:
             "DJANGO_RAILWAY_PROXY": "true",
             "DATABASE_URL": "postgresql://app:password@postgres.railway.internal:5432/railway",
             "REDIS_URL": "redis://redis.railway.internal:6379/0",
+            "S3_ACCESS_KEY_ID": "test-access-key",
+            "S3_SECRET_ACCESS_KEY": "test-secret-key",
+            "S3_BUCKET_NAME": "test-private-bucket",
             "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
         }
     )

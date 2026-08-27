@@ -1,28 +1,47 @@
-FROM python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
+FROM python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONPATH=/app/src
+    VIRTUAL_ENV=/opt/venv
+
+WORKDIR /build
+RUN python -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir .
+
+FROM python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH=/opt/venv/bin:$PATH \
+    PORT=8000 \
+    WEB_CONCURRENCY=2 \
+    CELERY_WORKER_CONCURRENCY=2 \
+    CELERY_LOG_LEVEL=INFO
 
 WORKDIR /app
 
-RUN addgroup --system app && adduser --system --ingroup app --home /app app
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --home-dir /app app
 
-COPY pyproject.toml README.md ./
-RUN mkdir -p src \
-    && pip install --no-cache-dir . \
-    && rm -rf /app/build /app/src
-
+COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app . .
-RUN python src/manage.py collectstatic --noinput \
-    && mkdir -p /app/private \
-    && chown -R app:app /app \
-    && chmod +x /app/scripts/entrypoint.sh
+
+RUN chmod +x /app/scripts/*.sh \
+    && mkdir -p /app/staticfiles /tmp/contact-outreach \
+    && chown -R app:app /app /tmp/contact-outreach \
+    && DJANGO_SECRET_KEY=container-build-only DATABASE_ENGINE=sqlite \
+       python src/manage.py collectstatic --noinput
 
 USER app
 
 EXPOSE 8000
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
-CMD ["web"]
+CMD ["backend"]

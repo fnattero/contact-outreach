@@ -55,7 +55,7 @@ def _detect_mime(content: bytes) -> str:
     return "application/octet-stream"
 
 
-def _read_upload(upload: UploadedFile) -> tuple[str, int, str]:
+def _read_upload(upload: UploadedFile[bytes]) -> tuple[str, int, str]:
     size = upload.size
     if size is None or size <= 0:
         raise ValidationError("El PDF está vacío.")
@@ -78,22 +78,23 @@ def _read_upload(upload: UploadedFile) -> tuple[str, int, str]:
 
 
 @transaction.atomic
-def create_catalog(*, name: str, upload: UploadedFile, actor: User) -> Catalog:
+def create_catalog(*, name: str, upload: UploadedFile[bytes], actor: User) -> Catalog:
     membership = require_user_capability(actor, Capability.MANAGE_CONFIGURATION)
     clean_name = re.sub(r"\s+", " ", name.strip())
     if not clean_name:
         raise ValidationError("Ingresá un nombre para el catálogo.")
     digest, size, detected_mime = _read_upload(upload)
-    storage_root = Path(private_catalog_storage.location)
-    try:
-        storage_root.mkdir(parents=True, exist_ok=True)
-        free_bytes = shutil.disk_usage(storage_root).free
-    except OSError as exc:
-        raise _storage_error(exc) from exc
-    if free_bytes < size + settings.MIN_FREE_DISK_BYTES:
-        raise ValidationError(
-            "No hay espacio seguro para guardar el catálogo. Liberá disco y volvé a intentar."
-        )
+    if private_catalog_storage.is_local:
+        storage_root = Path(private_catalog_storage.location)
+        try:
+            storage_root.mkdir(parents=True, exist_ok=True)
+            free_bytes = shutil.disk_usage(storage_root).free
+        except OSError as exc:
+            raise _storage_error(exc) from exc
+        if free_bytes < size + settings.MIN_FREE_DISK_BYTES:
+            raise ValidationError(
+                "No hay espacio seguro para guardar el catálogo. Liberá disco y volvé a intentar."
+            )
     if Catalog.objects.filter(workspace=membership.workspace, sha256=digest).exists():
         raise ValidationError("Este mismo PDF ya fue cargado.")
     existing = Catalog.objects.select_for_update().filter(
@@ -140,7 +141,13 @@ def create_catalog(*, name: str, upload: UploadedFile, actor: User) -> Catalog:
 
 
 def verify_catalog(catalog: Catalog) -> None:
-    if catalog.missing or not catalog.active or not catalog.file.storage.exists(catalog.file.name):
+    stored_name = catalog.file.name
+    if (
+        catalog.missing
+        or not catalog.active
+        or not stored_name
+        or not catalog.file.storage.exists(stored_name)
+    ):
         raise ValidationError("El catálogo seleccionado no está disponible.")
     with catalog.file.open("rb") as handle:
         digest = hashlib.sha256(handle.read()).hexdigest()

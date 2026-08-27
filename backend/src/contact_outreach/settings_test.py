@@ -44,6 +44,7 @@ DATABASES = {
 }
 
 PRIVATE_STORAGE_ROOT = BASE_DIR / ".test-private"
+PRIVATE_STORAGE_BACKEND = "filesystem"
 
 CACHES = {
     "default": {

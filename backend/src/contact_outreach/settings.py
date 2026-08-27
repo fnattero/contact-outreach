@@ -103,6 +103,11 @@ def _validate_redis_url(redis_url: str) -> str:
     return redis_url
 
 
+def _redis_logical_database(redis_url: str, database: int) -> str:
+    parsed = urlsplit(redis_url)
+    return parsed._replace(path=f"/{database}").geturl()
+
+
 APP_ENV = os.getenv("APP_ENV", "development")
 DEBUG = env_bool("DJANGO_DEBUG", APP_ENV == "development")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "development-only-change-me")
@@ -236,13 +241,25 @@ else:
     DATABASES = {"default": _database_from_environment()}
 
 redis_url_environment = os.getenv("REDIS_URL", "").strip()
-REDIS_URL = redis_url_environment or "redis://redis:6379/0"
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", redis_url_environment).strip()
+CACHE_REDIS_URL = os.getenv("CACHE_REDIS_URL", "").strip()
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip()
+if not CELERY_BROKER_URL:
+    CELERY_BROKER_URL = "redis://redis:6379/0"
+if not CACHE_REDIS_URL:
+    CACHE_REDIS_URL = _redis_logical_database(CELERY_BROKER_URL, 1)
+if not CELERY_RESULT_BACKEND:
+    CELERY_RESULT_BACKEND = _redis_logical_database(CELERY_BROKER_URL, 2)
 if APP_ENV == "production":
-    REDIS_URL = _validate_redis_url(redis_url_environment)
+    CELERY_BROKER_URL = _validate_redis_url(CELERY_BROKER_URL)
+    CACHE_REDIS_URL = _validate_redis_url(CACHE_REDIS_URL)
+    CELERY_RESULT_BACKEND = _validate_redis_url(CELERY_RESULT_BACKEND)
+# Compatibility alias for existing diagnostics while callers migrate to purpose-specific URLs.
+REDIS_URL = CELERY_BROKER_URL
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
+        "LOCATION": CACHE_REDIS_URL,
         "KEY_PREFIX": "contact-outreach",
     }
 }
@@ -275,6 +292,25 @@ STORAGES = {
     },
 }
 PRIVATE_STORAGE_ROOT = Path(os.getenv("PRIVATE_STORAGE_ROOT", str(BASE_DIR / "private")))
+PRIVATE_STORAGE_BACKEND = os.getenv(
+    "PRIVATE_STORAGE_BACKEND", "s3" if APP_ENV == "production" else "filesystem"
+)
+if PRIVATE_STORAGE_BACKEND not in {"filesystem", "s3"}:
+    raise ImproperlyConfigured("PRIVATE_STORAGE_BACKEND must be filesystem or s3")
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "").rstrip("/")
+S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "")
+S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
+S3_REGION_NAME = os.getenv("S3_REGION_NAME", "us-east-1")
+S3_ADDRESSING_STYLE = os.getenv("S3_ADDRESSING_STYLE", "path")
+if S3_ADDRESSING_STYLE not in {"auto", "path", "virtual"}:
+    raise ImproperlyConfigured("S3_ADDRESSING_STYLE must be auto, path, or virtual")
+if PRIVATE_STORAGE_BACKEND == "s3" and not all(
+    (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET_NAME)
+):
+    raise ImproperlyConfigured(
+        "S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, and S3_BUCKET_NAME are required for S3 storage"
+    )
 CATALOG_MAX_BYTES = 15 * 1024 * 1024
 MIN_FREE_DISK_BYTES = int(os.getenv("MIN_FREE_DISK_BYTES", str(100 * 1024 * 1024)))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -384,8 +420,6 @@ if APP_ENV == "production" and len(FIELD_ENCRYPTION_KEY) < 32:
         "FIELD_ENCRYPTION_KEY must be a long, randomly generated production secret"
     )
 
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_IMPORTS = (
     "contact_outreach.tasks",
     "apps.contacts.tasks",
@@ -400,6 +434,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_RESULT_EXPIRES = 3600
 CELERY_TASK_SOFT_TIME_LIMIT = 30
 CELERY_TASK_TIME_LIMIT = 45
 CELERY_TASK_ROUTES = {
