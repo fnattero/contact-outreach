@@ -198,6 +198,22 @@ export type CreatedUser = {
   expires_at: string;
 };
 
+export type IntegrationStatus = {
+  extractor: { provider: string; overture_min_confidence: string };
+  website_fetcher: { provider: string };
+  llm: { provider: string; model: string; credential_source: string; configured: boolean };
+  embeddings: { provider: string; model: string; dimensions: number };
+  gmail: {
+    provider: string;
+    oauth_client_id_configured: boolean;
+    credential_source: string;
+    credential_configured: boolean;
+    connection_status: string;
+    email: string | null;
+  };
+  revision: number;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -443,6 +459,10 @@ export function updateUserStatus(id: number, isActive: boolean): Promise<Managed
     method: "PATCH",
     body: JSON.stringify({ is_active: isActive }),
   });
+}
+
+export function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return request<IntegrationStatus>("/api/v1/integrations/status/");
 }
 
 export function login(username: string, password: string): Promise<UserSession> {
