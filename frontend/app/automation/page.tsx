@@ -1,15 +1,22 @@
 "use client";
 
-import { Alert, Button, Card, Flex, Form, Input, Radio, Skeleton, Tag, Typography } from "antd";
+import { Alert, Button, Card, Flex, Form, Input, List, Radio, Skeleton, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import {
   getAutomationConfiguration,
+  createKnowledgeContext,
+  createKnowledgeFact,
+  getKnowledgeContexts,
+  getKnowledgeFacts,
+  previewKnowledge,
   problemMessage,
   reauthenticate,
   setAutomationLive,
   updateAutomationMode,
   type AutomationConfiguration,
+  type KnowledgeContextRevision,
+  type KnowledgeFactRevision,
   type Problem,
 } from "@/lib/api";
 
@@ -18,9 +25,16 @@ export default function AutomationPage() {
   const [configuration, setConfiguration] = useState<AutomationConfiguration | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
+  const [facts, setFacts] = useState<KnowledgeFactRevision[]>([]);
+  const [contexts, setContexts] = useState<KnowledgeContextRevision[]>([]);
+  const [preview, setPreview] = useState<{ status: string; matches: Array<{ title: string; score: number; selected: boolean }> } | null>(null);
 
   useEffect(() => {
-    void getAutomationConfiguration().then(setConfiguration).catch(setError);
+    void Promise.all([getAutomationConfiguration(), getKnowledgeFacts(), getKnowledgeContexts()])
+      .then(([nextConfiguration, nextFacts, nextContexts]) => {
+        setConfiguration(nextConfiguration); setFacts(nextFacts); setContexts(nextContexts);
+      })
+      .catch(setError);
   }, []);
 
   if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para configurar automatización." }} />;
@@ -64,6 +78,24 @@ export default function AutomationPage() {
     }
   }
 
+  async function saveFact(values: { title: string; category?: string; text: string }) {
+    setSaving(true); setError(null);
+    try { const created = await createKnowledgeFact(values); setFacts((current) => [created, ...current]); }
+    catch (problem) { setError(problem); } finally { setSaving(false); }
+  }
+
+  async function saveContext(values: { context_text: string }) {
+    setSaving(true); setError(null);
+    try { const created = await createKnowledgeContext(values.context_text); setContexts((current) => [created, ...current]); }
+    catch (problem) { setError(problem); } finally { setSaving(false); }
+  }
+
+  async function runPreview(values: { query: string }) {
+    setSaving(true); setError(null);
+    try { setPreview(await previewKnowledge(values.query)); }
+    catch (problem) { setError(problem); } finally { setSaving(false); }
+  }
+
   return (
     <Flex vertical gap="large">
       <div>
@@ -99,6 +131,29 @@ export default function AutomationPage() {
           <Tag>Política {configuration.policy_version}</Tag>
           {configuration.live_enabled_by ? <Tag>Activada por {configuration.live_enabled_by}</Tag> : null}
         </Flex>
+      </Card>
+      <Card title="Información aprobada para el agente">
+        <Form layout="vertical" onFinish={(values) => void saveFact(values as { title: string; category?: string; text: string })}>
+          <Form.Item name="title" label="Título" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="category" label="Categoría"><Input /></Form.Item>
+          <Form.Item name="text" label="Información verificable" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
+          <Button htmlType="submit" loading={saving}>Guardar información</Button>
+        </Form>
+        <List style={{ marginTop: 16 }} dataSource={facts} renderItem={(fact) => <List.Item><List.Item.Meta title={`${fact.title} · v${fact.version}`} description={fact.text} /><Tag color="green">Aprobada</Tag></List.Item>} />
+      </Card>
+      <Card title="Contexto general aprobado">
+        <Form layout="vertical" onFinish={(values) => void saveContext(values as { context_text: string })}>
+          <Form.Item name="context_text" label="Contexto" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
+          <Button htmlType="submit" loading={saving}>Guardar contexto</Button>
+        </Form>
+        <List style={{ marginTop: 16 }} dataSource={contexts} renderItem={(context) => <List.Item><List.Item.Meta title={`Revisión ${context.version}`} description={context.context_text} /><Tag color={context.approved ? "green" : "default"}>{context.approved ? "Aprobada" : "Pendiente"}</Tag></List.Item>} />
+      </Card>
+      <Card title="Probar recuperación de información">
+        <Form layout="vertical" onFinish={(values) => void runPreview(values as { query: string })}>
+          <Form.Item name="query" label="Consulta de ejemplo" rules={[{ required: true }]}><Input /></Form.Item>
+          <Button htmlType="submit" loading={saving}>Probar</Button>
+        </Form>
+        {preview ? <Alert style={{ marginTop: 16 }} type={preview.status === "SELECTED" ? "success" : "info"} message={`Resultado: ${preview.status}`} description={preview.matches.map((match) => `${match.title} (${match.score.toFixed(2)})`).join(" · ") || "Sin coincidencias."} /> : null}
       </Card>
     </Flex>
   );

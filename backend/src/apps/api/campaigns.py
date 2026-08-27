@@ -9,20 +9,23 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.http import HttpResponse
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.concurrency import add_etag
 from apps.api.permissions import (
+    ExportDataPermission,
     ManageCampaignsPermission,
     ViewCampaignsPermission,
     authenticated_user,
 )
+from apps.api.schema import SchemaAPIView
 from apps.audit.models import ApiIdempotencyRecord
 from apps.campaigns.approval import approve_campaign, start_per_message_campaign
 from apps.campaigns.forms import CampaignForm
@@ -31,6 +34,9 @@ from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import BusinessProfile
+from apps.contacts.models import CampaignEnrollment
+from apps.dashboard.csv_export import csv_download
+from apps.prospects.models import Prospect
 
 
 class CampaignListQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -170,7 +176,7 @@ def _campaign_queryset(
     return queryset if include_drafts else queryset.exclude(state=Campaign.State.DRAFT)
 
 
-class CampaignListView(APIView):
+class CampaignListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewCampaignsPermission)
 
     def get(self, request: Request) -> Response:
@@ -263,9 +269,10 @@ class CampaignListView(APIView):
         )
 
 
-class CampaignDetailView(APIView):
+class CampaignDetailView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewCampaignsPermission)
 
+    @extend_schema(operation_id="campaign_detail")
     def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
         user = authenticated_user(request)
         workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
@@ -290,7 +297,7 @@ class CampaignDetailView(APIView):
         )
 
 
-class CampaignActionView(APIView):
+class CampaignActionView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     allowed_actions = frozenset(
@@ -367,3 +374,175 @@ class CampaignActionView(APIView):
                 expires_at=timezone.now() + timedelta(hours=24),
             )
         return Response(body, status=status.HTTP_200_OK)
+
+
+class CampaignCoverageView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ViewCampaignsPermission)
+
+    def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
+        campaign = Campaign.objects.filter(pk=campaign_id, workspace=workspace).first()
+        if campaign is None or (
+            campaign.state == Campaign.State.DRAFT
+            and not has_capability(user, Capability.MANAGE_CAMPAIGNS)
+        ):
+            raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
+        return Response(
+            {
+                "data": {
+                    "campaign_id": str(campaign.pk),
+                    "categories": [
+                        {
+                            "id": str(item.category_id),
+                            "name": item.name_snapshot,
+                            "sort_order": item.sort_order,
+                        }
+                        for item in campaign.category_selections.order_by("sort_order")
+                    ],
+                    "zones": [
+                        {
+                            "id": str(item.zone_id),
+                            "name": item.name_snapshot,
+                            "sort_order": item.sort_order,
+                        }
+                        for item in campaign.zone_selections.order_by("sort_order")
+                    ],
+                    "search_runs": [
+                        {
+                            "id": str(run.pk),
+                            "state": run.state,
+                            "raw_count": run.raw_count,
+                            "email_count": run.email_count,
+                            "error": run.error if run.state == run.State.FAILED_PERMANENT else "",
+                        }
+                        for run in campaign.search_runs.order_by("created_at")
+                    ],
+                }
+            }
+        )
+
+
+class CampaignEnrollmentListView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ViewCampaignsPermission)
+
+    def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
+        campaign = Campaign.objects.filter(pk=campaign_id, workspace=workspace).first()
+        if campaign is None or (
+            campaign.state == Campaign.State.DRAFT
+            and not has_capability(user, Capability.MANAGE_CAMPAIGNS)
+        ):
+            raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
+        enrollments = CampaignEnrollment.objects.filter(campaign=campaign).select_related(
+            "organization", "selected_email"
+        )
+        return Response(
+            {
+                "data": [
+                    {
+                        "id": str(item.pk),
+                        "organization_name": item.organization.name,
+                        "selected_email": (
+                            item.selected_email.original_email if item.selected_email else None
+                        ),
+                        "state": item.state,
+                        "state_label": item.get_state_display(),
+                        "exclusion_reason": (
+                            item.exclusion_reason
+                            if has_capability(user, Capability.MANAGE_CAMPAIGNS)
+                            else ""
+                        ),
+                    }
+                    for item in enrollments
+                ]
+            }
+        )
+
+
+class CampaignMessageListView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ViewCampaignsPermission)
+
+    def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
+        campaign = Campaign.objects.filter(pk=campaign_id, workspace=workspace).first()
+        if campaign is None or (
+            campaign.state == Campaign.State.DRAFT
+            and not has_capability(user, Capability.MANAGE_CAMPAIGNS)
+        ):
+            raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
+        messages = campaign.messages.order_by("created_at")
+        if not has_capability(user, Capability.MANAGE_CAMPAIGNS):
+            messages = messages.filter(state=OutboundMessage.State.SENT)
+        from apps.api.mailbox import _outbound_data
+
+        return Response(
+            {
+                "data": [
+                    _outbound_data(
+                        item,
+                        include_admin=has_capability(user, Capability.MANAGE_CAMPAIGNS),
+                    )
+                    for item in messages
+                ]
+            }
+        )
+
+
+class CampaignProspectListView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
+
+    def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
+        workspace = workspace_for_user(authenticated_user(request), Capability.MANAGE_CAMPAIGNS)
+        if not Campaign.objects.filter(pk=campaign_id, workspace=workspace).exists():
+            raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
+        prospects = Prospect.objects.filter(campaign_id=campaign_id).prefetch_related("emails")
+        return Response(
+            {
+                "data": [
+                    {
+                        "id": str(item.pk),
+                        "name": item.name,
+                        "address": item.address,
+                        "neighborhood": item.neighborhood,
+                        "category": item.category,
+                        "website": item.website,
+                        "pipeline_state": item.pipeline_state,
+                        "emails": [email.normalized_email for email in item.emails.all()],
+                    }
+                    for item in prospects
+                ]
+            }
+        )
+
+
+class ProspectExportView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ExportDataPermission)
+
+    def get(self, request: Request) -> HttpResponse:
+        workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
+        prospects = (
+            Prospect.objects.filter(campaign__workspace=workspace)
+            .select_related("campaign")
+            .prefetch_related("emails")
+        )
+        return csv_download(
+            filename="prospectos.csv",
+            headers=("campaña", "prospecto", "email", "rubro", "barrio", "estado"),
+            rows=(
+                (
+                    item.campaign.name,
+                    item.name,
+                    next(
+                        (email.normalized_email for email in item.emails.all() if email.is_primary),
+                        "",
+                    ),
+                    item.category,
+                    item.neighborhood,
+                    item.get_pipeline_state_display(),
+                )
+                for item in prospects
+            ),
+        )

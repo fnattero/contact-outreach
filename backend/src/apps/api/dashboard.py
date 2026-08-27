@@ -10,10 +10,10 @@ from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.permissions import ViewSummaryPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.audit.models import BackgroundJob
 from apps.automation.models import HumanTask
 from apps.campaigns.models import Campaign, OutboundMessage
@@ -67,7 +67,7 @@ def _campaign_data(campaign: Campaign) -> dict[str, object]:
     }
 
 
-class DashboardSummaryView(APIView):
+class DashboardSummaryView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSummaryPermission)
 
     def get(self, request: Request) -> Response:

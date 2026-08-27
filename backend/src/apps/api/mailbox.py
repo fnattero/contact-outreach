@@ -6,27 +6,30 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
+from django.http import HttpResponse
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.permissions import (
+    ExportDataPermission,
     SendRepliesPermission,
     ViewContactsPermission,
     ViewSentMessagesPermission,
     authenticated_user,
 )
+from apps.api.schema import SchemaAPIView
 from apps.campaigns.models import OutboundMessage
 from apps.campaigns.review import approve_message_for_delivery, edit_message_draft
-from apps.campaigns.tasks import deliver_message_task
+from apps.dashboard.csv_export import csv_download
 from apps.dashboard.queries import outbound_queryset, outbound_workspace_filter, response_queryset
 from apps.integrations.contracts import ProviderError
 from apps.mailbox.manual import authorize_manual_reply
 from apps.mailbox.models import InboundMessage
-from apps.mailbox.tasks import deliver_manual_reply_task
+from apps.mailbox.tasks import deliver_manual_reply_task, deliver_message_task
 
 
 class MessageQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -120,7 +123,7 @@ def _outbound_data(message: OutboundMessage, *, include_admin: bool) -> dict[str
     return data
 
 
-class InboundMessageListView(APIView):
+class InboundMessageListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewContactsPermission)
 
     def get(self, request: Request) -> Response:
@@ -135,7 +138,29 @@ class InboundMessageListView(APIView):
         return Response({"data": [_inbound_data(message) for message in rows], "meta": meta})
 
 
-class InboundMessageThreadView(APIView):
+class InboundMessageExportView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ExportDataPermission)
+
+    def get(self, request: Request) -> HttpResponse:
+        workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
+        rows = response_queryset(request.query_params, workspace_id=workspace.pk)
+        return csv_download(
+            filename="respuestas.csv",
+            headers=("fecha", "remitente", "asunto", "clasificación", "humana"),
+            rows=(
+                (
+                    item.external_at,
+                    item.sender,
+                    item.subject,
+                    item.get_classification_display(),
+                    "sí" if item.is_human else "no",
+                )
+                for item in rows
+            ),
+        )
+
+
+class InboundMessageThreadView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewContactsPermission)
 
     def get(self, request: Request, inbound_id: uuid.UUID) -> Response:
@@ -190,7 +215,7 @@ class InboundMessageThreadView(APIView):
         )
 
 
-class InboundManualReplyView(APIView):
+class InboundManualReplyView(SchemaAPIView):
     permission_classes = (IsAuthenticated, SendRepliesPermission)
 
     def post(self, request: Request, inbound_id: uuid.UUID) -> Response:
@@ -220,7 +245,7 @@ class InboundManualReplyView(APIView):
         )
 
 
-class OutboundMessageListView(APIView):
+class OutboundMessageListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSentMessagesPermission)
 
     def get(self, request: Request) -> Response:
@@ -246,9 +271,36 @@ class OutboundMessageListView(APIView):
         )
 
 
-class OutboundMessageDetailView(APIView):
+class OutboundMessageExportView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ExportDataPermission)
+
+    def get(self, request: Request) -> HttpResponse:
+        workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
+        rows = (
+            outbound_queryset(request.query_params)
+            .filter(outbound_workspace_filter(workspace.pk))
+            .distinct()
+        )
+        return csv_download(
+            filename="envios.csv",
+            headers=("fecha", "destinatario", "asunto", "tipo", "estado"),
+            rows=(
+                (
+                    item.created_at,
+                    item.recipient_normalized,
+                    item.subject,
+                    item.get_kind_display(),
+                    item.get_state_display(),
+                )
+                for item in rows
+            ),
+        )
+
+
+class OutboundMessageDetailView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSentMessagesPermission)
 
+    @extend_schema(operation_id="outbound_message_detail")
     def get(self, request: Request, message_id: uuid.UUID) -> Response:
         user = authenticated_user(request)
         workspace = workspace_for_user(user, Capability.VIEW_SENT_MESSAGES)
@@ -265,7 +317,7 @@ class OutboundMessageDetailView(APIView):
         return Response({"data": _outbound_data(message, include_admin=is_admin)})
 
 
-class OutboundMessageDraftView(APIView):
+class OutboundMessageDraftView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def patch(self, request: Request, message_id: uuid.UUID) -> Response:
@@ -287,7 +339,7 @@ class OutboundMessageDraftView(APIView):
         return Response({"data": _outbound_data(message, include_admin=True)})
 
 
-class OutboundMessageAuthorizeView(APIView):
+class OutboundMessageAuthorizeView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request, message_id: uuid.UUID) -> Response:

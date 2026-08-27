@@ -11,7 +11,6 @@ from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.models import ActivationToken, Membership
 from apps.accounts.services import (
@@ -23,6 +22,7 @@ from apps.accounts.services import (
     unlock_login,
 )
 from apps.api.permissions import ManageUsersPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 
 
 class ManagedUserCreateSerializer(serializers.Serializer[dict[str, object]]):
@@ -87,7 +87,7 @@ def _validation_error(exc: ValidationError) -> serializers.ValidationError:
     return serializers.ValidationError(str(exc))
 
 
-class UserListView(APIView):
+class UserListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageUsersPermission)
 
     def get(self, request: Request) -> Response:
@@ -123,7 +123,7 @@ class UserListView(APIView):
         )
 
 
-class UserRoleView(APIView):
+class UserRoleView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageUsersPermission)
 
     def patch(self, request: Request, user_id: int) -> Response:
@@ -142,7 +142,7 @@ class UserRoleView(APIView):
         return Response({"data": ManagedUserSerializer(_user_data(membership)).data})
 
 
-class UserStatusView(APIView):
+class UserStatusView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageUsersPermission)
 
     def patch(self, request: Request, user_id: int) -> Response:
@@ -163,7 +163,7 @@ class UserStatusView(APIView):
         return Response({"data": ManagedUserSerializer(_user_data(membership)).data})
 
 
-class UserActivationLinkView(APIView):
+class UserActivationLinkView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageUsersPermission)
 
     def post(self, request: Request, user_id: int) -> Response:
@@ -185,7 +185,7 @@ class UserActivationLinkView(APIView):
         )
 
 
-class UnlockLoginView(APIView):
+class UnlockLoginView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageUsersPermission)
 
     def post(self, request: Request) -> Response:

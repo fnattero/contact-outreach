@@ -9,10 +9,10 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability
 from apps.api.permissions import authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.automation.models import HumanTask
 from apps.automation.presentation import review_reason_for_task
 from apps.automation.services import close_human_task
@@ -28,7 +28,7 @@ class HumanTaskResolutionSerializer(serializers.Serializer[dict[str, object]]):
     note = serializers.CharField(max_length=2000)
 
 
-class AttentionView(APIView):
+class AttentionView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request: Request) -> Response:
@@ -55,7 +55,7 @@ class AttentionView(APIView):
         return Response({"data": data})
 
 
-class HumanTaskActionView(APIView):
+class HumanTaskActionView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request, task_id: UUID, action: str) -> Response:
@@ -84,7 +84,7 @@ class HumanTaskActionView(APIView):
         return Response({"data": {"id": str(saved.pk), "status": saved.status}})
 
 
-class OvertureStatusView(APIView):
+class OvertureStatusView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request: Request) -> Response:
@@ -127,7 +127,7 @@ class OvertureStatusView(APIView):
         )
 
 
-class OvertureSyncView(APIView):
+class OvertureSyncView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request) -> Response:

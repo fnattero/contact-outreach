@@ -12,7 +12,6 @@ from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.permissions import membership_for
 from apps.accounts.services import (
@@ -23,6 +22,7 @@ from apps.accounts.services import (
     login_throttle_status,
     record_login_failure,
 )
+from apps.api.schema import SchemaAPIView
 from apps.api.serializers import (
     ActivationSerializer,
     LoginSerializer,
@@ -58,7 +58,7 @@ def _reauthentication_active(request: Request) -> bool:
     return timestamp + REAUTHENTICATION_LIFETIME > timezone.now()
 
 
-class CsrfView(APIView):
+class CsrfView(SchemaAPIView):
     authentication_classes: tuple[Any, ...] = ()
     permission_classes = (AllowAny,)
 
@@ -66,7 +66,7 @@ class CsrfView(APIView):
         return Response({"data": {"csrf_token": get_token(request)}})
 
 
-class LoginView(APIView):
+class LoginView(SchemaAPIView):
     authentication_classes: tuple[Any, ...] = ()
     permission_classes = (AllowAny,)
 
@@ -124,7 +124,7 @@ class LoginView(APIView):
         return Response({"data": UserSessionSerializer(payload).data})
 
 
-class ActivateView(APIView):
+class ActivateView(SchemaAPIView):
     authentication_classes: tuple[Any, ...] = ()
     permission_classes = (AllowAny,)
 
@@ -149,7 +149,7 @@ class ActivateView(APIView):
         return Response({"data": UserSessionSerializer(payload).data}, status=status.HTTP_200_OK)
 
 
-class SessionView(APIView):
+class SessionView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request: Request) -> Response:
@@ -162,7 +162,7 @@ class SessionView(APIView):
         return Response({"data": UserSessionSerializer(payload).data})
 
 
-class LogoutView(APIView):
+class LogoutView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request) -> Response:
@@ -170,7 +170,7 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ReauthenticateView(APIView):
+class ReauthenticateView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request) -> Response:

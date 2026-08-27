@@ -10,9 +10,9 @@ from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.permissions import ManageConfigurationPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.configuration.message_templates import (
     create_message_template_revision,
     ensure_default_message_templates,
@@ -22,7 +22,11 @@ from apps.configuration.models import (
     SearchZone,
     WorkspaceMessageTemplateRevision,
 )
-from apps.configuration.services import runtime_prompt_configuration, save_prompt_configuration
+from apps.configuration.services import (
+    runtime_prompt_configuration,
+    save_config_item,
+    save_prompt_configuration,
+)
 
 
 class SearchCategoryInputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -36,6 +40,17 @@ class SearchCategorySerializer(serializers.Serializer[dict[str, Any]]):
     sort_order = serializers.IntegerField()
     rules_revision = serializers.IntegerField()
     rules = serializers.ListField(child=serializers.DictField())
+
+
+class CategoryRuleInputSerializer(serializers.Serializer[dict[str, Any]]):
+    taxonomy_code = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    name_terms = serializers.ListField(
+        child=serializers.CharField(max_length=80), required=False, default=list
+    )
+
+
+class CategoryRulesInputSerializer(serializers.Serializer[dict[str, Any]]):
+    rules = serializers.ListField(child=CategoryRuleInputSerializer(), max_length=40)
 
 
 class SearchZoneSerializer(serializers.Serializer[dict[str, Any]]):
@@ -127,7 +142,7 @@ def _template_data(template: WorkspaceMessageTemplateRevision) -> dict[str, obje
     }
 
 
-class SearchCategoryListView(APIView):
+class SearchCategoryListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
@@ -160,7 +175,7 @@ class SearchCategoryListView(APIView):
         )
 
 
-class SearchCategoryRulesView(APIView):
+class SearchCategoryRulesView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def _category(self, request: Request, category_id: UUID) -> SearchCategory:
@@ -177,8 +192,24 @@ class SearchCategoryRulesView(APIView):
         category = self._category(request, category_id)
         return Response({"data": SearchCategorySerializer(_category_data(category)).data})
 
+    def post(self, request: Request, category_id: UUID) -> Response:
+        category = self._category(request, category_id)
+        serializer = CategoryRulesInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            saved = save_config_item(
+                item=category,
+                actor=authenticated_user(request),
+                category_rules=cast(list[dict[str, object]], serializer.validated_data["rules"]),
+            )
+        except ValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return Response({"data": SearchCategorySerializer(_category_data(saved)).data})
 
-class SearchZoneListView(APIView):
+    patch = post
+
+
+class SearchZoneListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
@@ -202,7 +233,7 @@ class SearchZoneListView(APIView):
         return Response({"data": [SearchZoneSerializer(_zone_data(zone)).data for zone in zones]})
 
 
-class SearchZoneGeometryView(APIView):
+class SearchZoneGeometryView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request, zone_id: UUID) -> Response:
@@ -228,7 +259,7 @@ class SearchZoneGeometryView(APIView):
         )
 
 
-class MessageTemplateRevisionView(APIView):
+class MessageTemplateRevisionView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
@@ -261,7 +292,7 @@ class MessageTemplateRevisionView(APIView):
         )
 
 
-class PromptConfigurationView(APIView):
+class PromptConfigurationView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:

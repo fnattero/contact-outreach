@@ -7,13 +7,13 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q, QuerySet
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import PermissionDenied as ApiPermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability
 from apps.api.concurrency import add_etag, require_if_match
@@ -22,6 +22,7 @@ from apps.api.permissions import (
     ViewContactsPermission,
     authenticated_user,
 )
+from apps.api.schema import SchemaAPIView
 from apps.contacts.models import CommunicationRestriction, Contact, EmailAddress
 from apps.contacts.queries import contact_queryset, conversation_timelines
 from apps.contacts.services import (
@@ -91,6 +92,7 @@ class RestrictionSerializer(serializers.Serializer[dict[str, object]]):
     evidence = serializers.CharField()
     revoked_at = serializers.DateTimeField(allow_null=True)
     created_at = serializers.DateTimeField()
+    email_address_id = serializers.UUIDField(allow_null=True)
 
 
 def _workspace_contacts(actor: User) -> QuerySet[Contact]:
@@ -137,7 +139,7 @@ def _raise_domain_error(exc: ValidationError | PermissionDenied) -> NoReturn:
     raise _permission_error(exc) from exc
 
 
-class ContactListView(APIView):
+class ContactListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewContactsPermission)
 
     def get(self, request: Request) -> Response:
@@ -188,9 +190,10 @@ class ContactListView(APIView):
         )
 
 
-class ContactDetailView(APIView):
+class ContactDetailView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewContactsPermission)
 
+    @extend_schema(operation_id="contact_detail")
     def get(self, request: Request, contact_id: UUID) -> Response:
         contact = _contact(authenticated_user(request), contact_id)
         emails = list(
@@ -231,6 +234,7 @@ class ContactDetailView(APIView):
                     "evidence": item.evidence,
                     "revoked_at": item.revoked_at,
                     "created_at": item.created_at,
+                    "email_address_id": item.email_address_id,
                 }
             ).data
             for item in restrictions.select_related("email_address").order_by("-created_at")
@@ -295,7 +299,7 @@ class ContactDetailView(APIView):
         )
 
 
-class ContactEmailCreateView(APIView):
+class ContactEmailCreateView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
     def post(self, request: Request, contact_id: UUID) -> Response:
@@ -330,7 +334,7 @@ class ContactEmailCreateView(APIView):
         )
 
 
-class ContactEmailValidateView(APIView):
+class ContactEmailValidateView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
     def post(self, request: Request, contact_id: UUID, email_id: UUID) -> Response:
@@ -350,7 +354,7 @@ class ContactEmailValidateView(APIView):
         return Response({"data": {"status": "queued"}}, status=status.HTTP_202_ACCEPTED)
 
 
-class ContactPreferredEmailView(APIView):
+class ContactPreferredEmailView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
     def patch(self, request: Request, contact_id: UUID, email_id: UUID) -> Response:
@@ -363,7 +367,7 @@ class ContactPreferredEmailView(APIView):
         return Response({"data": ContactListSerializer(_contact_list_data(contact)).data})
 
 
-class ContactRestrictionView(APIView):
+class ContactRestrictionView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
     def post(self, request: Request, contact_id: UUID) -> Response:
@@ -408,6 +412,7 @@ class ContactRestrictionView(APIView):
                         "evidence": restriction.evidence,
                         "revoked_at": restriction.revoked_at,
                         "created_at": restriction.created_at,
+                        "email_address_id": restriction.email_address_id,
                     }
                 ).data
             },
@@ -415,7 +420,7 @@ class ContactRestrictionView(APIView):
         )
 
 
-class RestrictionRevokeView(APIView):
+class RestrictionRevokeView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
     def post(self, request: Request, contact_id: UUID, restriction_id: UUID) -> Response:
@@ -451,6 +456,7 @@ class RestrictionRevokeView(APIView):
                         "evidence": restriction.evidence,
                         "revoked_at": restriction.revoked_at,
                         "created_at": restriction.created_at,
+                        "email_address_id": restriction.email_address_id,
                     }
                 ).data
             }

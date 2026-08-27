@@ -126,10 +126,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     { key: "/settings/profile", label: <Link href="/settings/profile">Perfil comercial</Link> },
                     { key: "/settings/message-templates", label: <Link href="/settings/message-templates">Mensajes de campaña</Link> },
                     { key: "/settings/prompts", label: <Link href="/settings/prompts">Instrucciones</Link> },
+                    { key: "/settings/categories", label: <Link href="/settings/categories">Rubros</Link> },
                     { key: "/automation", label: <Link href="/automation">Automatización</Link> },
                     { key: "/settings/integrations", label: <Link href="/settings/integrations">Integraciones</Link> },
                     { key: "/settings/overture", label: <Link href="/settings/overture">Cobertura Overture</Link> },
                     { key: "/settings/users", label: <Link href="/settings/users">Usuarios</Link> },
+                    { key: "/audit", label: <Link href="/audit">Auditoría</Link> },
+                    { key: "/jobs", label: <Link href="/jobs">Tareas</Link> },
                   ]
                 : []),
             ]}

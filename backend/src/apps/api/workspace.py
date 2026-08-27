@@ -7,10 +7,10 @@ from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.concurrency import add_etag, require_if_match
 from apps.api.permissions import ManageConfigurationPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.configuration.models import BusinessProfile
 from apps.configuration.services import profile_snapshot, save_business_profile
 
@@ -31,7 +31,7 @@ class BusinessProfileSerializer(serializers.Serializer[dict[str, object]]):
     profile_version = serializers.IntegerField(read_only=True)
 
 
-class BusinessProfileView(APIView):
+class BusinessProfileView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:

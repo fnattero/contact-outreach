@@ -8,10 +8,10 @@ from rest_framework.exceptions import PermissionDenied as ApiPermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.auth import _reauthentication_active
 from apps.api.permissions import ManageAutomationPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.automation.models import ReplyAutomationConfiguration
 from apps.automation.services import set_live_mode, set_non_live_mode
 from apps.configuration.services import runtime_prompt_configuration, save_automatic_reply_prompt
@@ -47,7 +47,7 @@ def _configuration_data(configuration: ReplyAutomationConfiguration) -> dict[str
     }
 
 
-class AutomationConfigurationView(APIView):
+class AutomationConfigurationView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageAutomationPermission)
 
     def get(self, request: Request) -> Response:
@@ -78,7 +78,7 @@ class AutomationConfigurationView(APIView):
         )
 
 
-class AutomationLiveActionView(APIView):
+class AutomationLiveActionView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request, action: str) -> Response:
@@ -111,7 +111,7 @@ class AutomationLiveActionView(APIView):
         )
 
 
-class WritingInstructionsView(APIView):
+class WritingInstructionsView(SchemaAPIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request: Request) -> Response:

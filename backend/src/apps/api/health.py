@@ -5,13 +5,13 @@ import json
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.permissions import ManageIntegrationsPermission
+from apps.api.schema import SchemaAPIView
 from apps.health.views import degraded
 
 
-class DegradedHealthView(APIView):
+class DegradedHealthView(SchemaAPIView):
     """Expose operational detail only through the authenticated API boundary."""
 
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)

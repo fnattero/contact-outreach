@@ -38,6 +38,10 @@ class ManageAutomationPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_AUTOMATION
 
 
+class ManageKnowledgePermission(CapabilityPermission):
+    required_capability = Capability.MANAGE_KNOWLEDGE
+
+
 class ManageIntegrationsPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_INTEGRATIONS
 
@@ -80,6 +84,10 @@ class ViewJobsPermission(CapabilityPermission):
 
 class ViewAuditPermission(CapabilityPermission):
     required_capability = Capability.VIEW_AUDIT
+
+
+class ExportDataPermission(CapabilityPermission):
+    required_capability = Capability.EXPORT_DATA
 
 
 def authenticated_user(request: Request) -> User:

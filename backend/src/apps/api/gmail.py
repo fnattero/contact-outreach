@@ -13,9 +13,9 @@ from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.permissions import ManageIntegrationsPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.integrations.contracts import ProviderError
 from apps.mailbox.models import GmailConnection
 from apps.mailbox.services import (
@@ -59,7 +59,7 @@ def _redirect_uri(request: Request) -> str:
     return oauth_redirect_uri(request.build_absolute_uri(reverse("api-gmail-oauth-callback")))
 
 
-class GmailConnectionView(APIView):
+class GmailConnectionView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def get(self, request: Request) -> Response:
@@ -69,7 +69,7 @@ class GmailConnectionView(APIView):
         return Response({"data": _connection_data(connection)})
 
 
-class GmailOAuthStartView(APIView):
+class GmailOAuthStartView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def post(self, request: Request) -> Response:
@@ -94,7 +94,7 @@ class GmailOAuthStartView(APIView):
         return Response({"data": {"authorization_url": url}})
 
 
-class GmailOAuthCallbackView(APIView):
+class GmailOAuthCallbackView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def get(self, request: Request) -> HttpResponseRedirect:
@@ -134,7 +134,7 @@ class GmailOAuthCallbackView(APIView):
         return HttpResponseRedirect("/settings/integrations?gmail=connected")
 
 
-class GmailTestView(APIView):
+class GmailTestView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def post(self, request: Request) -> Response:
@@ -149,7 +149,7 @@ class GmailTestView(APIView):
         )
 
 
-class GmailDisconnectView(APIView):
+class GmailDisconnectView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def post(self, request: Request) -> Response:

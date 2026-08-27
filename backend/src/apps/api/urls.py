@@ -31,7 +31,16 @@ from apps.api.automation import (
     AutomationLiveActionView,
     WritingInstructionsView,
 )
-from apps.api.campaigns import CampaignActionView, CampaignDetailView, CampaignListView
+from apps.api.campaigns import (
+    CampaignActionView,
+    CampaignCoverageView,
+    CampaignDetailView,
+    CampaignEnrollmentListView,
+    CampaignListView,
+    CampaignMessageListView,
+    CampaignProspectListView,
+    ProspectExportView,
+)
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
 from apps.api.configuration import (
     MessageTemplateRevisionView,
@@ -60,19 +69,36 @@ from apps.api.gmail import (
 )
 from apps.api.health import DegradedHealthView
 from apps.api.integrations import IntegrationStatusView
+from apps.api.knowledge import (
+    KnowledgeContextApproveView,
+    KnowledgeContextRevisionView,
+    KnowledgeFactApproveView,
+    KnowledgeFactListView,
+    KnowledgeSearchPreviewView,
+)
 from apps.api.mailbox import (
     InboundManualReplyView,
+    InboundMessageExportView,
     InboundMessageListView,
     InboundMessageThreadView,
     OutboundMessageAuthorizeView,
     OutboundMessageDetailView,
     OutboundMessageDraftView,
+    OutboundMessageExportView,
     OutboundMessageListView,
 )
 from apps.api.operations import (
     AuditEventListView,
     BackgroundJobDetailView,
     BackgroundJobListView,
+    BackgroundJobRetryView,
+)
+from apps.api.scheduled import (
+    ContactPlanStateView,
+    ContactPlanView,
+    FollowUpTopicDetailView,
+    FollowUpTopicListView,
+    ScheduledAttemptActionView,
 )
 from apps.api.workspace import BusinessProfileView
 from apps.health.views import liveness, readiness
@@ -129,6 +155,33 @@ urlpatterns = [
         AutomationLiveActionView.as_view(),
         name="api-automation-action",
     ),
+    path("knowledge/facts/", KnowledgeFactListView.as_view(), name="api-knowledge-facts"),
+    path(
+        "knowledge/fact-revisions/<uuid:revision_id>/approve/",
+        KnowledgeFactApproveView.as_view(),
+        name="api-knowledge-fact-approve",
+    ),
+    path(
+        "knowledge/global-context-revisions/",
+        KnowledgeContextRevisionView.as_view(),
+        name="api-knowledge-context-revisions",
+    ),
+    path(
+        "knowledge/global-context-revisions/<uuid:revision_id>/approve/",
+        KnowledgeContextApproveView.as_view(),
+        name="api-knowledge-context-approve",
+    ),
+    path(
+        "knowledge/search-preview/",
+        KnowledgeSearchPreviewView.as_view(),
+        name="api-knowledge-search-preview",
+    ),
+    path("follow-up-topics/", FollowUpTopicListView.as_view(), name="api-follow-up-topics"),
+    path(
+        "follow-up-topics/<uuid:topic_id>/",
+        FollowUpTopicDetailView.as_view(),
+        name="api-follow-up-topic-detail",
+    ),
     path("attention/", AttentionView.as_view(), name="api-attention"),
     path(
         "human-tasks/<uuid:task_id>/<str:action>/",
@@ -173,10 +226,31 @@ urlpatterns = [
     ),
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="api-dashboard-summary"),
     path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
+    path("prospects/export.csv", ProspectExportView.as_view(), name="api-prospect-export"),
     path(
         "campaigns/<uuid:campaign_id>/",
         CampaignDetailView.as_view(),
         name="api-campaign-detail",
+    ),
+    path(
+        "campaigns/<uuid:campaign_id>/coverage-map/",
+        CampaignCoverageView.as_view(),
+        name="api-campaign-coverage",
+    ),
+    path(
+        "campaigns/<uuid:campaign_id>/enrollments/",
+        CampaignEnrollmentListView.as_view(),
+        name="api-campaign-enrollments",
+    ),
+    path(
+        "campaigns/<uuid:campaign_id>/messages/",
+        CampaignMessageListView.as_view(),
+        name="api-campaign-messages",
+    ),
+    path(
+        "campaigns/<uuid:campaign_id>/prospects/",
+        CampaignProspectListView.as_view(),
+        name="api-campaign-prospects",
     ),
     path(
         "campaigns/<uuid:campaign_id>/actions/<str:action>/",
@@ -190,7 +264,17 @@ urlpatterns = [
         BackgroundJobDetailView.as_view(),
         name="api-background-job-detail",
     ),
+    path(
+        "background-jobs/<uuid:job_id>/retry/",
+        BackgroundJobRetryView.as_view(),
+        name="api-background-job-retry",
+    ),
     path("inbound-messages/", InboundMessageListView.as_view(), name="api-inbound-messages"),
+    path(
+        "inbound-messages/export.csv",
+        InboundMessageExportView.as_view(),
+        name="api-inbound-message-export",
+    ),
     path(
         "inbound-messages/<uuid:inbound_id>/thread/",
         InboundMessageThreadView.as_view(),
@@ -202,6 +286,11 @@ urlpatterns = [
         name="api-inbound-message-manual-reply",
     ),
     path("outbound-messages/", OutboundMessageListView.as_view(), name="api-outbound-messages"),
+    path(
+        "outbound-messages/export.csv",
+        OutboundMessageExportView.as_view(),
+        name="api-outbound-message-export",
+    ),
     path(
         "outbound-messages/<uuid:message_id>/",
         OutboundMessageDetailView.as_view(),
@@ -225,6 +314,26 @@ urlpatterns = [
     ),
     path("contacts/", ContactListView.as_view(), name="api-contacts"),
     path("contacts/<uuid:contact_id>/", ContactDetailView.as_view(), name="api-contact-detail"),
+    path(
+        "contacts/<uuid:contact_id>/communication-plans/",
+        ContactPlanView.as_view(),
+        name="api-contact-communication-plans",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/communication-plans/<uuid:plan_id>/<str:action>/",
+        ContactPlanStateView.as_view(),
+        name="api-contact-communication-plan-action",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/scheduled-attempts/<uuid:attempt_id>/draft/",
+        ScheduledAttemptActionView.as_view(),
+        name="api-scheduled-attempt-draft",
+    ),
+    path(
+        "contacts/<uuid:contact_id>/scheduled-attempts/<uuid:attempt_id>/authorize/",
+        ScheduledAttemptActionView.as_view(),
+        name="api-scheduled-attempt-authorize",
+    ),
     path(
         "contacts/<uuid:contact_id>/emails/",
         ContactEmailCreateView.as_view(),

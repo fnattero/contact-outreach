@@ -3,9 +3,9 @@ from __future__ import annotations
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.permissions import ManageIntegrationsPermission, authenticated_user
+from apps.api.schema import SchemaAPIView
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.mailbox.models import GmailConnection
 
@@ -43,7 +43,7 @@ def _status_data(request: Request) -> dict[str, object]:
     }
 
 
-class IntegrationStatusView(APIView):
+class IntegrationStatusView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def get(self, request: Request) -> Response:

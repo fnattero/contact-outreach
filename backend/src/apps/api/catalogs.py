@@ -12,13 +12,13 @@ from rest_framework.exceptions import PermissionDenied as ApiPermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from apps.api.permissions import (
     DownloadPdfsPermission,
     ManageConfigurationPermission,
     authenticated_user,
 )
+from apps.api.schema import SchemaAPIView
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import create_catalog, verify_catalog
 
@@ -62,7 +62,7 @@ def _raise_catalog_error(exc: ValidationError | PermissionDenied) -> NoReturn:
     raise ApiPermissionDenied("El catálogo no está disponible.") from exc
 
 
-class CatalogListView(APIView):
+class CatalogListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
@@ -93,7 +93,7 @@ class CatalogListView(APIView):
         )
 
 
-class CatalogDownloadView(APIView):
+class CatalogDownloadView(SchemaAPIView):
     permission_classes = (IsAuthenticated, DownloadPdfsPermission)
 
     def get(self, request: Request, catalog_id: UUID) -> FileResponse:

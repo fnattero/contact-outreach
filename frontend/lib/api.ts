@@ -126,6 +126,7 @@ export type ContactRestriction = {
   evidence: string;
   revoked_at: string | null;
   created_at: string;
+  email_address_id: string | null;
 };
 
 export type ContactTimeline = {
@@ -152,6 +153,19 @@ export type ContactDetail = Contact & {
   emails: ContactEmail[];
   restrictions: ContactRestriction[];
   timelines: ContactTimeline[];
+};
+
+export type CommunicationPlan = {
+  id: string;
+  contact_id: string;
+  topic_id: string;
+  topic_name: string;
+  preferred_email_id: string;
+  state: string;
+  state_label: string;
+  mode: string;
+  next_due_at: string | null;
+  snoozed_until: string | null;
 };
 
 export type Catalog = {
@@ -276,6 +290,29 @@ export type AutomationConfiguration = {
   live_enabled_by: string | null;
 };
 
+export type KnowledgeFactRevision = {
+  id: string;
+  fact_id: string;
+  title: string;
+  category: string;
+  version: number;
+  text: string;
+  source_notes: string;
+  content_hash: string;
+  approved: boolean;
+  approved_at: string | null;
+};
+
+export type KnowledgeContextRevision = {
+  id: string;
+  version: number;
+  context_text: string;
+  source_notes: string;
+  content_hash: string;
+  approved: boolean;
+  approved_at: string | null;
+};
+
 export type AttentionTask = {
   id: string;
   contact_id: string;
@@ -304,6 +341,34 @@ export type OvertureStatus = {
     imported_at: string | null;
     error: string;
   }>;
+};
+
+export type BackgroundJob = {
+  id: string;
+  created_at: string;
+  task_name: string;
+  entity_type: string;
+  entity_id: string;
+  queue: string;
+  state: string;
+  state_label: string;
+  attempts: number;
+  heartbeat_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  next_retry_at: string | null;
+  error: string | null;
+};
+
+export type AuditEvent = {
+  id: string;
+  created_at: string;
+  actor: string | null;
+  actor_type: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  correlation_id: string;
 };
 
 export type DashboardMetrics = {
@@ -582,6 +647,81 @@ export function updateContact(id: string, name: string): Promise<Contact> {
   });
 }
 
+export function addContactEmail(
+  contactId: string,
+  email: string,
+  label: string,
+  makePreferred: boolean,
+): Promise<ContactEmail> {
+  return request<ContactEmail>(`/api/v1/contacts/${encodeURIComponent(contactId)}/emails/`, {
+    method: "POST",
+    body: JSON.stringify({ email, label, make_preferred: makePreferred }),
+  });
+}
+
+export function setPreferredEmail(contactId: string, emailId: string): Promise<Contact> {
+  return request<Contact>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/emails/${encodeURIComponent(emailId)}/preferred/`,
+    { method: "PATCH", body: "{}" },
+  );
+}
+
+export function validateContactEmail(contactId: string, emailId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/emails/${encodeURIComponent(emailId)}/validate/`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export function createContactRestriction(
+  contactId: string,
+  scope: "CONTACT" | "EMAIL",
+  reason: string,
+  emailAddressId?: string,
+): Promise<ContactRestriction> {
+  return request<ContactRestriction>(`/api/v1/contacts/${encodeURIComponent(contactId)}/restrictions/`, {
+    method: "POST",
+    body: JSON.stringify({ scope, reason, email_address_id: emailAddressId }),
+  });
+}
+
+export function revokeContactRestriction(
+  contactId: string,
+  restrictionId: string,
+  reason: string,
+): Promise<ContactRestriction> {
+  return request<ContactRestriction>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/restrictions/${encodeURIComponent(restrictionId)}/revoke/`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
+export function getCommunicationPlans(contactId: string): Promise<CommunicationPlan[]> {
+  return request<CommunicationPlan[]>(`/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/`);
+}
+
+export function createCommunicationPlan(
+  contactId: string,
+  input: { preferred_email_id: string; purpose: string; goal_text?: string; cadence_days: number; mode: string; enabled: boolean },
+): Promise<CommunicationPlan> {
+  return request<CommunicationPlan>(`/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function changeCommunicationPlan(
+  contactId: string,
+  planId: string,
+  action: "pause" | "disable" | "active" | "snooze",
+  body: Record<string, unknown> = {},
+): Promise<CommunicationPlan> {
+  return request<CommunicationPlan>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/${encodeURIComponent(planId)}/${action}/`,
+    { method: "POST", body: JSON.stringify(action === "active" || action === "pause" || action === "disable" ? { state: action === "active" ? "ACTIVE" : action === "pause" ? "PAUSED" : "DISABLED" } : body) },
+  );
+}
+
 export function getCatalogs(): Promise<Catalog[]> {
   return request<Catalog[]>("/api/v1/catalogs/");
 }
@@ -710,12 +850,72 @@ export function getAutomationConfiguration(): Promise<AutomationConfiguration> {
   return request<AutomationConfiguration>("/api/v1/automation/configuration/");
 }
 
+export function getKnowledgeFacts(): Promise<KnowledgeFactRevision[]> {
+  return request<KnowledgeFactRevision[]>("/api/v1/knowledge/facts/");
+}
+
+export function createKnowledgeFact(input: {
+  title: string;
+  category?: string;
+  text: string;
+  source_notes?: string;
+}): Promise<KnowledgeFactRevision> {
+  return request<KnowledgeFactRevision>("/api/v1/knowledge/facts/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getKnowledgeContexts(): Promise<KnowledgeContextRevision[]> {
+  return request<KnowledgeContextRevision[]>("/api/v1/knowledge/global-context-revisions/");
+}
+
+export function createKnowledgeContext(contextText: string): Promise<KnowledgeContextRevision> {
+  return request<KnowledgeContextRevision>("/api/v1/knowledge/global-context-revisions/", {
+    method: "POST",
+    body: JSON.stringify({ context_text: contextText }),
+  });
+}
+
+export function previewKnowledge(query: string): Promise<{
+  status: string;
+  matches: Array<{ revision_id: string; title: string; score: number; selected: boolean; may_be_irrelevant: boolean }>;
+}> {
+  return request(`/api/v1/knowledge/search-preview/`, {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  });
+}
+
 export function getAttention(): Promise<AttentionTask[]> {
   return request<AttentionTask[]>("/api/v1/attention/");
 }
 
 export function getOvertureStatus(): Promise<OvertureStatus> {
   return request<OvertureStatus>("/api/v1/overture/status/");
+}
+
+export function getBackgroundJobs(): Promise<ApiPage<BackgroundJob[]>> {
+  return requestEnvelope<BackgroundJob[]>("/api/v1/background-jobs/") as Promise<
+    ApiPage<BackgroundJob[]>
+  >;
+}
+
+export function retryBackgroundJob(
+  id: string,
+  reason: string,
+): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/background-jobs/${encodeURIComponent(id)}/retry/`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function getAuditEvents(): Promise<ApiPage<AuditEvent[]>> {
+  return requestEnvelope<AuditEvent[]>("/api/v1/audit-events/") as Promise<
+    ApiPage<AuditEvent[]>
+  >;
 }
 
 export function syncOverture(releaseId: string, provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
@@ -757,6 +957,23 @@ export function reauthenticate(password: string): Promise<{ reauthentication_act
 
 export function getSearchCategories(): Promise<SearchCategory[]> {
   return request<SearchCategory[]>("/api/v1/search-categories/");
+}
+
+export function createSearchCategory(name: string, sortOrder = 0): Promise<SearchCategory> {
+  return request<SearchCategory>("/api/v1/search-categories/", {
+    method: "POST",
+    body: JSON.stringify({ name, sort_order: sortOrder }),
+  });
+}
+
+export function updateSearchCategoryRules(
+  id: string,
+  rules: Array<{ taxonomy_code?: string; name_terms: string[] }>,
+): Promise<SearchCategory> {
+  return request<SearchCategory>(`/api/v1/search-categories/${encodeURIComponent(id)}/rules/`, {
+    method: "PATCH",
+    body: JSON.stringify({ rules }),
+  });
 }
 
 export function getSearchZones(level?: string): Promise<SearchZone[]> {
