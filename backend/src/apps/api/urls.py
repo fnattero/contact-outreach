@@ -33,6 +33,7 @@ from apps.api.contacts import (
 )
 from apps.api.dashboard import DashboardSummaryView
 from apps.api.health import DegradedHealthView
+from apps.api.integrations import IntegrationStatusView
 from apps.api.mailbox import (
     InboundMessageListView,
     InboundMessageThreadView,
@@ -78,6 +79,7 @@ urlpatterns = [
         name="api-user-activation-link",
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
+    path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="api-dashboard-summary"),
     path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
     path(
