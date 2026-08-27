@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 
 
@@ -69,4 +69,19 @@ def server_error(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpRespons
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
     del reason
+    if request.path.startswith("/api/"):
+        response = JsonResponse(
+            {
+                "type": "about:blank",
+                "title": "Confirmación de seguridad inválida",
+                "status": 403,
+                "code": "csrf_failed",
+                "detail": "Actualizá la página y volvé a intentar.",
+                "correlation_id": getattr(request, "correlation_id", ""),
+            },
+            status=403,
+            content_type="application/problem+json",
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
     return permission_denied(request)

@@ -69,6 +69,10 @@ def test_login_requires_csrf_and_returns_an_authenticated_session(owner: User) -
         content_type="application/json",
     )
     assert without_csrf.status_code == 403
+    assert without_csrf["Content-Type"].startswith("application/problem+json")
+    assert without_csrf["Cache-Control"] == "private, no-store"
+    assert without_csrf.json()["code"] == "csrf_failed"
+    assert without_csrf.json()["correlation_id"]
 
     response = _json_post(client, reverse("api-auth-login"), payload, _csrf_token(client))
 
