@@ -251,6 +251,31 @@ export type GmailConnection = {
   error: string | null;
 };
 
+export type MessageTemplate = {
+  id: string;
+  kind: "INITIAL" | "REMINDER" | "REFERRED_PROPOSAL";
+  subject: string;
+  body: string;
+  revision: number;
+  content_hash: string;
+  approved_at: string;
+  active: boolean;
+};
+
+export type PromptConfiguration = {
+  email_drafting_prompt: string;
+  automatic_reply_prompt: string;
+  revision: number;
+};
+
+export type AutomationConfiguration = {
+  mode: "OFF" | "SHADOW" | "LIVE";
+  mode_label: string;
+  policy_version: string;
+  live_enabled_at: string | null;
+  live_enabled_by: string | null;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -307,6 +332,11 @@ type ApiPage<T> = ApiEnvelope<T> & {
 };
 
 let csrfToken: string | null = null;
+
+export type VersionedResource<T> = {
+  data: T;
+  etag: string | null;
+};
 
 function correlationId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -379,6 +409,28 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await requestEnvelope<T>(path, init)).data;
 }
 
+async function requestVersioned<T>(path: string, init: RequestInit = {}): Promise<VersionedResource<T>> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  headers.set("X-Correlation-ID", correlationId());
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers.set("X-CSRFToken", csrfToken ?? (await getCsrfToken()));
+  }
+  const response = await fetch(path, {
+    ...init,
+    method,
+    headers,
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) throw await responseError(response);
+  const body = (await response.json()) as ApiEnvelope<T>;
+  const etag = response.headers.get("ETag");
+  return { data: body.data, etag };
+}
+
 export function getSession(): Promise<UserSession> {
   return request<UserSession>("/api/v1/auth/session/");
 }
@@ -396,6 +448,33 @@ export function getCampaigns(): Promise<ApiPage<DashboardCampaign[]>> {
 
 export function getCampaign(id: string): Promise<CampaignDetail> {
   return request<CampaignDetail>(`/api/v1/campaigns/${encodeURIComponent(id)}/`);
+}
+
+export type CampaignAction =
+  | "start-discovery"
+  | "approve"
+  | "start-approved"
+  | "pause"
+  | "resume"
+  | "cancel";
+
+export function runCampaignAction(
+  id: string,
+  action: CampaignAction,
+  reason = "",
+): Promise<CampaignDetail> {
+  const idempotencyKey =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return request<CampaignDetail>(
+    `/api/v1/campaigns/${encodeURIComponent(id)}/actions/${action}/`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
 }
 
 export function getInboundMessages(): Promise<ApiPage<InboundMessage[]>> {
@@ -476,9 +555,17 @@ export function getBusinessProfile(): Promise<BusinessProfile | null> {
   return request<BusinessProfile | null>("/api/v1/workspace/profile/");
 }
 
-export function updateBusinessProfile(values: Partial<BusinessProfile>): Promise<BusinessProfile> {
+export function getBusinessProfileVersioned(): Promise<VersionedResource<BusinessProfile | null>> {
+  return requestVersioned<BusinessProfile | null>("/api/v1/workspace/profile/");
+}
+
+export function updateBusinessProfile(
+  values: Partial<BusinessProfile>,
+  etag?: string,
+): Promise<BusinessProfile> {
   return request<BusinessProfile>("/api/v1/workspace/profile/", {
     method: "PATCH",
+    headers: etag ? { "If-Match": etag } : undefined,
     body: JSON.stringify(values),
   });
 }
@@ -538,6 +625,66 @@ export function disconnectGmail(): Promise<GmailConnection> {
   return request<GmailConnection>("/api/v1/integrations/gmail/disconnect/", {
     method: "POST",
     body: "{}",
+  });
+}
+
+export function getMessageTemplates(): Promise<MessageTemplate[]> {
+  return request<MessageTemplate[]>("/api/v1/message-template-revisions/");
+}
+
+export function createMessageTemplate(input: {
+  kind: MessageTemplate["kind"];
+  subject: string;
+  body: string;
+}): Promise<MessageTemplate> {
+  return request<MessageTemplate>("/api/v1/message-template-revisions/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getPromptConfiguration(): Promise<PromptConfiguration> {
+  return request<PromptConfiguration>("/api/v1/prompts/");
+}
+
+export function updatePromptConfiguration(emailDraftingPrompt: string): Promise<PromptConfiguration> {
+  return request<PromptConfiguration>("/api/v1/prompts/", {
+    method: "PATCH",
+    body: JSON.stringify({ email_drafting_prompt: emailDraftingPrompt }),
+  });
+}
+
+export function updateAutomaticReplyPrompt(prompt: string): Promise<{ automatic_reply_prompt: string }> {
+  return request<{ automatic_reply_prompt: string }>("/api/v1/automation/writing-instructions/", {
+    method: "PATCH",
+    body: JSON.stringify({ automatic_reply_prompt: prompt }),
+  });
+}
+
+export function getAutomationConfiguration(): Promise<AutomationConfiguration> {
+  return request<AutomationConfiguration>("/api/v1/automation/configuration/");
+}
+
+export function updateAutomationMode(
+  mode: "OFF" | "SHADOW",
+): Promise<AutomationConfiguration> {
+  return request<AutomationConfiguration>("/api/v1/automation/configuration/", {
+    method: "PATCH",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function setAutomationLive(action: "enable-live" | "disable-live"): Promise<AutomationConfiguration> {
+  return request<AutomationConfiguration>(`/api/v1/automation/actions/${action}/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function reauthenticate(password: string): Promise<{ reauthentication_active: boolean }> {
+  return request<{ reauthentication_active: boolean }>("/api/v1/auth/reauthenticate/", {
+    method: "POST",
+    body: JSON.stringify({ password }),
   });
 }
 

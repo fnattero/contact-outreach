@@ -20,9 +20,16 @@ from apps.api.auth import (
     ReauthenticateView,
     SessionView,
 )
+from apps.api.automation import (
+    AutomationConfigurationView,
+    AutomationLiveActionView,
+    WritingInstructionsView,
+)
 from apps.api.campaigns import CampaignActionView, CampaignDetailView, CampaignListView
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
 from apps.api.configuration import (
+    MessageTemplateRevisionView,
+    PromptConfigurationView,
     SearchCategoryListView,
     SearchCategoryRulesView,
     SearchZoneGeometryView,
@@ -93,6 +100,27 @@ urlpatterns = [
         name="api-user-activation-link",
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
+    path(
+        "message-template-revisions/",
+        MessageTemplateRevisionView.as_view(),
+        name="api-message-template-revisions",
+    ),
+    path("prompts/", PromptConfigurationView.as_view(), name="api-prompts"),
+    path(
+        "automation/configuration/",
+        AutomationConfigurationView.as_view(),
+        name="api-automation-configuration",
+    ),
+    path(
+        "automation/writing-instructions/",
+        WritingInstructionsView.as_view(),
+        name="api-automation-writing-instructions",
+    ),
+    path(
+        "automation/actions/<str:action>/",
+        AutomationLiveActionView.as_view(),
+        name="api-automation-action",
+    ),
     path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
     path(
         "integrations/gmail/connection/",

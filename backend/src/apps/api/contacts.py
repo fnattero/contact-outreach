@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability
+from apps.api.concurrency import add_etag, require_if_match
 from apps.api.permissions import (
     ManageContactsPermission,
     ViewContactsPermission,
@@ -262,16 +263,19 @@ class ContactDetailView(APIView):
             }
             for timeline in timelines
         ]
-        return Response(
-            {
-                "data": {
-                    **_contact_list_data(contact),
-                    "organization_id": contact.organization_id,
-                    "emails": email_data,
-                    "restrictions": restriction_data,
-                    "timelines": timeline_data,
+        return add_etag(
+            Response(
+                {
+                    "data": {
+                        **_contact_list_data(contact),
+                        "organization_id": contact.organization_id,
+                        "emails": email_data,
+                        "restrictions": restriction_data,
+                        "timelines": timeline_data,
+                    }
                 }
-            }
+            ),
+            contact,
         )
 
     def patch(self, request: Request, contact_id: UUID) -> Response:
@@ -281,11 +285,14 @@ class ContactDetailView(APIView):
         serializer = ContactPatchSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         contact = _contact(actor, contact_id)
+        require_if_match(request, contact)
         if "name" in serializer.validated_data:
             contact.name = cast(str, serializer.validated_data["name"]).strip()
             contact.save(update_fields=("name", "updated_at"))
         contact.refresh_from_db()
-        return Response({"data": ContactListSerializer(_contact_list_data(contact)).data})
+        return add_etag(
+            Response({"data": ContactListSerializer(_contact_list_data(contact)).data}), contact
+        )
 
 
 class ContactEmailCreateView(APIView):

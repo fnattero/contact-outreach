@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
+from apps.api.concurrency import add_etag
 from apps.api.permissions import (
     ManageCampaignsPermission,
     ViewCampaignsPermission,
@@ -276,13 +277,16 @@ class CampaignDetailView(APIView):
             campaign = queryset.get(pk=campaign_id)
         except Campaign.DoesNotExist as exc:
             raise serializers.ValidationError({"campaign_id": "La campaña no existe."}) from exc
-        return Response(
-            {
-                "data": _campaign_data(
-                    campaign,
-                    include_admin=has_capability(user, Capability.MANAGE_CAMPAIGNS),
-                )
-            }
+        return add_etag(
+            Response(
+                {
+                    "data": _campaign_data(
+                        campaign,
+                        include_admin=has_capability(user, Capability.MANAGE_CAMPAIGNS),
+                    )
+                }
+            ),
+            campaign,
         )
 
 

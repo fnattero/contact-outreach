@@ -9,6 +9,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.api.concurrency import add_etag, require_if_match
 from apps.api.permissions import ManageConfigurationPermission, authenticated_user
 from apps.configuration.models import BusinessProfile
 from apps.configuration.services import profile_snapshot, save_business_profile
@@ -37,13 +38,21 @@ class BusinessProfileView(APIView):
         profile = BusinessProfile.objects.filter(
             workspace=authenticated_user(request).membership.workspace
         ).first()
-        return Response(
+        response = Response(
             {"data": BusinessProfileSerializer(profile_snapshot(profile)).data if profile else None}
         )
+        if profile is not None:
+            add_etag(response, profile)
+        return response
 
     def patch(self, request: Request) -> Response:
         serializer = BusinessProfileSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        current = BusinessProfile.objects.filter(
+            workspace=authenticated_user(request).membership.workspace
+        ).first()
+        if current is not None:
+            require_if_match(request, current)
         try:
             profile = save_business_profile(
                 owner=authenticated_user(request),
@@ -53,4 +62,6 @@ class BusinessProfileView(APIView):
             if hasattr(exc, "message_dict"):
                 raise serializers.ValidationError(exc.message_dict) from exc
             raise serializers.ValidationError(str(exc)) from exc
-        return Response({"data": BusinessProfileSerializer(profile_snapshot(profile)).data})
+        return add_etag(
+            Response({"data": BusinessProfileSerializer(profile_snapshot(profile)).data}), profile
+        )

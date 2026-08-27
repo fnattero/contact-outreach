@@ -279,11 +279,23 @@ def test_business_profile_is_admin_only_and_uses_explicit_fields(owner: User) ->
         "relevance_threshold": 80,
     }
 
+    initial = client.patch(
+        url,
+        data=json.dumps(values),
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf_token,
+    )
+    assert initial.status_code == 200
+    current = client.get(url)
+    assert current.status_code == 200
+    etag = current["ETag"]
+
     response = client.patch(
         url,
         data=json.dumps(values),
         content_type="application/json",
         HTTP_X_CSRFTOKEN=csrf_token,
+        HTTP_IF_MATCH=etag,
     )
 
     assert response.status_code == 200

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound
@@ -12,7 +13,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.api.permissions import ManageConfigurationPermission, authenticated_user
-from apps.configuration.models import SearchCategory, SearchZone
+from apps.configuration.message_templates import (
+    create_message_template_revision,
+    ensure_default_message_templates,
+)
+from apps.configuration.models import (
+    SearchCategory,
+    SearchZone,
+    WorkspaceMessageTemplateRevision,
+)
+from apps.configuration.services import runtime_prompt_configuration, save_prompt_configuration
 
 
 class SearchCategoryInputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -40,6 +50,33 @@ class SearchZoneSerializer(serializers.Serializer[dict[str, Any]]):
     location_text = serializers.CharField()
     boundary_revision = serializers.IntegerField()
     boundary_hash = serializers.CharField()
+
+
+class MessageTemplateInputSerializer(serializers.Serializer[dict[str, Any]]):
+    kind = serializers.ChoiceField(choices=WorkspaceMessageTemplateRevision.Kind.choices)
+    subject = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    body = serializers.CharField(max_length=12000)
+
+
+class MessageTemplateSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField()
+    kind = serializers.CharField()
+    subject = serializers.CharField()
+    body = serializers.CharField()
+    revision = serializers.IntegerField()
+    content_hash = serializers.CharField()
+    approved_at = serializers.DateTimeField()
+    active = serializers.BooleanField()
+
+
+class PromptInputSerializer(serializers.Serializer[dict[str, Any]]):
+    email_drafting_prompt = serializers.CharField(max_length=4000)
+
+
+class PromptSerializer(serializers.Serializer[dict[str, Any]]):
+    email_drafting_prompt = serializers.CharField()
+    automatic_reply_prompt = serializers.CharField()
+    revision = serializers.IntegerField()
 
 
 def _category_data(category: SearchCategory) -> dict[str, object]:
@@ -74,6 +111,19 @@ def _zone_data(zone: SearchZone) -> dict[str, object]:
         "location_text": zone.location_text,
         "boundary_revision": zone.boundary_revision,
         "boundary_hash": zone.boundary_hash,
+    }
+
+
+def _template_data(template: WorkspaceMessageTemplateRevision) -> dict[str, object]:
+    return {
+        "id": template.pk,
+        "kind": template.kind,
+        "subject": template.subject,
+        "body": template.body,
+        "revision": template.revision,
+        "content_hash": template.content_hash,
+        "approved_at": template.approved_at,
+        "active": template.active,
     }
 
 
@@ -174,5 +224,78 @@ class SearchZoneGeometryView(APIView):
                     "geojson": zone.boundary_geojson,
                     "bbox": zone.boundary_bbox,
                 }
+            }
+        )
+
+
+class MessageTemplateRevisionView(APIView):
+    permission_classes = (IsAuthenticated, ManageConfigurationPermission)
+
+    def get(self, request: Request) -> Response:
+        workspace = authenticated_user(request).membership.workspace
+        ensure_default_message_templates(workspace)
+        templates = WorkspaceMessageTemplateRevision.objects.filter(workspace=workspace).order_by(
+            "kind", "-revision"
+        )
+        return Response(
+            {"data": [MessageTemplateSerializer(_template_data(item)).data for item in templates]}
+        )
+
+    def post(self, request: Request) -> Response:
+        serializer = MessageTemplateInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        workspace = authenticated_user(request).membership.workspace
+        try:
+            template = create_message_template_revision(
+                workspace=workspace,
+                actor=authenticated_user(request),
+                kind=cast(str, serializer.validated_data["kind"]),
+                subject=cast(str, serializer.validated_data.get("subject", "")),
+                body=cast(str, serializer.validated_data["body"]),
+            )
+        except ValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return Response(
+            {"data": MessageTemplateSerializer(_template_data(template)).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PromptConfigurationView(APIView):
+    permission_classes = (IsAuthenticated, ManageConfigurationPermission)
+
+    def get(self, request: Request) -> Response:
+        runtime = runtime_prompt_configuration(authenticated_user(request).pk)
+        return Response(
+            {
+                "data": PromptSerializer(
+                    {
+                        "email_drafting_prompt": runtime.email_drafting_prompt,
+                        "automatic_reply_prompt": runtime.automatic_reply_prompt,
+                        "revision": runtime.revision,
+                    }
+                ).data
+            }
+        )
+
+    def patch(self, request: Request) -> Response:
+        serializer = PromptInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            saved = save_prompt_configuration(
+                owner=authenticated_user(request),
+                email_drafting_prompt=cast(str, serializer.validated_data["email_drafting_prompt"]),
+            )
+        except ValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return Response(
+            {
+                "data": PromptSerializer(
+                    {
+                        "email_drafting_prompt": saved.email_drafting_prompt,
+                        "automatic_reply_prompt": saved.automatic_reply_prompt,
+                        "revision": saved.revision,
+                    }
+                ).data
             }
         )

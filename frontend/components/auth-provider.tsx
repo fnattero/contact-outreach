@@ -123,6 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 ? [
                     { key: "/catalogs", label: <Link href="/catalogs">Catálogos</Link> },
                     { key: "/settings/profile", label: <Link href="/settings/profile">Perfil comercial</Link> },
+                    { key: "/settings/message-templates", label: <Link href="/settings/message-templates">Mensajes de campaña</Link> },
+                    { key: "/settings/prompts", label: <Link href="/settings/prompts">Instrucciones</Link> },
+                    { key: "/automation", label: <Link href="/automation">Automatización</Link> },
                     { key: "/settings/integrations", label: <Link href="/settings/integrations">Integraciones</Link> },
                     { key: "/settings/users", label: <Link href="/settings/users">Usuarios</Link> },
                   ]

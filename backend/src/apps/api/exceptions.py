@@ -52,6 +52,12 @@ def api_exception_handler(exc: Exception, context: dict[str, Any]) -> Response |
     elif status == 429:
         title = "Demasiadas solicitudes"
         code = "rate_limited"
+    elif status == 412:
+        title = "El recurso cambió"
+        code = "precondition_failed"
+    elif status == 428:
+        title = "Falta la versión del recurso"
+        code = "precondition_required"
     elif status == 400:
         title = "Solicitud inválida"
         code = "validation_error"

@@ -4,7 +4,7 @@ import { Alert, Button, Card, Flex, Form, Input, InputNumber, Skeleton, Typograp
 import { useEffect, useState } from "react";
 import { AuthError } from "@/components/auth-provider";
 import {
-  getBusinessProfile,
+  getBusinessProfileVersioned,
   problemMessage,
   updateBusinessProfile,
   type BusinessProfile,
@@ -16,10 +16,14 @@ export default function ProfileSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [etag, setEtag] = useState<string | null>(null);
 
   useEffect(() => {
-    void getBusinessProfile()
-      .then(setProfile)
+    void getBusinessProfileVersioned()
+      .then(({ data, etag: nextEtag }) => {
+        setProfile(data);
+        setEtag(nextEtag);
+      })
       .catch(setError)
       .finally(() => setLoading(false));
   }, []);
@@ -28,7 +32,10 @@ export default function ProfileSettingsPage() {
     setSaving(true);
     setError(null);
     try {
-      setProfile(await updateBusinessProfile(values));
+      const saved = await updateBusinessProfile(values, etag ?? undefined);
+      setProfile(saved);
+      const refreshed = await getBusinessProfileVersioned();
+      setEtag(refreshed.etag);
     } catch (problem) {
       setError(problem);
     } finally {

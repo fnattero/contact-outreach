@@ -1,15 +1,35 @@
 "use client";
 
-import { Alert, Card, Descriptions, Empty, Flex, Skeleton, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Flex,
+  Popconfirm,
+  Skeleton,
+  Tag,
+  Typography,
+} from "antd";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { AuthError } from "@/components/auth-provider";
-import { getCampaign, type CampaignDetail } from "@/lib/api";
+import { AuthError, useAuth } from "@/components/auth-provider";
+import {
+  getCampaign,
+  problemMessage,
+  runCampaignAction,
+  type CampaignAction,
+  type CampaignDetail,
+  type Problem,
+} from "@/lib/api";
 
 export default function CampaignDetailPage() {
   const params = useParams<{ id: string }>();
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [busyAction, setBusyAction] = useState<CampaignAction | null>(null);
+  const { session } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -27,6 +47,38 @@ export default function CampaignDetailPage() {
 
   if (error) return <AuthError error={error} />;
   if (!campaign) return <Skeleton active paragraph={{ rows: 8 }} />;
+  const currentCampaign = campaign;
+
+  async function performAction(action: CampaignAction) {
+    setBusyAction(action);
+    setError(null);
+    try {
+      setCampaign(await runCampaignAction(currentCampaign.id, action));
+    } catch (problem) {
+      setError(problem);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  const actionLabel: Record<CampaignAction, string> = {
+    "start-discovery": "Iniciar descubrimiento",
+    approve: "Aprobar audiencia y contenido",
+    "start-approved": "Iniciar entrega",
+    pause: "Pausar",
+    resume: "Reanudar",
+    cancel: "Cancelar",
+  };
+  const availableActions: CampaignAction[] =
+    campaign.state === "DRAFT"
+      ? ["start-discovery"]
+      : campaign.state === "AWAITING_APPROVAL"
+        ? [campaign.approval_mode === "PER_MESSAGE" ? "start-approved" : "approve"]
+        : campaign.state === "RUNNING"
+            ? ["pause", "cancel"]
+          : campaign.state === "PAUSED"
+            ? ["resume", "cancel"]
+            : [];
 
   return (
     <Flex vertical gap="large">
@@ -38,6 +90,35 @@ export default function CampaignDetailPage() {
           <Tag>{campaign.discovery_state_label}</Tag>
         </Flex>
       </div>
+      {session?.role === "ADMIN" && availableActions.length ? (
+        <Card title="Acciones de campaña">
+          <Flex gap="small" wrap>
+            {availableActions.map((action) => (
+              <Popconfirm
+                key={action}
+                title={action === "cancel" ? "¿Cancelar esta campaña?" : actionLabel[action]}
+                description={
+                  action === "start-approved"
+                    ? "El backend volverá a comprobar las restricciones y los kill switches antes de cada efecto."
+                    : undefined
+                }
+                okText="Confirmar"
+                cancelText="Volver"
+                onConfirm={() => void performAction(action)}
+              >
+                <Button
+                  danger={action === "cancel"}
+                  type={action === "start-approved" ? "primary" : "default"}
+                  loading={busyAction === action}
+                >
+                  {actionLabel[action]}
+                </Button>
+              </Popconfirm>
+            ))}
+          </Flex>
+        </Card>
+      ) : null}
+      {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       <Card title="Configuración">
         <Descriptions column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item label="Objetivo">{campaign.objective ?? "—"}</Descriptions.Item>
