@@ -276,6 +276,36 @@ export type AutomationConfiguration = {
   live_enabled_by: string | null;
 };
 
+export type AttentionTask = {
+  id: string;
+  contact_id: string;
+  contact_name: string;
+  kind: string;
+  reason: string;
+  status: string;
+  title: string;
+  summary: string;
+  next_step: string;
+  opened_at: string;
+};
+
+export type OvertureStatus = {
+  latest_snapshot_id: string | null;
+  active_snapshot_id: string | null;
+  release_checks: Array<{ status: string; latest_release: string; created_at: string }>;
+  partitions: Array<{
+    id: string;
+    release_id: string;
+    province_code: string;
+    province_name: string;
+    status: string;
+    is_active: boolean;
+    place_count: number;
+    imported_at: string | null;
+    error: string;
+  }>;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -663,6 +693,28 @@ export function updateAutomaticReplyPrompt(prompt: string): Promise<{ automatic_
 
 export function getAutomationConfiguration(): Promise<AutomationConfiguration> {
   return request<AutomationConfiguration>("/api/v1/automation/configuration/");
+}
+
+export function getAttention(): Promise<AttentionTask[]> {
+  return request<AttentionTask[]>("/api/v1/attention/");
+}
+
+export function getOvertureStatus(): Promise<OvertureStatus> {
+  return request<OvertureStatus>("/api/v1/overture/status/");
+}
+
+export function syncOverture(releaseId: string, provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
+  return request<{ status: string; celery_task_id: string; province_code: string }>("/api/v1/overture/sync/", {
+    method: "POST",
+    body: JSON.stringify({ release_id: releaseId, province_code: provinceCode }),
+  });
+}
+
+export function resolveHumanTask(id: string, action: "resolve" | "dismiss", note: string): Promise<{ id: string; status: string }> {
+  return request<{ id: string; status: string }>(`/api/v1/human-tasks/${encodeURIComponent(id)}/${action}/`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
 }
 
 export function updateAutomationMode(

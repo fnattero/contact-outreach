@@ -118,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               { key: "/contacts", label: <Link href="/contacts">Contactos</Link> },
               { key: "/campaigns", label: <Link href="/campaigns">Campañas</Link> },
               { key: "/responses", label: <Link href="/responses">Respuestas</Link> },
+              { key: "/attention", label: <Link href="/attention">Atención</Link> },
               { key: "/outbound", label: <Link href="/outbound">Envíos</Link> },
               ...(session.role === "ADMIN"
                 ? [
@@ -127,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     { key: "/settings/prompts", label: <Link href="/settings/prompts">Instrucciones</Link> },
                     { key: "/automation", label: <Link href="/automation">Automatización</Link> },
                     { key: "/settings/integrations", label: <Link href="/settings/integrations">Integraciones</Link> },
+                    { key: "/settings/overture", label: <Link href="/settings/overture">Cobertura Overture</Link> },
                     { key: "/settings/users", label: <Link href="/settings/users">Usuarios</Link> },
                   ]
                 : []),

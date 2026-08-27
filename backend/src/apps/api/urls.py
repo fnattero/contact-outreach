@@ -12,6 +12,12 @@ from apps.api.admin import (
     UserRoleView,
     UserStatusView,
 )
+from apps.api.advanced import (
+    AttentionView,
+    HumanTaskActionView,
+    OvertureStatusView,
+    OvertureSyncView,
+)
 from apps.api.auth import (
     ActivateView,
     CsrfView,
@@ -121,6 +127,14 @@ urlpatterns = [
         AutomationLiveActionView.as_view(),
         name="api-automation-action",
     ),
+    path("attention/", AttentionView.as_view(), name="api-attention"),
+    path(
+        "human-tasks/<uuid:task_id>/<str:action>/",
+        HumanTaskActionView.as_view(),
+        name="api-human-task-action",
+    ),
+    path("overture/status/", OvertureStatusView.as_view(), name="api-overture-status"),
+    path("overture/sync/", OvertureSyncView.as_view(), name="api-overture-sync"),
     path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
     path(
         "integrations/gmail/connection/",
