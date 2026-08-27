@@ -23,7 +23,8 @@ function backendUrl(path: string[], search: string): URL {
   if (!base) {
     throw new Error("BACKEND_INTERNAL_URL is not configured");
   }
-  const url = new URL(`/api/v1/${path.map(encodeURIComponent).join("/")}`, base);
+  const encodedPath = path.map(encodeURIComponent).join("/");
+  const url = new URL(`/api/v1/${encodedPath}/`, base);
   url.search = search;
   return url;
 }

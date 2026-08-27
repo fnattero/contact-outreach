@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import ipaddress
 from collections.abc import Callable
 
@@ -20,6 +21,12 @@ def _trusted_proxy(remote_address: str) -> bool:
         if remote in network:
             return True
     return False
+
+
+def internal_proxy_authenticated(request: HttpRequest) -> bool:
+    expected = getattr(settings, "INTERNAL_PROXY_TOKEN", "")
+    received = request.META.get("HTTP_X_INTERNAL_PROXY_TOKEN", "")
+    return bool(expected and received and hmac.compare_digest(received, expected))
 
 
 def _trusted_railway_proxy(request: HttpRequest) -> bool:
@@ -45,16 +52,20 @@ class TrustedProxySecurityMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         trusted_by_cidr = _trusted_proxy(request.META.get("REMOTE_ADDR", ""))
+        trusted_by_internal = internal_proxy_authenticated(request)
         trusted_by_railway = _trusted_railway_proxy(request)
-        if not trusted_by_cidr and not trusted_by_railway:
+        if not trusted_by_cidr and not trusted_by_internal and not trusted_by_railway:
             request.META.pop("HTTP_X_FORWARDED_PROTO", None)
             request.META.pop("HTTP_X_FORWARDED_HOST", None)
             request.META.pop("HTTP_X_FORWARDED_FOR", None)
-        elif trusted_by_railway and not trusted_by_cidr:
+        elif (trusted_by_railway or trusted_by_internal) and not trusted_by_cidr:
             # The Railway marker is only used to establish HTTPS. Do not
-            # accept client-address or host forwarding without a CIDR trust
-            # boundary, because those values influence auditing and throttles.
-            request.META.pop("HTTP_X_FORWARDED_HOST", None)
+            # accept client-address forwarding without a CIDR trust boundary,
+            # because that value influences auditing and throttles. The private
+            # frontend proxy is separately authenticated by a secret token and
+            # is allowed to forward the canonical public host.
+            if not trusted_by_internal:
+                request.META.pop("HTTP_X_FORWARDED_HOST", None)
             request.META.pop("HTTP_X_FORWARDED_FOR", None)
         return self.get_response(request)
 

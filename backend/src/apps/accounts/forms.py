@@ -32,37 +32,6 @@ class ActivationPasswordForm(SetPasswordForm):  # type: ignore[type-arg]
     pass
 
 
-class OTPTokenForm(forms.Form):
-    token = forms.CharField(
-        label="Código de la aplicación",
-        max_length=32,
-        required=False,
-        widget=forms.TextInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
-    )
-    recovery_code = forms.CharField(
-        label="Código de recuperación",
-        max_length=32,
-        required=False,
-    )
-
-    def clean(self) -> dict[str, Any]:
-        cleaned: dict[str, Any] = super().clean() or {}
-        if not cleaned.get("token") and not cleaned.get("recovery_code"):
-            raise forms.ValidationError("Ingresá un código de la aplicación o de recuperación.")
-        if cleaned.get("token") and cleaned.get("recovery_code"):
-            raise forms.ValidationError("Usá un solo tipo de código.")
-        return cleaned
-
-
-class OTPEnrollmentForm(forms.Form):
-    token = forms.CharField(
-        label="Código de seis dígitos",
-        min_length=6,
-        max_length=6,
-        widget=forms.TextInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
-    )
-
-
 class RoleChangeForm(forms.Form):
     role = forms.ChoiceField(label="Rol", choices=Membership.Role.choices)
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import segno
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
@@ -16,16 +15,12 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
-from django_otp import login as otp_login
-from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.forms import (
     ActivationPasswordForm,
     LoginUnlockForm,
     ManagedUserCreateForm,
     NeutralAuthenticationForm,
-    OTPEnrollmentForm,
-    OTPTokenForm,
     RoleChangeForm,
 )
 from apps.accounts.models import ActivationToken, Membership
@@ -38,12 +33,10 @@ from apps.accounts.services import (
     canonical_client_ip,
     change_membership_role,
     clear_login_pair,
-    consume_recovery_code,
     create_managed_user,
     issue_activation_token,
     login_throttle_status,
     record_login_failure,
-    replace_recovery_codes,
     set_user_active,
     unlock_login,
 )
@@ -66,18 +59,6 @@ def _safe_next(request: HttpRequest) -> str:
     ):
         return candidate
     return reverse("dashboard")
-
-
-def _mfa_redirect_for(user: User) -> str | None:
-    if not getattr(settings, "MFA_ENFORCEMENT_ENABLED", True):
-        return None
-    has_device = TOTPDevice.objects.filter(user=user, confirmed=True).exists()
-    membership = getattr(user, "membership", None)
-    if membership is not None and membership.role == Membership.Role.ADMIN and not has_device:
-        return reverse("mfa-enroll")
-    if has_device:
-        return reverse("mfa-verify")
-    return None
 
 
 class ThrottledLoginView(LoginView):
@@ -118,12 +99,10 @@ class ThrottledLoginView(LoginView):
         username = self.request.POST.get("username", "")
         client_ip = canonical_client_ip(cast(dict[str, object], self.request.META))
         clear_login_pair(username=username, client_ip=client_ip)
-        self.request.session["post_mfa_next"] = _safe_next(self.request)
         return _no_store(super().form_valid(form))
 
     def get_success_url(self) -> str:
-        user = cast(User, self.request.user)
-        return _mfa_redirect_for(user) or super().get_success_url()
+        return super().get_success_url()
 
 
 @admin_required
@@ -310,96 +289,14 @@ def activate_account(request: HttpRequest, token: str) -> HttpResponse:
             except ActivationError:
                 return _no_store(render(request, "accounts/activation_invalid.html"))
             login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-            request.session["post_mfa_next"] = reverse("dashboard")
-            return redirect(_mfa_redirect_for(user) or "dashboard")
+            return redirect("dashboard")
     else:
         form = ActivationPasswordForm(activation.user)
     return _no_store(render(request, "accounts/activate.html", {"form": form}))
-
-
-@never_cache
-@require_http_methods(["GET", "POST"])
-def mfa_enroll(request: HttpRequest) -> HttpResponse:
-    if not request.user.is_authenticated:
-        return redirect(f"{reverse('login')}?next={reverse('mfa-enroll')}")
-    user = request.user
-    confirmed = TOTPDevice.objects.filter(user=user, confirmed=True).first()
-    if confirmed is not None:
-        return redirect("mfa-verify")
-    device, _ = TOTPDevice.objects.get_or_create(
-        user=user,
-        confirmed=False,
-        name="Autenticador principal",
-    )
-    if request.method == "POST":
-        form = OTPEnrollmentForm(request.POST)
-        if form.is_valid() and device.verify_token(cast(str, form.cleaned_data["token"])):
-            device.confirmed = True
-            device.save(update_fields=("confirmed",))
-            otp_login(request, device)
-            codes = replace_recovery_codes(user.membership)
-            return _no_store(
-                render(
-                    request,
-                    "accounts/recovery_codes.html",
-                    {"recovery_codes": codes},
-                )
-            )
-        form.add_error("token", "El código no coincide. Revisá la hora del teléfono.")
-    else:
-        form = OTPEnrollmentForm()
-    qr_data_uri = segno.make(device.config_url).svg_data_uri(scale=4)
-    return _no_store(
-        render(
-            request,
-            "accounts/mfa_enroll.html",
-            {"form": form, "qr_data_uri": qr_data_uri, "config_url": device.config_url},
-        )
-    )
-
-
-@never_cache
-@require_http_methods(["GET", "POST"])
-def mfa_verify(request: HttpRequest) -> HttpResponse:
-    if not request.user.is_authenticated:
-        return redirect("login")
-    user = request.user
-    verified_method = getattr(user, "is_verified", None)
-    if bool(verified_method()) if callable(verified_method) else False:
-        return redirect(cast(str, request.session.pop("post_mfa_next", reverse("dashboard"))))
-    devices = list(TOTPDevice.objects.filter(user=user, confirmed=True))
-    if not devices:
-        return redirect("mfa-enroll")
-    if request.method == "POST":
-        form = OTPTokenForm(request.POST)
-        if form.is_valid():
-            accepted_device = None
-            token = cast(str, form.cleaned_data.get("token") or "")
-            recovery = cast(str, form.cleaned_data.get("recovery_code") or "")
-            if token:
-                accepted_device = next(
-                    (device for device in devices if device.verify_token(token)),
-                    None,
-                )
-            elif consume_recovery_code(membership=user.membership, value=recovery):
-                accepted_device = devices[0]
-            if accepted_device is not None:
-                otp_login(request, accepted_device)
-                destination = cast(
-                    str,
-                    request.session.pop("post_mfa_next", reverse("dashboard")),
-                )
-                return redirect(destination)
-            form.add_error(None, "El código no es válido o ya fue utilizado.")
-    else:
-        form = OTPTokenForm()
-    return _no_store(render(request, "accounts/mfa_verify.html", {"form": form}))
 
 
 @require_GET
 def account_security(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("login")
-    user = request.user
-    device = TOTPDevice.objects.filter(user=user, confirmed=True).first()
-    return _no_store(render(request, "accounts/security.html", {"mfa_device": device}))
+    return _no_store(render(request, "accounts/security.html", {"mfa_deferred": True}))

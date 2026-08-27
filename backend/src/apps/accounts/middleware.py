@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import ClassVar, cast
 
-from django.conf import settings
 from django.contrib.auth import logout
-from django.http import HttpRequest, HttpResponse, HttpResponseBase
+from django.http import HttpRequest, HttpResponseBase
 from django.shortcuts import redirect
-from django.urls import Resolver404, resolve
-from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.models import Membership
 
@@ -42,44 +38,4 @@ class MembershipSessionMiddleware:
         elif stored != current:
             logout(request)
             return redirect("login")
-        return self.get_response(request)
-
-
-class MFARequiredMiddleware:
-    """Require confirmed, per-session OTP for admins and opted-in sellers."""
-
-    allowed_names: ClassVar[set[str]] = {
-        "login",
-        "logout",
-        "account-activate",
-        "mfa-enroll",
-        "mfa-verify",
-        "health",
-        "health-live",
-    }
-
-    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest) -> HttpResponseBase:
-        if not getattr(settings, "MFA_ENFORCEMENT_ENABLED", True):
-            return self.get_response(request)
-        if not request.user.is_authenticated:
-            return self.get_response(request)
-        try:
-            name = resolve(request.path_info).url_name
-        except Resolver404:
-            name = None
-        if name in self.allowed_names:
-            return self.get_response(request)
-
-        user = request.user
-        confirmed = TOTPDevice.objects.filter(user=user, confirmed=True).exists()
-        membership = getattr(user, "membership", None)
-        if membership is not None and membership.role == Membership.Role.ADMIN and not confirmed:
-            return cast(HttpResponse, redirect("mfa-enroll"))
-        verified_method = getattr(user, "is_verified", None)
-        verified = bool(verified_method()) if callable(verified_method) else False
-        if confirmed and not verified:
-            return cast(HttpResponse, redirect("mfa-verify"))
         return self.get_response(request)

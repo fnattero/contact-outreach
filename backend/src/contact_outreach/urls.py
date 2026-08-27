@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib.auth.views import LogoutView
-from django.urls import path
+from django.urls import include, path
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.accounts.views import (
     ThrottledLoginView,
     account_security,
     activate_account,
-    mfa_enroll,
-    mfa_verify,
     user_list,
     user_reset_link,
     user_role,
@@ -95,12 +95,11 @@ from apps.mailbox.views import (
 from apps.overture.views import overture_datasets, overture_sync
 
 urlpatterns = [
+    path("api/v1/", include("apps.api.urls")),
     path("login/", ThrottledLoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("activar/<str:token>/", activate_account, name="account-activate"),
     path("seguridad/", account_security, name="account-security"),
-    path("seguridad/verificacion/", mfa_verify, name="mfa-verify"),
-    path("seguridad/activar-verificacion/", mfa_enroll, name="mfa-enroll"),
     path("usuarios/", user_list, name="account-users"),
     path("usuarios/desbloquear/", user_unlock, name="account-user-unlock"),
     path("usuarios/<int:user_id>/rol/", user_role, name="account-user-role"),
@@ -282,6 +281,16 @@ urlpatterns = [
     path("health/ready/", readiness, name="health-ready"),
     path("health/degraded/", degraded, name="health-degraded"),
 ]
+
+if settings.DEBUG:
+    urlpatterns += [
+        path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),
+        path(
+            "api/docs/",
+            SpectacularSwaggerView.as_view(url_name="api-schema"),
+            name="api-docs",
+        ),
+    ]
 
 handler400 = "apps.core.views.bad_request"
 handler403 = "apps.core.views.permission_denied"

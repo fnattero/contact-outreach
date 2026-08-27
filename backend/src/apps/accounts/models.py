@@ -118,21 +118,3 @@ class ActivationToken(TimestampedUUIDModel):
             if original is not None and original["token_hash"] != self.token_hash:
                 raise ValidationError("El identificador del enlace no se puede modificar.")
         super().save(*args, **kwargs)
-
-
-class RecoveryCode(TimestampedUUIDModel):
-    membership = models.ForeignKey(
-        Membership,
-        on_delete=models.CASCADE,
-        related_name="recovery_codes",
-    )
-    code_hash = models.CharField(max_length=255)
-    used_at = models.DateTimeField(blank=True, null=True)
-
-    class Meta:
-        ordering = ("created_at",)
-        indexes = [models.Index(fields=("membership", "used_at"))]
-
-    def __str__(self) -> str:
-        state = "usado" if self.used_at else "disponible"
-        return f"Código de recuperación {state}"

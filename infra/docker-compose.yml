@@ -3,7 +3,7 @@ name: contact-outreach-v2
 services:
   frontend:
     build:
-      context: ./frontend
+      context: ../frontend
     environment:
       BACKEND_INTERNAL_URL: http://backend:8000
       INTERNAL_PROXY_TOKEN: ${INTERNAL_PROXY_TOKEN:-development-proxy-token-change-me}
@@ -39,7 +39,7 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: ../backend
     env_file:
       - path: ./.env
         required: false

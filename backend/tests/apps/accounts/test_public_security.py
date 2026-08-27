@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from django.http import HttpRequest, HttpResponse
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
@@ -82,6 +83,7 @@ def test_railway_proxy_honors_only_its_marked_https_header() -> None:
     assert "HTTP_X_FORWARDED_HOST" not in request.META
 
 
+@pytest.mark.django_db
 def test_browser_security_headers_are_applied_to_public_pages(client: Client) -> None:
     response = client.get(reverse("login"))
 
@@ -129,6 +131,7 @@ def test_production_settings_require_exact_https_origins_and_enable_hardening() 
             "S3_SECRET_ACCESS_KEY": "test-secret-key",
             "S3_BUCKET_NAME": "test-private-bucket",
             "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
+            "INTERNAL_PROXY_TOKEN": "production-internal-proxy-token-with-more-than-32-chars",
         }
     )
     source_path = str(Path.cwd() / "src")

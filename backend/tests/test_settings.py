@@ -21,8 +21,9 @@ from contact_outreach.settings import (
 
 
 def test_compose_uses_one_backend_service_and_private_object_storage() -> None:
-    compose = (Path(__file__).resolve().parents[2] / "infra" / "docker-compose.yml").read_text()
-    supervisor = (Path(__file__).resolve().parents[1] / "supervisord.conf").read_text()
+    repository_root = Path(__file__).resolve().parents[2]
+    compose = (repository_root / "infra" / "docker-compose.yml").read_text()
+    supervisor = (repository_root / "backend" / "supervisord.conf").read_text()
 
     assert "  backend:\n" in compose
     assert "  worker:\n" not in compose
@@ -45,7 +46,7 @@ def test_safe_runtime_defaults_use_fake_providers() -> None:
     assert settings.GMAIL_PROVIDER == "fake"
     assert settings.AUTO_REPLY_KILL_SWITCH is True
     assert settings.RELATIONSHIP_KILL_SWITCH is True
-    assert settings.SESSION_COOKIE_AGE == 60 * 60 * 24 * 7
+    assert settings.SESSION_COOKIE_AGE == 60 * 60 * 12
     assert settings.SESSION_EXPIRE_AT_BROWSER_CLOSE is False
 
 
@@ -75,6 +76,7 @@ def test_production_database_url_is_parsed_without_exposing_credentials() -> Non
             "S3_SECRET_ACCESS_KEY": "test-secret-key",
             "S3_BUCKET_NAME": "test-private-bucket",
             "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
+            "INTERNAL_PROXY_TOKEN": "production-internal-proxy-token-with-more-than-32-chars",
         }
     )
     source_path = str(Path.cwd() / "src")
@@ -118,6 +120,7 @@ def test_railway_proxy_mode_honors_only_marked_https_requests() -> None:
             "S3_SECRET_ACCESS_KEY": "test-secret-key",
             "S3_BUCKET_NAME": "test-private-bucket",
             "FIELD_ENCRYPTION_KEY": "production-field-encryption-key-with-more-than-32-chars",
+            "INTERNAL_PROXY_TOKEN": "production-internal-proxy-token-with-more-than-32-chars",
         }
     )
     source_path = str(Path.cwd() / "src")

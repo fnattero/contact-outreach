@@ -168,8 +168,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_otp",
-    "django_otp.plugins.otp_totp",
+    "rest_framework",
+    "drf_spectacular",
     "apps.accounts.apps.AccountsConfig",
     "apps.contacts.apps.ContactsConfig",
     "apps.automation.apps.AutomationConfig",
@@ -191,14 +191,13 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "apps.audit.middleware.RequestObservabilityMiddleware",
+    "apps.api.middleware.InternalProxyMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.accounts.middleware.MembershipSessionMiddleware",
-    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "apps.accounts.middleware.MFARequiredMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.core.security.ApplicationSecurityHeadersMiddleware",
 ]
@@ -321,6 +320,7 @@ LOGOUT_REDIRECT_URL = "login"
 
 TRUSTED_PROXY_IPS = env_list("DJANGO_TRUSTED_PROXY_IPS")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+INTERNAL_PROXY_TOKEN = os.getenv("INTERNAL_PROXY_TOKEN", "").strip()
 PROXY_HTTPS = env_bool("DJANGO_PROXY_HTTPS", False)
 TRUST_RAILWAY_PROXY_HEADERS = env_bool("DJANGO_RAILWAY_PROXY", False)
 if TRUST_RAILWAY_PROXY_HEADERS and "healthcheck.railway.app" not in ALLOWED_HOSTS:
@@ -348,11 +348,17 @@ if APP_ENV == "production":
         raise ImproperlyConfigured(
             "Configure DJANGO_TRUSTED_PROXY_IPS or explicitly enable DJANGO_RAILWAY_PROXY"
         )
-MFA_ENFORCEMENT_ENABLED = True
-
-SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE", "604800"))
+    if len(INTERNAL_PROXY_TOKEN) < 32:
+        raise ImproperlyConfigured("INTERNAL_PROXY_TOKEN must be a long random production secret")
+SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE", "43200"))
+SESSION_COOKIE_NAME = os.getenv(
+    "SESSION_COOKIE_NAME",
+    "__Host-contact_outreach_session" if APP_ENV == "production" else "contact_outreach_session",
+)
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_PATH = "/"
+CSRF_USE_SESSIONS = True
 CSRF_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = env_bool("DJANGO_SECURE_COOKIES", APP_ENV == "production")
 CSRF_COOKIE_SECURE = env_bool("DJANGO_SECURE_COOKIES", APP_ENV == "production")
@@ -379,6 +385,22 @@ USE_X_FORWARDED_HOST = False
 if PROXY_HTTPS:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CSRF_FAILURE_VIEW = "apps.core.views.csrf_failure"
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ("apps.api.authentication.ApiSessionAuthentication",),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "EXCEPTION_HANDLER": "apps.api.exceptions.api_exception_handler",
+    "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 25,
+}
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Contact Outreach API",
+    "DESCRIPTION": "REST API for the private outreach dashboard.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
 
 SEND_MODE = os.getenv("SEND_MODE", "dry-run")
 SEND_KILL_SWITCH = env_bool("SEND_KILL_SWITCH", True)

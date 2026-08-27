@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
+  skipTrailingSlashRedirect: true,
   async headers() {
     return [
       {

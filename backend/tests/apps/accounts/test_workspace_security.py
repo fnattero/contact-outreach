@@ -10,10 +10,8 @@ from django.core.management import CommandError, call_command
 from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
-from django_otp.oath import totp
-from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from apps.accounts.models import ActivationToken, LoginThrottle, Membership, RecoveryCode, Workspace
+from apps.accounts.models import ActivationToken, LoginThrottle, Membership, Workspace
 from apps.accounts.permissions import Capability, has_capability
 from apps.accounts.services import (
     ActivationError,
@@ -220,60 +218,6 @@ def test_vendedor_cannot_open_user_management(client: Client) -> None:
     seller = User.objects.create_user(username="seller", password="password")
     client.force_login(seller)
     assert client.get(reverse("account-users")).status_code == 403
-
-
-@pytest.mark.django_db
-@override_settings(MFA_ENFORCEMENT_ENABLED=True)
-def test_admin_enrolls_totp_and_can_consume_one_of_ten_recovery_codes(
-    client: Client,
-) -> None:
-    admin = User.objects.create_user(username="admin", password="correct-password")
-    password_response = client.post(
-        reverse("login"),
-        {"username": "admin", "password": "correct-password"},
-    )
-    assert password_response.status_code == 302
-    assert password_response.url == reverse("mfa-enroll")
-
-    enrollment = client.get(reverse("mfa-enroll"))
-    assert enrollment.status_code == 200
-    assert b"data:image/svg+xml" in enrollment.content
-    assert "private" in enrollment["Cache-Control"]
-    assert "no-store" in enrollment["Cache-Control"]
-    device = TOTPDevice.objects.get(user=admin, confirmed=False)
-    token = str(
-        totp(
-            device.bin_key,
-            step=device.step,
-            t0=device.t0,
-            digits=device.digits,
-            drift=device.drift,
-        )
-    ).zfill(device.digits)
-
-    completed = client.post(reverse("mfa-enroll"), {"token": token})
-    assert completed.status_code == 200
-    recovery_codes = completed.context["recovery_codes"]
-    assert len(recovery_codes) == 10
-    unused_codes = RecoveryCode.objects.filter(
-        membership=admin.membership,
-        used_at__isnull=True,
-    )
-    assert unused_codes.count() == 10
-
-    client.post(reverse("logout"))
-    relogin = client.post(
-        reverse("login"),
-        {"username": "admin", "password": "correct-password"},
-    )
-    assert relogin.url == reverse("mfa-verify")
-    verified = client.post(
-        reverse("mfa-verify"),
-        {"token": "", "recovery_code": recovery_codes[0]},
-    )
-    assert verified.status_code == 302
-    assert verified.url == reverse("dashboard")
-    assert unused_codes.count() == 9
 
 
 @pytest.mark.django_db

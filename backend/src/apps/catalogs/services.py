@@ -6,6 +6,7 @@ import logging
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -55,7 +56,7 @@ def _detect_mime(content: bytes) -> str:
     return "application/octet-stream"
 
 
-def _read_upload(upload: UploadedFile[bytes]) -> tuple[str, int, str]:
+def _read_upload(upload: UploadedFile[Any]) -> tuple[str, int, str]:
     size = upload.size
     if size is None or size <= 0:
         raise ValidationError("El PDF está vacío.")
@@ -78,7 +79,7 @@ def _read_upload(upload: UploadedFile[bytes]) -> tuple[str, int, str]:
 
 
 @transaction.atomic
-def create_catalog(*, name: str, upload: UploadedFile[bytes], actor: User) -> Catalog:
+def create_catalog(*, name: str, upload: UploadedFile[Any], actor: User) -> Catalog:
     membership = require_user_capability(actor, Capability.MANAGE_CONFIGURATION)
     clean_name = re.sub(r"\s+", " ", name.strip())
     if not clean_name:

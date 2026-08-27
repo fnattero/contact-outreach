@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 from django.conf import settings
-from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -22,7 +21,6 @@ from apps.accounts.models import (
     ActivationToken,
     LoginThrottle,
     Membership,
-    RecoveryCode,
     Workspace,
 )
 from apps.accounts.permissions import Capability, require_user_capability
@@ -35,7 +33,6 @@ IP_FAILURE_LIMIT = 20
 LOGIN_FAILURE_WINDOW = timedelta(minutes=30)
 LOGIN_LOCK_DURATION = timedelta(minutes=30)
 ACTIVATION_LIFETIME = timedelta(hours=24)
-RECOVERY_CODE_COUNT = 10
 
 
 class OwnerConflictError(RuntimeError):
@@ -467,45 +464,6 @@ def activate_with_token(*, raw_token: str, password: str) -> User:
     token.save(update_fields=("used_at", "updated_at"))
     invalidate_user_sessions(user)
     return user
-
-
-def _plain_recovery_code() -> str:
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    raw = "".join(secrets.choice(alphabet) for _ in range(12))
-    return f"{raw[:4]}-{raw[4:8]}-{raw[8:]}"
-
-
-@transaction.atomic
-def replace_recovery_codes(membership: Membership) -> list[str]:
-    RecoveryCode.objects.filter(membership=membership).delete()
-    plain = [_plain_recovery_code() for _ in range(RECOVERY_CODE_COUNT)]
-    RecoveryCode.objects.bulk_create(
-        [
-            RecoveryCode(
-                membership=membership,
-                code_hash=make_password(code.replace("-", "")),
-            )
-            for code in plain
-        ]
-    )
-    return plain
-
-
-@transaction.atomic
-def consume_recovery_code(*, membership: Membership, value: str) -> bool:
-    normalized = value.strip().upper().replace("-", "").replace(" ", "")
-    if not normalized:
-        return False
-    codes = RecoveryCode.objects.select_for_update().filter(
-        membership=membership,
-        used_at__isnull=True,
-    )
-    for code in codes:
-        if check_password(normalized, code.code_hash):
-            code.used_at = timezone.now()
-            code.save(update_fields=("used_at", "updated_at"))
-            return True
-    return False
 
 
 def _lock_owner_bootstrap() -> None:
