@@ -120,7 +120,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               { key: "/responses", label: <Link href="/responses">Respuestas</Link> },
               { key: "/outbound", label: <Link href="/outbound">Envíos</Link> },
               ...(session.role === "ADMIN"
-                ? [{ key: "/settings/users", label: <Link href="/settings/users">Usuarios</Link> }]
+                ? [
+                    { key: "/catalogs", label: <Link href="/catalogs">Catálogos</Link> },
+                    { key: "/settings/profile", label: <Link href="/settings/profile">Perfil comercial</Link> },
+                    { key: "/settings/users", label: <Link href="/settings/users">Usuarios</Link> },
+                  ]
                 : []),
             ]}
           />

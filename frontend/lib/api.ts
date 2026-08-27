@@ -154,6 +154,35 @@ export type ContactDetail = Contact & {
   timelines: ContactTimeline[];
 };
 
+export type Catalog = {
+  id: string;
+  name: string;
+  version: number;
+  original_filename: string;
+  detected_mime: string;
+  byte_size: number;
+  sha256: string;
+  active: boolean;
+  missing: boolean;
+  created_at: string;
+};
+
+export type BusinessProfile = {
+  company_name: string;
+  salesperson_name: string;
+  phone: string;
+  whatsapp: string;
+  description: string;
+  products: string;
+  differentiators: string;
+  address: string;
+  website: string;
+  signature: string;
+  additional_instructions: string;
+  relevance_threshold: number;
+  profile_version: number;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -344,6 +373,31 @@ export function updateContact(id: string, name: string): Promise<Contact> {
   return request<Contact>(`/api/v1/contacts/${encodeURIComponent(id)}/`, {
     method: "PATCH",
     body: JSON.stringify({ name }),
+  });
+}
+
+export function getCatalogs(): Promise<Catalog[]> {
+  return request<Catalog[]>("/api/v1/catalogs/");
+}
+
+export function uploadCatalog(name: string, file: File): Promise<Catalog> {
+  const formData = new FormData();
+  formData.set("name", name);
+  formData.set("file", file);
+  return request<Catalog>("/api/v1/catalogs/", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function getBusinessProfile(): Promise<BusinessProfile | null> {
+  return request<BusinessProfile | null>("/api/v1/workspace/profile/");
+}
+
+export function updateBusinessProfile(values: Partial<BusinessProfile>): Promise<BusinessProfile> {
+  return request<BusinessProfile>("/api/v1/workspace/profile/", {
+    method: "PATCH",
+    body: JSON.stringify(values),
   });
 }
 
