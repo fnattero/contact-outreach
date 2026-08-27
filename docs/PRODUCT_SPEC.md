@@ -4,8 +4,10 @@
 
 Contact Outreach es una aplicación web de una sola empresa para encontrar compradores B2B de
 carbones para motores, enviar campañas desde Gmail y concentrar las relaciones comerciales en
-`Contactos`. Es un monolito modular Django/HTMX preparado para publicarse detrás de HTTPS y para
-varios usuarios de la misma empresa; no es un SaaS multiempresa y no ofrece registro público.
+`Contactos`. La aplicación se entrega como un workspace único con frontend Next.js/React y un
+backend modular Django REST desplegables de forma independiente. PostgreSQL, Redis y almacenamiento
+S3-compatible son servicios privados separados. No es un SaaS multiempresa y no ofrece registro
+público.
 
 Una campaña busca organizaciones por rubros y zonas de una o más provincias, prepara para toda la
 audiencia un mensaje fijo previamente aprobado, adjunta uno o más catálogos PDF y puede enviar un
@@ -40,7 +42,8 @@ requiere criterio comercial o contiene riesgo crea una tarea humana.
 
 ### FR-01 Workspace, roles y autenticación
 
-La instalación crea un `Workspace` y migra al propietario existente como primer `ADMIN`. Perfil,
+La instalación nueva crea un `Workspace` vacío y el primer `ADMIN` mediante un comando de
+bootstrap de una sola ejecución. No se copian usuarios ni datos desde la instalación anterior. Perfil,
 integraciones, prompts, conexión Gmail, campañas y catálogos pertenecen al Workspace; los campos
 de creador, editor, aprobador o uploader sólo atribuyen acciones y nunca delimitan autorización.
 Un segundo admin puede operar campañas creadas por otro.
@@ -55,9 +58,12 @@ queda bloqueada tras 20 fallos sobre cualquier username dentro de 30 minutos. Un
 está bloqueado devuelve HTTP 429 y `Retry-After` sin extender la espera; un login correcto limpia
 el par. Un admin puede desbloquear desde UI y existe un comando de emergencia.
 
-Los administradores deben enrolar TOTP con `django-otp`; vendedores pueden hacerlo. Se generan diez
-códigos de recuperación de un solo uso, guardados únicamente como hashes. El alta, reset, cambio de
-rol, desactivación, desbloqueo y uso de recuperación quedan auditados sin secretos.
+MFA queda diferido en esta versión. La autenticación usa sesiones opacas server-side, cookie
+`__Host-` Secure/HttpOnly/SameSite=Lax, CSRF guardado en sesión, Argon2, contraseña mínima de 14
+caracteres, sesión absoluta de 12 horas, reautenticación por contraseña para acciones sensibles y
+el lockout durable anterior. El alta, reset, cambio de rol, desactivación y desbloqueo quedan
+auditados sin secretos. La ausencia temporal de MFA se declara como riesgo y no como protección
+equivalente.
 
 ### FR-02 Organizaciones, direcciones y Contactos
 
@@ -387,8 +393,10 @@ de proxy, redirect SSL, HSTS escalonado, CSP, referrer/content-type/frame protec
 detallado protegido. Scripts inline se mueven a static. Se prueban `check --deploy`, matriz de
 permisos y proxy confiable.
 
-La app sigue ligada a loopback por defecto. Provisión real de proxy inverso/TLS está diferida por
-decisión explícita: no se declara Internet go-live hasta aprobar un plan HTTPS posterior.
+Sólo el servicio frontend recibe dominio público y TLS. El frontend enruta `/api/v1/*` por la red
+privada al backend usando un token interno server-side; elimina headers forwarded suministrados por
+el navegador. Backend, PostgreSQL, Redis y storage no reciben dominio ni proxy TCP público. El
+go-live exige verificar en staging certificados, proxy, cookies, CSRF, CSP, health y monitoreo.
 
 ### FR-19 Estados, idempotencia, auditoría e interfaces
 
@@ -410,18 +418,19 @@ responsive. El color nunca comunica un estado por sí solo.
 
 ## 4. Requisitos operativos y de datos
 
-- **OPS-01:** Python 3.12+, Django 5.2 LTS, PostgreSQL, Redis, Celery worker/Beat, Docker Compose,
-  HTMX/templates, Ruff, mypy con `django-stubs`, pytest y migraciones versionadas; sin Node salvo
-  necesidad documentada.
-- **OPS-02:** `make lint`, `make typecheck`, `make test`, `make test-e2e`, `make check`, backups,
-  restore, health, seeds y runbooks reproducibles.
+- **OPS-01:** monorepo con Python 3.12+, Django 5.2 LTS/DRF/Uvicorn y procesos Celery supervisados
+  dentro de un backend; Next.js/React/TypeScript/Ant Design en un frontend independiente;
+  PostgreSQL, Redis y S3-compatible privados; Docker Compose local con MinIO.
+- **OPS-02:** `make backend-check`, `make frontend-check`, `make test-e2e`, `make security-check` y
+  `make check`, lockfiles exactos, OpenAPI/cliente generado, backups, restore, health, seeds y
+  runbooks reproducibles.
 - **DM-01:** persistir como mínimo las entidades detalladas en `DATA_MODEL.md`, incluidas Workspace,
   Membership, Organization, OrganizationIdentity, EmailAddress, Contact, restriction, enrollment,
   Conversation, mensajes/adjuntos, decisiones/tareas/memoria/conocimiento, temas y aprobaciones de
   seguimiento, notificaciones y particiones Overture.
-- **QA-01:** cubrir fresh/upgrade migrations, permisos, auth/TOTP, estados, concurrencia,
-  idempotencia, supresión, SSRF, contexto/IA, MIME, Gmail, recordatorios, redirección, métricas, UX y
-  E2E fake con red bloqueada.
+- **QA-01:** cubrir fresh/upgrade migrations, permisos, sesión/CSRF/lockout/reauth, proxy, estados,
+  concurrencia, idempotencia, supresión, SSRF, contexto/IA, MIME, Gmail, recordatorios,
+  redirección, OpenAPI, UI responsive/accesible y E2E fake con red bloqueada.
 
 ## 5. Fuera de alcance y trabajo diferido
 
@@ -434,14 +443,18 @@ responsive. El color nunca comunica un estado por sí solo.
   herramientas externas para el modelo.
 - Mutaciones por vendedores.
 - HTML saliente, tracking, scraping directo, SMTP con contraseña, rotación de cuentas o evasión.
-- Provisión real de reverse proxy, certificados TLS y go-live público; sólo readiness de app.
+- MFA/TOTP/WebAuthn inicial; debe reintroducirse antes de ampliar significativamente el acceso.
+- JWT/API keys para terceros, backend horizontal, workers desplegados por separado, Kubernetes,
+  Sentry, antivirus y acceso directo browser-to-S3.
+- Migración de datos, dual-write, traffic splitting gradual o rollback productivo al servicio viejo.
 - Cohortes métricas por rangos arbitrarios y borrado administrativo de historia.
 
 ## 6. Criterios de aceptación
 
-Un upgrade conserva UUIDs, Gmail/RFC IDs, mensajes, adjuntos, restricciones, ciphertext y auditoría;
-las migraciones Overture existentes no se reescriben. Una instalación limpia arranca con envío y
-auto-respuesta bloqueados, login protegido, admin TOTP, contenido seed y decisiones SHADOW.
+La migración arquitectónica crea una base nueva y no transporta UUIDs, Gmail/RFC IDs, mensajes,
+adjuntos, restricciones, ciphertext ni auditoría. La instalación vieja queda preservada y privada.
+Las migraciones Overture existentes no se reescriben. La instalación nueva arranca con envío y
+auto-respuesta bloqueados, login protegido, contenido seed y decisiones SHADOW.
 
 Un E2E fake puede seleccionar distritos de dos provincias, descubrir y aprobar audiencia, adjuntar
 varios PDFs, enviar iniciales sin LLM, posponer un conflicto de mismo día, enviar/cancelar un único

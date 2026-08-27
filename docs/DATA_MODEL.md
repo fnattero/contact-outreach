@@ -39,11 +39,12 @@ es HMAC de datos normalizados y una clave separada. `USERNAME_IP` bloquea al qui
 minutos; `IP` al vigésimo fallo agregado dentro de 30 minutos. Índices permiten lock/limpieza sin
 guardar usernames ni IPs crudos.
 
-### TOTPDevice y RecoveryCode
+### Sesión y reautenticación
 
-TOTP usa `django_otp.plugins.otp_totp.models.TOTPDevice` ligado a User. `RecoveryCode` conserva
-digest, `used_at`, creación y set version; exactamente diez códigos nuevos se muestran una vez al
-regenerar. Admin activo exige device confirmado o estado de enrollment temporal controlado.
+MFA queda diferido y la base nueva no instala `TOTPDevice` ni conserva `RecoveryCode`. Django
+mantiene sesiones opacas server-side; `Membership.session_version` invalida sesiones tras cambios
+de rol/estado/password. La sesión registra una marca temporal de reautenticación por contraseña,
+válida diez minutos para acciones sensibles y nunca utilizable para saltar kill switches.
 
 ## 3. Configuración del Workspace
 
@@ -56,9 +57,9 @@ mensajes fijos; la campaña copia texto y versión.
 ### IntegrationConfiguration y PromptConfiguration
 
 Relación 1:1 Workspace. Integration guarda proveedores/parámetros no secretos, incluyendo
-proveedor/modelo/dimensiones de embeddings; ciphertext write-only para LLM/Google y revisión. La
-configuración OpenAI-compatible de embeddings usa la misma conexión OpenAI-compatible y credencial
-del LLM, pero detrás de un contrato separado. Prompt conserva preferencias usadas sólo por
+proveedor/modelo/dimensiones de embeddings. API keys, Google client secret y credenciales de
+infraestructura se leen sólo del entorno y la API muestra únicamente estado configurado. El refresh
+token obtenido por OAuth sí se persiste cifrado con subclave de propósito. Prompt conserva preferencias usadas sólo por
 respuestas y comunicación con Contactos. Además guarda instrucciones de redacción para respuestas
 automáticas; esas instrucciones orientan tono/estructura y no pueden modificar policy, datos
 permitidos ni reglas de búsqueda. Root keys, barreras live e infraestructura no se guardan.
@@ -350,7 +351,14 @@ contadores en estas filas; se derivan del dominio.
 - HumanTask OPEN suspende automation; limits/kill switches se leen justo antes de Gmail.
 - Los modelos de history y auditoría no se eliminan desde UI.
 
-El cutover valida, antes de contract: conteos de prospects->organizations/enrollments, emails,
-respuestas humanas->contacts, threads->conversations, inbound/outbound y restricciones; hashes de
-Gmail/RFC IDs, cuerpos/adjuntos/ciphertext; y ausencia de Organization/Email duplicados. El fallo de
-cualquier validación detiene la migración de retiro sin destruir filas legacy.
+El cutover arquitectónico no transforma datos. La DB nueva recibe migraciones y seeds deterministas;
+usuarios, contactos, mensajes, PDFs, Overture, credenciales y auditoría se configuran desde cero.
+La DB anterior permanece separada y es la única fuente de su historia. No existe rollback productivo
+desde la nueva instalación hacia la anterior.
+
+### Object storage privado
+
+`Catalog` conserva nombre visible, key generada por servidor, SHA-256, tamaño, MIME detectado,
+uploader y timestamps. El objeto reside en S3-compatible privado; ninguna URL pública ni filename
+del usuario forma un path. Downloads se autorizan y transmiten por el backend. MinIO implementa el
+mismo contrato en desarrollo y Railway Bucket en producción.

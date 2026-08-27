@@ -9,6 +9,11 @@ crean auditoría. Views/tasks nunca asignan estados. Toda transición no enumera
 Los estados legacy se preservan para lectura/migración, pero campañas nuevas y acciones nuevas usan
 las máquinas de este documento.
 
+La API REST nunca acepta un estado destino arbitrario. Cada acción semántica llama el servicio de
+transición y devuelve `409` si el estado cambió, `412` si el ETag del draft/config quedó obsoleto o
+`202` con `BackgroundJob` durable si continúa fuera del request. El publish Celery ocurre sólo en
+`transaction.on_commit`; pérdida de Redis deja `PENDING` recuperable en PostgreSQL.
+
 ## 2. Campaña
 
 Estados: `DRAFT`, `DISCOVERING`, `AWAITING_APPROVAL`, `RUNNING`, `PAUSED`, `CANCELLED`,
@@ -195,6 +200,10 @@ ejecutables de distintas versiones.
 `SearchRun`: `PENDING -> RUNNING -> SUCCEEDED|RETRY_WAIT|FAILED_PERMANENT|CANCELLED`.
 `BackgroundJob`: `PENDING -> RUNNING -> SUCCEEDED|RETRY_WAIT|FAILED|CANCELLED`. Recovery de
 heartbeat sólo repite operaciones internas/idempotentes; efectos externos consultan su agregado.
+
+Migration runner no es una máquina de negocio: toma advisory lock, aplica sólo migraciones forward
+y debe completar antes de iniciar Uvicorn/workers/Beat. Un fallo deja el backend no-ready y nunca
+sirve schema parcial.
 
 ## 11. Invariantes de concurrencia
 

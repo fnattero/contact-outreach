@@ -14,11 +14,11 @@ duplicado, timeout Gmail ambiguo y habilitación accidental de automatización/l
 La app implementa readiness para Internet, pero el despliegue actual no se declara público hasta
 aprobar proxy inverso, TLS, certificados, monitoreo y runbook de incidente.
 
-## 2. Autenticación, lockout y MFA
+## 2. Autenticación, lockout y MFA diferido
 
 - Sin registro ni recuperación pública. El admin crea usuarios y recibe una sola vez un token
   aleatorio de activación/reset válido 24 h; DB guarda sólo digest y consumo.
-- Passwords usan Argon2. Login y MFA regeneran sesión; logout la invalida.
+- Passwords usan Argon2 y mínimo 14 caracteres. Login regenera sesión; logout la invalida.
 - Attempts 1–4 dan mensaje neutro. El quinto fallo bloquea username normalizado + IP confiable por
   30 minutos. Veinte fallos agregados por IP en 30 minutos bloquean esa IP.
 - Identificadores se guardan como HMAC con una clave de propósito, nunca username/IP crudos. Las
@@ -28,8 +28,11 @@ aprobar proxy inverso, TLS, certificados, monitoreo y runbook de incidente.
   auditan sin revelar digest.
 - La IP sólo proviene de `REMOTE_ADDR` o del header del proxy cuando su origen pertenece a una
   allowlist exacta de proxies. Un cliente directo no puede falsear `X-Forwarded-For`.
-- ADMIN requiere TOTP confirmado con `django-otp`; VENDEDOR puede habilitarlo. Diez recovery codes
-  se muestran una vez y quedan hasheados/consumibles individualmente. Regenerar invalida el set.
+- MFA/TOTP/WebAuthn no se incluye inicialmente por decisión explícita. No se instala `django-otp`,
+  no existen endpoints de enrolamiento/códigos y no se afirma protección equivalente. Se compensa
+  temporalmente con cuentas sólo por invitación, sesión absoluta de 12 h, password reauth de 10 min
+  para acciones sensibles, lockout durable, cookies `__Host-`, CSRF y aislamiento de red. MFA debe
+  volver antes de ampliar significativamente usuarios o privilegios.
 - Cambio de rol, desactivación, reset sensible o pérdida de Membership incrementan una versión de
   seguridad y eliminan sesiones activas.
 - No se borra un User con historia ni se desactiva/degrada el último admin activo.
@@ -45,18 +48,20 @@ Contactos/conversaciones. Recibe 403/404 seguro para borradores, audiencia/prosp
 descargas PDF, reply, approvals, configuración, integraciones, usuarios, jobs, auditoría y detalles
 técnicos. No puede POST salvo logout. Ocultar navegación no sustituye enforcement.
 
-CSRF es obligatorio en mutaciones y HTMX. Acciones críticas (habilitar LIVE IA, cambiar
-credenciales/rol, recovery reset) exigen reautenticación admin. GET nunca muta.
+CSRF es obligatorio en toda mutación REST, incluido login. Acciones críticas (habilitar LIVE IA,
+usuarios/roles/estado y Gmail connect/disconnect) exigen reautenticación admin. GET nunca muta.
 
 ## 4. Sesiones, headers e Internet readiness
 
-Producción define listas exactas de `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS`; no wildcards. Cookies
-de sesión/CSRF `Secure`, `HttpOnly` cuando aplica y `SameSite=Lax`; SSL redirect; proxy HTTPS
-awareness sólo para proxy confiable. HSTS se escala primero con duración corta y sin
-includeSubDomains/preload hasta verificar despliegue.
+Producción define listas exactas de `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS`; no wildcards. La
+cookie `__Host-contact_outreach_session` es `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` y sin
+Domain. CSRF se guarda server-side en sesión y el token masked permanece sólo en memoria del
+frontend. Las sesiones duran 12 horas absolutas; rol, desactivación, password y logout las invalidan.
 
-Las sesiones de usuario duran una semana por defecto y no expiran al cerrar el navegador; cambios de
-rol, desactivación, resets sensibles y logout siguen invalidándolas inmediatamente.
+Sólo Next.js recibe dominio público. Su proxy elimina headers `Forwarded`, `X-Forwarded-*` e
+`X-Internal-*` del browser, agrega valores propios y un `INTERNAL_PROXY_TOKEN`. El backend privado
+compara ese token en tiempo constante antes de confiar proxy metadata. No se configura CORS ni se
+admiten credenciales cross-origin.
 
 Headers: CSP restrictiva con scripts/styles propios static y nonce sólo si fuera imprescindible,
 `Referrer-Policy`, `X-Content-Type-Options`, frame-ancestors/DENY, permissions policy y no sniff.
@@ -69,11 +74,10 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
 
 ## 5. Secretos y OAuth
 
-- `FIELD_ENCRYPTION_KEY`, `DJANGO_SECRET_KEY`, DB/Redis, barreras live, claves HMAC, bootstrap y
-  proxy config viven fuera del repositorio/dashboard.
-- LLM API key, Google client secret y refresh token Gmail se cifran con Fernet autenticado y
-  subclaves separadas por propósito. Son write-only; formularios, errores, audit y logs sólo muestran
-  configured/origin.
+- `FIELD_ENCRYPTION_KEY`, `DJANGO_SECRET_KEY`, DB/Redis/S3, barreras live, claves HMAC, bootstrap,
+  token de proxy, LLM API key y Google client secret viven fuera del repositorio/dashboard.
+- Secretos estáticos se leen sólo del entorno. El refresh token Gmail obtenido por OAuth se cifra
+  con Fernet autenticado y subclave de propósito; UI, errores, audit y logs muestran sólo estado.
 - Rotar client credentials exige desconectar Gmail. OAuth usa state/PKCE, redirect exacto y scopes
   `gmail.send` + `gmail.readonly`, nunca SMTP password ni `mail.google.com`.
 - No se loguean tokens, codes, secrets, ciphertext, Authorization headers ni URLs con credenciales.
@@ -177,8 +181,9 @@ aplican egress/segmentación cuando infraestructura lo permita; PostgreSQL y Red
   parcial.
 - GeoJSON: límites existentes (<=1 MiB, WGS84 Polygon/MultiPolygon, partes/anillos/coordenadas
   acotados, números finitos, sin CRS custom ni geometría inválida).
-- Archivos están fuera de static/media público. Web escribe; worker monta read-only; Beat no monta.
-  Descarga admin autenticada; VENDEDOR no descarga.
+- Archivos están en S3-compatible privado. Sólo procesos del backend poseen credenciales; descarga
+  admin autenticada se transmite por API/frontend proxy y VENDEDOR no descarga. MinIO se usa sólo
+  en desarrollo y Railway Bucket en producción.
 - Filenames nunca forman paths. PDFs no se renderizan/abren en servidor; antivirus queda como
   hardening futuro documentado.
 
@@ -196,7 +201,8 @@ separado; restore prueba descifrado e integridad sin imprimir valores.
 ## 12. Checklist antes de exposición/live
 
 - Matriz anonymous/ADMIN/VENDEDOR y service-level authorization aprobada.
-- Lockout quinto intento/IP spray, TOTP/recovery, last-admin y session invalidation aprobados.
+- Lockout quinto intento/IP spray, password reauth, last-admin y session invalidation aprobados;
+  riesgo de MFA diferido reconocido.
 - Hosts/orígenes/proxy confiable/cookies/redirect/HSTS/CSP/headers y `check --deploy` aprobados.
 - Proxy Railway/TLS/certificados/monitoreo/runbook externos implementados y validados en staging;
   hasta entonces no habilitar tráfico público ni `SEND_MODE=live`. Ver `docs/RAILWAY_DEPLOYMENT.md`.

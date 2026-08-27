@@ -1,56 +1,64 @@
-# Despliegue seguro en Railway
+# Despliegue seguro en Railway — frontend y backend separados
 
-Este procedimiento prepara un entorno de staging privado y luego un entorno público controlado.
-Railway ejecuta el Dockerfile del repositorio. El mismo contenedor se usa como web, worker,
-maintenance worker, beat y migración; cada servicio debe tener un comando distinto.
+Railway aloja dos deployables de aplicación y tres servicios de infraestructura. Sólo el frontend
+tiene dominio público. Backend, PostgreSQL, Redis y Bucket usan private networking; no se crean TCP
+proxies ni dominios públicos para ellos. La instalación v2 usa DB/Bucket nuevos y no copia datos.
 
-## 1. Servicios del proyecto
+## 1. Servicios
 
-Crear en el mismo proyecto y entorno:
-
-| Servicio | Comando del contenedor | Público | Volumen `/app/private` |
+| Servicio | Imagen/comando | Público | Credenciales de datos |
 | --- | --- | --- | --- |
-| `web` | `web` | Sí, sólo el dominio de la aplicación | lectura/escritura |
-| `worker` | `worker` | No | sólo lectura |
-| `maintenance` | `maintenance-worker` | No | sólo lectura |
-| `beat` | `beat` | No | no necesita |
-| `migrate` | `migrate` o pre-deploy `python src/manage.py migrate_safe` | No | no necesita |
+| `frontend` | `frontend/Dockerfile` | Sí, único custom domain | Sólo backend URL y proxy token server-side |
+| `backend` | `backend/Dockerfile` / `backend` | No | DB runtime/migration, Redis, S3, providers |
+| `postgres` | PostgreSQL 17 patched | No | Sólo backend |
+| `redis` | Redis 7.4 patched | No | Sólo backend |
+| `bucket` | Railway private Bucket | No | Sólo backend |
 
-Agregar PostgreSQL y Redis como servicios internos. No crear TCP proxies públicos para ellos.
-Referenciar sus variables con Railway, por ejemplo:
+El container backend ejecuta primero `migrate_safe` y después Supervisor con Uvicorn, worker
+general, maintenance concurrency uno y Beat. Se configura exactamente una réplica. API/workers no
+se despliegan por separado y no se llaman por HTTP entre sí.
+
+## 2. Variables frontend
 
 ```text
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
+NODE_ENV=production
+PUBLIC_APP_ORIGIN=https://<dominio-publico-exacto>
+BACKEND_INTERNAL_URL=http://backend.railway.internal:<puerto-privado>
+INTERNAL_PROXY_TOKEN=<secreto aleatorio distinto por entorno>
 ```
 
-Railway recomienda estas referencias entre servicios y sus redes privadas para evitar credenciales
-duplicadas y exposición pública: <https://docs.railway.com/guides/docker-compose>.
+Ninguna variable de DB, Redis, S3, Gmail, LLM ni cifrado entra al servicio frontend. El token y URL
+son server-only y nunca usan prefijo `NEXT_PUBLIC_`.
 
-## 2. Variables obligatorias del servicio web
-
-Configurar las mismas variables sensibles en `web`, `worker`, `maintenance`, `beat` y `migrate`.
-Usar Railway Variables/Secrets; nunca subirlas al repositorio.
+## 3. Variables backend
 
 ```text
 APP_ENV=production
 DJANGO_DEBUG=false
-DJANGO_SECRET_KEY=<secreto aleatorio largo, distinto por entorno>
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
-FIELD_ENCRYPTION_KEY=<secreto aleatorio largo, respaldado por separado>
+DJANGO_SECRET_KEY=<secreto aleatorio largo>
+LOGIN_THROTTLE_HMAC_KEY=<secreto aleatorio independiente>
+FIELD_ENCRYPTION_KEY=<secreto aleatorio respaldado aparte>
+INTERNAL_PROXY_TOKEN=<mismo secreto server-side del frontend>
 
-DJANGO_ALLOWED_HOSTS=<dominio-railway-exacto>,<dominio-personalizado-exacto>
+DATABASE_URL=<rol runtime en PostgreSQL privado>
+MIGRATION_DATABASE_URL=<rol DDL usado sólo antes de Supervisor>
+REDIS_BROKER_URL=<Redis privado db 0>
+REDIS_CACHE_URL=<Redis privado db 1>
+REDIS_RESULT_URL=<Redis privado db 2>
+
+S3_ENDPOINT_URL=<endpoint privado Railway Bucket>
+S3_BUCKET_NAME=<bucket privado>
+S3_ACCESS_KEY_ID=<secret>
+S3_SECRET_ACCESS_KEY=<secret>
+S3_REGION=<region>
+S3_ADDRESSING_STYLE=path
+
+DJANGO_ALLOWED_HOSTS=<backend-internal-host>
 DJANGO_CSRF_TRUSTED_ORIGINS=https://<dominio-publico-exacto>
 PUBLIC_BASE_URL=https://<dominio-publico-exacto>
 DJANGO_SECURE_COOKIES=true
-DJANGO_SSL_REDIRECT=true
+DJANGO_SSL_REDIRECT=false
 DJANGO_PROXY_HTTPS=true
-DJANGO_RAILWAY_PROXY=true
-
-PRIVATE_STORAGE_ROOT=/app/private
-RUN_MIGRATIONS_ON_STARTUP=false
-RUN_OWNER_BOOTSTRAP_ON_STARTUP=false
 
 SEND_MODE=dry-run
 SEND_KILL_SWITCH=true
@@ -62,66 +70,55 @@ EMBEDDING_PROVIDER=fake
 GMAIL_PROVIDER=fake
 ```
 
-El contenedor toma automáticamente el `PORT` que Railway inyecta y enlaza en `0.0.0.0`.
-No fijar `PORT=8000` en producción. Si se usa el dominio Railway, `RAILWAY_PUBLIC_DOMAIN` se
-incorpora a los hosts permitidos cuando la plataforma lo proporciona; verificarlo en la vista de
-variables. El health check de Railway usa `healthcheck.railway.app`, que el modo
-`DJANGO_RAILWAY_PROXY=true` agrega como host exacto.
+Railway termina TLS en frontend. El proxy Next normaliza metadata y prueba identidad con
+`INTERNAL_PROXY_TOKEN`; backend no confía headers forwarded de un request sin token. No fijar el
+`PORT` público: cada container consume el valor Railway y liga `0.0.0.0` internamente.
 
-`DJANGO_RAILWAY_PROXY=true` sólo debe usarse en el servicio web público de Railway. El middleware
-acepta HTTPS reenviado únicamente si llega el marcador `X-Railway-Request-Id` junto con
-`X-Forwarded-Proto=https`; no acepta por esa vía el host ni la IP del cliente. Si se despliega detrás
-de otro proxy, usar `DJANGO_TRUSTED_PROXY_IPS` con CIDR exactos y mantener el modo Railway apagado.
+## 4. Migraciones y primer administrador
 
-Comenzar con el HSTS de 300 segundos que trae la aplicación. Aumentarlo gradualmente sólo después
-de comprobar el dominio, certificados y todos sus subdominios. No habilitar
-`DJANGO_HSTS_INCLUDE_SUBDOMAINS` ni `DJANGO_HSTS_PRELOAD` sin controlar cada subdominio HTTPS; por
-esa razón `check --deploy` puede informar esas dos advertencias durante el rollout inicial.
+El entrypoint backend:
 
-## 3. Volumen privado
+1. valida variables;
+2. espera DB/Redis con timeout;
+3. usa `MIGRATION_DATABASE_URL` para `python src/manage.py migrate_safe`;
+4. elimina esa variable del entorno hijo;
+5. inicia Supervisor con `DATABASE_URL` runtime.
 
-Adjuntar un volumen al servicio `web` en `/app/private` y el mismo volumen a `worker` y
-`maintenance` en `/app/private`. El web necesita escritura; los workers sólo lectura. No servir ese
-directorio como static/media y no montar el volumen en beat.
+Un fallo de migración impide servir API/schema parcial. `MIGRATION_DATABASE_URL` no llega a
+Uvicorn/workers/Beat.
 
-Probar que el volumen sobrevive a un redeploy y definir retención/backup antes de importar PDFs o
-catálogos. El volumen no reemplaza el backup de PostgreSQL ni el backup separado de
-`FIELD_ENCRYPTION_KEY`.
-
-## 4. Migración y propietario inicial
-
-Usar el pre-deploy command de Railway:
+El primer admin se crea una sola vez desde un shell/job privado:
 
 ```text
-python src/manage.py migrate_safe
-```
-
-Esto evita que varias réplicas web intenten cambiar el esquema durante el arranque. Si Railway no
-ofrece un pre-deploy command para el servicio elegido, desplegar un servicio privado `migrate` con
-comando `migrate`; debe completarse antes de escalar `web`.
-
-Para el primer administrador, ejecutar una vez desde un shell/one-off job privado:
-
-```text
+OWNER_USERNAME=<valor temporal>
+OWNER_EMAIL=<valor temporal>
+OWNER_PASSWORD=<valor temporal fuerte>
 python src/manage.py bootstrap_owner
 ```
 
-Definir `OWNER_USERNAME`, `OWNER_EMAIL` y `OWNER_PASSWORD` sólo para esa ejecución; después
-eliminarlos o rotar inmediatamente `OWNER_PASSWORD`. No habilitar el bootstrap automático en web.
+Eliminar inmediatamente `OWNER_*`. Nunca habilitar bootstrap automático en producción.
 
-## 5. Orden de validación
+## 5. Staging y validación
 
-1. Desplegar staging sin dominio público o con acceso restringido.
-2. Confirmar `/health/live/` y `/health/ready/`; el segundo debe comprobar PostgreSQL y Redis.
-3. Ejecutar `python src/manage.py check --deploy` con las variables reales de staging.
-4. Verificar login, MFA, CSRF, cookies, redirección HTTPS, descarga privada y logs redactados.
-5. Ejecutar `make smoke-worker` y comprobar que los cuatro procesos Celery estén activos.
-6. Crear un backup/restauración de prueba con `SEND_KILL_SWITCH=true`.
-7. Conectar Gmail sólo con los scopes aprobados y mantener `GMAIL_PROVIDER=fake` hasta completar
-   la prueba OAuth controlada.
-8. Para el primer rollout, mantener dry-run y todos los kill switches. Habilitar LIVE únicamente
-   después de revisar manualmente una campaña pequeña y su reconciliación.
+1. Crear frontend/backend/PostgreSQL/Redis/Bucket nuevos.
+2. Mantener backend/data sin dominio/TCP público.
+3. Desplegar con providers fake, dry-run y kill switches activos.
+4. Verificar frontend `/healthz` y backend private `/api/v1/health/live|ready`.
+5. Ejecutar backend/frontend/security checks y fake E2E desktop/mobile.
+6. Confirmar cookie `__Host-`, sesión 12 h, CSRF-in-session, exact origin, CSP y no-store.
+7. Confirmar que spoofed forwarded/internal headers fallan.
+8. Probar upload/download S3 por API; el browser nunca recibe una URL pública.
+9. Ejecutar smoke de ambos workers/Beat y recovery tras reinicio Redis/backend.
+10. Ejecutar backup/restore con todos los kill switches activos.
+11. Conectar Gmail sólo después de mover el dominio y actualizar el redirect exacto.
 
-Railway health checks sólo controlan la disponibilidad durante el despliegue; agregar monitoreo
-externo, alertas de logs y una política de backup. Referencias oficiales: [health checks](https://docs.railway.com/deployments/healthchecks),
-[PostgreSQL](https://docs.railway.com/databases/postgresql) y [red privada](https://docs.railway.com/private-networking).
+## 6. Cutover sin rollback productivo
+
+Antes de mover dominio: backup viejo verificado, kill switches viejos activos, `SEND_MODE=dry-run`,
+workers/Beat viejos detenidos y refresh token Gmail viejo revocado. Mover el custom domain sólo al
+frontend v2, conectar Gmail nuevo y ejecutar una campaña dry-run. El servicio viejo queda privado,
+sin procesos de efectos y con DB/PDF propios. Una incidencia v2 activa kill switches y se corrige
+forward; nunca se reactivan Gmail/workers viejos.
+
+Railway health checks no sustituyen alertas, backup ni restore drill. Mantener 30 días de backup DB
+cuando el plan lo soporte y respaldar `FIELD_ENCRYPTION_KEY` por canal cifrado separado.

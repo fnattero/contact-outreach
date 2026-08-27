@@ -1,5 +1,21 @@
 # Integraciones
 
+## 0. Frontera frontend/backend y secretos
+
+El browser consume exclusivamente `/api/v1/*` en el mismo origin que Next.js. Next actúa como
+proxy streaming hacia el backend privado, elimina headers forwarded/control suministrados por el
+cliente y agrega un token interno server-side. No hay CORS, JWT browser ni acceso directo a
+PostgreSQL, Redis, S3, Gmail o proveedores.
+
+API keys, Google client secret, Redis/DB/S3 y root keys provienen del entorno del backend. La API
+sólo expone `configured|not_configured` y metadatos no sensibles. El refresh token Gmail es la única
+credencial producida en runtime: se cifra por propósito en PostgreSQL. Workers pertenecen al mismo
+backend release y llaman servicios/ORM directamente; nunca endpoints HTTP internos.
+
+`PrivateObjectStorage` abstrae MinIO local y Railway Bucket productivo. Acepta streams, genera key
+server-side, calcula metadata/hashes y nunca entrega URL pública. Catálogos se descargan por un
+endpoint backend autenticado que transmite el objeto completo con `private, no-store`.
+
 ## 1. Contratos y frontera de efectos
 
 El dominio define protocolos inmutables; ningún model/view/task consume schemas de SDK:

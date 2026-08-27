@@ -2,18 +2,19 @@
 
 ## 1. Estrategia y gates
 
-pytest/pytest-django cubren dominio, PostgreSQL, workers y E2E HTTP/HTMX. `pytest-socket` bloquea
-red; HTTP/DNS/Gmail/Overture/LLM siempre usan fakes. Celery corre eager para unit/integration y con
+pytest/pytest-django cubren dominio, PostgreSQL, DRF y workers. Vitest/Testing Library cubren React
+y Playwright recorre Next.js en desktop y mobile. `pytest-socket` bloquea red;
+HTTP/DNS/Gmail/Overture/LLM siempre usan fakes. Celery corre eager para unit/integration y con
 worker de test en escenarios de recovery/concurrencia.
 
 Cada fase ejecuta:
 
 ```bash
-make lint
-make typecheck
-make test
+make backend-check
+make frontend-check
 make test-e2e
-make check       # incluye makemigrations --check --dry-run
+make security-check
+make check       # agrega migraciones, OpenAPI/client drift e imágenes
 ```
 
 Antes de revisión también se ejecutan migraciones frescas/upgrade, tests de seguridad relevantes y
@@ -24,20 +25,12 @@ nunca sustituye negativos.
 
 ## 2. Migraciones y compatibilidad
 
-- Fresh install hasta head con Workspace/admin seed, mensajes fijos y geografía.
-- Upgrade desde fixtures con campañas DRAFT/RUNNING/COMPLETED/FAILED, prospects duplicados,
-  emails secundarios, respuestas/threads, manual suppressions, unsubscribe, bounce, auto-reply,
-  PDFs, ciphertext y audit.
-- Verificar que UUIDs, Gmail/RFC IDs, bodies, timestamps, attachment hashes/order, restricciones,
-  ciphertext, ProviderUsage y AuditEvent no cambian.
-- Backfill Prospect -> Organization/Identity/EmailAddress/Enrollment con merge por email, GERS,
-  domain y name/address; conflictos concurrentes convergen.
-- Backfill Contact sólo desde reply humano/manual restriction/manual entry; unsubscribe queda Contact
-  no-contact; AUTO_REPLY/BOUNCE no promueven.
-- Backfill thread -> Conversation y vínculos inbound/outbound, incluyendo varios threads por
-  Contact.
-- Validación count/hash detiene contract si algo no coincide; ContactLedger/ContactOverride sólo se
-  retiran después. No se alteran migraciones Overture existentes.
+- Fresh install hasta head con Workspace/bootstrap admin, mensajes fijos y geografía.
+- La DB v2 se crea vacía: no se copian usuarios, UUIDs, Gmail/RFC IDs, mensajes, PDFs, secrets,
+  Overture ni auditoría desde el servicio viejo.
+- Toda migración histórica y nueva es segura sobre tablas vacías; no se alteran migraciones
+  Overture existentes.
+- Un fixture representativo de v2 valida upgrades futuros y expand/contract después del cutover.
 - Protección del último admin y singleton Workspace bajo transacciones concurrentes.
 
 ## 3. Autenticación, permisos e Internet readiness
@@ -52,9 +45,12 @@ nunca sustituye negativos.
   success limpia par; username normalization/HMAC y admin/emergency unlock.
 - IP spray: 20 failures/30min cruzando usernames; concurrencia no pierde counts. Proxy header
   spoofing desde origen no confiable no cambia IP; proxy allowlisted sí.
-- TOTP admin requerido, optional seller, QR enrollment, 10 recovery hashes de un uso,
-  regeneración/invalidation, last-admin and session invalidation on role/deactivation.
-- CSRF en cada mutación/HTMX; GET no muta; no-store en auth/message/contact/health detail.
+- No existen endpoints/dependencias MFA en v2 y el riesgo queda documentado; password mínimo 14,
+  sesión 12 h, reauth sensible 10 min, last-admin y session invalidation on role/deactivation.
+- CSRF-in-session en cada mutación REST, incluido login; GET no muta; no-store en
+  auth/message/contact/health detail.
+- Proxy Next elimina headers spoofed, exige token interno, preserva cookie/streaming y no habilita
+  CORS. Sólo frontend recibe endpoint público.
 - Production settings: exact hosts/origins, secure cookies, SSL redirect, trusted proxy, staged
   HSTS, CSP sin inline scripts, referrer/nosniff/frame. `manage.py check --deploy` profile pasa.
 - Health público no filtra topología; detalle sólo admin. Loopback continúa default.
@@ -232,7 +228,7 @@ failed but task open; duplicate/reconciliation idempotent; vendedor not recipien
 
 E2E fake ejecuta con formularios/views/tasks reales:
 
-1. fresh Workspace, admin TOTP, vendedor y permission checks;
+1. fresh Workspace, admin bootstrap, vendedor activation y permission checks;
 2. seed profile/messages/knowledge/geography, two READY provinces and multiple PDFs;
 3. deterministic discovery and campaign approval with zero initial LLM;
 4. dry-run/live fake, same-day reschedule and reminder;
@@ -240,9 +236,9 @@ E2E fake ejecuta con formularios/views/tasks reales:
 6. safe fact reply, redirect two-thread saga, meeting HumanTask/notifications;
 7. scheduled Contact review/automatic and metrics.
 
-Rollout verification order: backup -> migrations/backfill hashes -> fixed-message dry-run ->
-campaign sending -> Contactos -> SHADOW evaluation -> explicit LIVE enable -> scheduled Contact
-pilot. Independent kill switches stay active until their step.
+Rollout verification order: backup viejo -> DB nueva/migrations/seeds -> frontend/API fake E2E ->
+fixed-message dry-run -> cerrar efectos viejos -> mover dominio -> Gmail nuevo -> explicit LIVE.
+Independent kill switches stay active until their step.
 
 ## 15. Quality review final
 
@@ -250,5 +246,5 @@ pilot. Independent kill switches stay active until their step.
 - Fresh and representative upgrade migration green; no migration histórica modificada.
 - Diff review: duplicate sends, invalid transition, service permission bypass, missing restriction,
   stale context, leaked secret/body, unsafe URL, partial PDF, missing retry/reconciliation.
-- Production-like deploy checks and trusted-proxy suite green; actual HTTPS provisioning remains an
-  explicitly uncompleted external go-live gate.
+- Production-like deploy checks, private backend/data networking, frontend proxy, custom-domain TLS
+  and trusted-proxy suite green.

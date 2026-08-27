@@ -2,55 +2,63 @@
 
 ## 1. Decisión principal
 
-Se conserva un **monolito modular Django/HTMX**. Separar un frontend SPA y una API no aporta una
-frontera de negocio útil para este dashboard de una sola empresa y aumentaría autenticación,
-despliegue, CSP, consistencia de formularios y superficie de ataque. Django sirve HTML, endpoints
-HTMX y archivos privados; PostgreSQL es la fuente de verdad; Redis es broker/cache prescindible y
-Celery ejecuta trabajo asíncrono. Las integraciones quedan detrás de protocolos tipados.
+Se adopta un **frontend Next.js/React independiente y un backend modular Django REST unificado**.
+PostgreSQL, Redis y object storage son servicios privados separados. La frontera de negocio sigue
+en los servicios de dominio Django; la separación frontend/backend es una frontera de despliegue y
+seguridad del navegador, no una división de las transacciones de dominio.
 
-Esta forma soporta acceso público futuro y múltiples usuarios del mismo Workspace. “Monolito” no
-significa proceso único: web, workers, Beat, mantenimiento, PostgreSQL y Redis se despliegan como
-servicios separados, pero comparten un modelo de dominio y una única migración transaccional.
+API, worker general, worker Overture/maintenance y Beat comparten un único backend container,
+release y credenciales. Un runner aplica migraciones bajo advisory lock antes de iniciar un
+Supervisor que mantiene esos procesos. Los workers acceden al ORM directamente y nunca llaman
+endpoints HTTP internos. Sólo frontend y backend se despliegan de forma independiente; los procesos
+internos del backend se reinician juntos y existe una sola réplica inicial.
 
 ```text
-Browser -> reverse proxy HTTPS (futuro) -> Django web -> PostgreSQL
-                                                |-> private PDF volume
-                                                |-> Redis -> Celery workers
-                                                           |-> DNS/web
-                                                           |-> LLM
-                                                           |-> Gmail
-                                                -> maintenance -> Overture STAC/S3
-                                                -> Beat -> schedulers/recovery
+Browser -> HTTPS -> Next.js frontend (único público)
+                     | / -> React UI
+                     | /api/v1/* -> proxy privado autenticado
+                                      -> backend container
+                                         |-> Uvicorn/Django REST
+                                         |-> Celery general
+                                         |-> Celery maintenance (concurrency=1)
+                                         |-> Celery Beat
+                                         |-> migration runner antes de startup
+                                         |-> PostgreSQL privado
+                                         |-> Redis privado
+                                         |-> S3-compatible privado
+                                         |-> DNS/web/LLM/Gmail/Overture
 ```
 
-La provisión del proxy/certificados está diferida. Compose sigue publicando loopback por defecto;
-los settings de aplicación sí deben estar listos para un proxy HTTPS explícitamente confiable.
+En local el browser usa sólo `localhost:3000`; el backend diagnóstico liga `127.0.0.1:8001` y los
+servicios de datos no necesitan publicación. En producción el custom domain pertenece sólo al
+frontend. El backend exige un token de proxy server-side, hosts/orígenes exactos y nunca confía
+headers forwarded enviados por el browser.
 
 ## 2. Módulos y dependencias
 
 ```text
-src/contact_outreach/   settings, URLs, ASGI/WSGI, Celery, middleware
-src/apps/accounts/      Workspace, Membership, auth, TOTP, usuarios/capacidades
-src/apps/configuration/ perfil, contenido fijo, rubros, zonas, conocimiento
-src/apps/organizations/ Organization, EmailAddress, Contact, restricciones, memoria
-src/apps/campaigns/     campañas, enrollments, consultas, adjuntos, mensajes, delivery
-src/apps/catalogs/      PDFs privados e inmutables
-src/apps/mailbox/       conexión/sync Gmail, conversaciones, decisiones y tareas
-src/apps/integrations/  contratos, factories, adaptadores y fakes
-src/apps/overture/      releases, particiones provinciales y catálogo Places
-src/apps/audit/         AuditEvent, BackgroundJob y observabilidad durable
-templates/              páginas y fragments HTMX
-static/                 JS/CSS propios compatibles con CSP
-tests/                  árbol espejo, factories, migraciones y E2E
+backend/src/contact_outreach/ settings, API URLs, ASGI, Celery y middleware
+backend/src/apps/accounts/    Workspace, Membership, sesión y usuarios/capacidades
+backend/src/apps/*/           dominio, provider boundaries, tasks y DRF APIs
+backend/tests/                tests de dominio/API, migraciones y fakes sin red
+frontend/app/                 rutas Next.js y proxy `/api/v1/*`
+frontend/features/            UI por capacidad con cliente OpenAPI generado
+frontend/tests/               unit, accesibilidad y Playwright desktop/mobile
+infra/                        Compose de frontend/backend/PostgreSQL/Redis/MinIO
 ```
 
 Si el repositorio conserva temporalmente entidades en `prospects` o `configuration`, el cutover
 puede implementar los modelos nuevos allí antes de extraer un módulo. La frontera lógica importa
 más que un refactor de paths. No se mueve código sólo por estética durante la migración.
 
-La dirección de dependencias es views/forms/tasks -> servicios de dominio -> models/protocolos.
+La dirección de dependencias es API serializers/views y tasks -> servicios de dominio ->
+models/protocolos.
 Adaptadores externos dependen de los protocolos, nunca al revés. Views y tasks no asignan estados.
 Tasks reciben UUIDs, reabren filas y revalidan permisos/precondiciones.
+
+El frontend consume exclusivamente `/api/v1`; oculta controles según capabilities sólo para UX.
+DRF vuelve a autorizar y scopear cada objeto. Mutaciones largas crean `BackgroundJob` durable en la
+misma transacción y publican Celery con `transaction.on_commit`.
 
 ## 3. Autorización y privacidad
 
@@ -73,23 +81,12 @@ Provider/model/confidence/IDs/hashes/manifiestos se exponen sólo a admins bajo 
 
 ## 4. Flujos principales
 
-### 4.1 Expansión y cutover contact-centric
+### 4.1 Base nueva y preservación del servicio anterior
 
-La migración sigue expand/backfill/switch/contract:
-
-1. Agregar Workspace/Membership y Organization/Identity/EmailAddress/Contact/Conversation/
-   CampaignEnrollment sin retirar tablas legacy.
-2. Resolver cada Prospect hacia una Organization mediante sus claves globales; vincular un
-   enrollment por participación de campaña y su email elegido.
-3. Promover Contactos desde respuestas humanas y restricciones manuales. AUTO_REPLY/BOUNCE se
-   conservan como eventos sin promoción; una baja humana sí promueve.
-4. Crear Conversations por thread Gmail y vincular mensajes manteniendo IDs Gmail/RFC y bytes de
-   historia.
-5. Cambiar reads/writes de discovery, eligibility, mailbox y UI a las relaciones nuevas.
-6. Comparar conteos y hashes; sólo entonces retirar ContactLedger/ContactOverride y la identidad
-   campaign-owned que ya no sea necesaria.
-
-Todas las migraciones son forward. Nunca se editan las migraciones Overture existentes.
+La arquitectura nueva aplica toda la historia de migraciones sobre PostgreSQL vacío y luego las
+migraciones forward de API/storage/remoción de MFA. No hay ETL, backfill entre bases, dual-write ni
+CDC. El servicio anterior conserva su DB/volumen y queda privado, sin workers, Beat ni Gmail después
+del cutover. Nunca se editan las migraciones Overture existentes.
 
 ### 4.2 Geografía y Overture
 

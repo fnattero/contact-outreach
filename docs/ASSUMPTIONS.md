@@ -5,12 +5,12 @@ seguridad no se relajan desde el dashboard.
 
 | ID | Decisión | Impacto |
 | --- | --- | --- |
-| A-001 | Python 3.12+, Django 5.2 LTS, monolito modular Django/HTMX, PostgreSQL, Redis y Celery; sin SPA/Node salvo necesidad demostrada. | Arquitectura |
+| A-001 | Monorepo: frontend Next.js/React/TypeScript/Ant Design y backend modular Django 5.2 LTS/DRF/Uvicorn; PostgreSQL, Redis y S3-compatible separados. | Arquitectura |
 | A-002 | Una instalación contiene un solo Workspace/empresa; hay múltiples usuarios, no tenants ni registro público. | Alcance |
 | A-003 | Roles: ADMIN completo y VENDEDOR de lectura acotada. Los campos creator/uploader son atribución, no autorización. | Seguridad |
 | A-004 | Admin crea cuentas mediante link de un solo uso mostrado una vez y válido 24 h; no hay recovery público. | Seguridad |
 | A-005 | Quinto fallo de username+IP bloquea 30 min; 20 fallos/IP en 30 min bloquean IP; un intento bloqueado no desliza la espera. | Seguridad |
-| A-006 | TOTP es obligatorio para ADMIN y opcional para VENDEDOR; cada set tiene diez recovery codes hasheados de un uso. | Seguridad |
+| A-006 | MFA queda diferido en v2; se elimina django-otp/recovery y se compensa temporalmente con sesión 12 h, Argon2, lockout, CSRF y reauth sensible. | Seguridad |
 | A-007 | No se borra un User con historia ni se desactiva/degrada al último ADMIN activo; rol/deactivación invalida sesiones. | Integridad |
 | A-008 | Organization es global dentro del Workspace; EmailAddress es única en Workspace y pertenece a una Organization. | Datos |
 | A-009 | Una respuesta humana, carga manual o restricción manual crea Contact; Contact excluye toda Organization de campañas. | Producto |
@@ -59,7 +59,7 @@ seguridad no se relajan desde el dashboard.
 | A-048 | Conversational/scheduled replies no usan same-day campaign guard; scheduled Contact nunca vuelve elegible a Contact. | Alcance |
 | A-049 | Métricas se derivan de filas, no counters; cero denominador muestra `—`; global y filtro campaign, sin rango arbitrario inicial. | Analítica |
 | A-050 | UI en español simple, progressive disclosure, técnico sólo admin, consecuencias de toggles, errores accionables, foco/teclado/responsive y color no exclusivo. | UX / accesibilidad |
-| A-051 | App-side public readiness se implementa, pero proxy inverso/TLS real queda diferido; bind loopback default y no se declara go-live. | Operación |
+| A-051 | Sólo Next.js es público; `/api/v1` se proxya al backend privado con token interno. PostgreSQL, Redis y storage nunca reciben endpoints públicos. | Operación |
 | A-052 | Gmail usa gmail.send + gmail.readonly y reconciliación Message-ID; exactly-once absoluto no existe. | Integridad |
 | A-053 | No Google Maps scraping, SMTP password, tracking, HTML outbound, account rotation ni evasión de cuotas. | Legal / seguridad |
 | A-054 | Campañas/AIAnalysis históricos siguen legibles y nunca se regeneran o reenvían retroactivamente. | Migración |
@@ -85,8 +85,8 @@ denominación local. Un nombre repetido bajo otra provincia no se deduplica por 
 
 ## Contradicciones resueltas
 
-1. **Público vs. despliegue actual:** la aplicación queda endurecida/configurable para Internet;
-   TLS/proxy real permanece una fase externa y loopback es el default seguro.
+1. **Público vs. servicios privados:** Railway termina TLS sólo frente al frontend; el backend y
+   datos permanecen en private networking y confían proxy metadata sólo con token interno.
 2. **IA “agente” vs. efectos:** el LLM analiza texto y selecciona IDs/acciones permitidos; un
    servicio determinista con estado durable ejecuta Gmail. No necesita tools ni LangGraph.
 3. **Contacto con varios emails:** Organization agrupa identidades y Contact agrupa Conversations;

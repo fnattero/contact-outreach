@@ -19,21 +19,20 @@ Los errores HTML muestran el correlation ID y no la excepción.
 
 Health endpoints:
 
-- `/health/live/`: proceso web vivo;
-- `/health/ready/`: PostgreSQL y Redis disponibles;
-- `/health/degraded/`: margen del volumen privado y estado/configuración local de Gmail,
+- `/api/v1/health/live/`: proceso Uvicorn vivo;
+- `/api/v1/health/ready/`: Supervisor, PostgreSQL, Redis y storage disponibles;
+- `/api/v1/health/degraded/`: estado seguro del Bucket y configuración local de Gmail,
   extractor, snapshot/cobertura Overture e IA. No llama proveedores remotos.
 
-El volumen `private_catalogs` debe estar montado con lectura/escritura en `web` y sólo lectura en
-`worker`. Si el worker no lo ve, la preparación MIME rechaza el catálogo como no disponible y el
-mensaje permanece preparado para que el scheduler lo recupere después de corregir el montaje.
+Frontend no posee credenciales S3. Todos los procesos supervisados del backend usan el mismo
+storage adapter y Bucket privado; si un objeto no existe o cambia hash/tamaño, la preparación MIME
+rechaza el set completo y el mensaje queda recuperable. MinIO representa ese contrato sólo en local.
 
 ## 2. Backup
 
-`scripts/backup.sh [directorio]` ejecuta `verify_restore`, genera `pg_dump --format=custom`, copia
-el volumen `/app/private`, crea manifiesto y checksums, y publica el directorio sólo al finalizar.
-Usa `umask 077`. Un fallo, incluido disco lleno, conserva el backup anterior y elimina sólo el
-temporal de esa ejecución.
+`scripts/backup.sh [directorio]` ejecuta `verify_restore`, genera `pg_dump --format=custom` y crea
+un manifiesto de objetos S3 con key/tamaño/hash. La copia/versioning de Bucket se configura fuera
+del container. Usa `umask 077`; un fallo conserva el backup anterior y elimina sólo el temporal.
 
 El dump contiene el catálogo Overture, sus manifests/licencias/atribución y ciphertext de
 Integraciones, pero no `FIELD_ENCRYPTION_KEY`. Guardar esa raíz por
@@ -45,9 +44,8 @@ sólo el dump no debe poder descifrar API keys, client secret ni refresh token.
 1. Recuperar `.env` y la misma `FIELD_ENCRYPTION_KEY`.
 2. Establecer `SEND_KILL_SWITCH=true`.
 3. Ejecutar `scripts/restore.sh --confirm RUTA_BACKUP`.
-4. El script verifica checksums, detiene web/worker/maintenance/beat, restaura PostgreSQL, reemplaza
-   el volumen privado y reasigna sus archivos al usuario no privilegiado `app`; después aplica
-   migraciones y ejecuta `verify_restore`.
+4. El procedimiento detiene el backend unificado, restaura PostgreSQL y los objetos del Bucket,
+   después aplica migraciones bajo advisory lock y ejecuta `verify_restore`.
 5. `verify_restore` rechaza migraciones pendientes, catálogos PDF ausentes/hash inválido, refresh
    tokens o credenciales de integración no descifrables, snapshots no `READY` usados por campañas
    activas, poco disco o live efectivo sin kill switch. Nunca imprime valores ni ciphertext.
@@ -65,8 +63,8 @@ se elimina y la UI informa que debe liberarse espacio. Ante alerta degradada:
 1. mantener o activar el kill switch;
 2. pausar campañas live;
 3. no borrar catálogos referenciados ni datos de PostgreSQL manualmente;
-4. liberar espacio en logs/backups externos o ampliar el volumen;
-5. verificar `/health/degraded/` y ejecutar `python src/manage.py verify_restore`;
+4. liberar espacio en backups externos o ampliar capacidad del Bucket/plan;
+5. verificar `/api/v1/health/degraded/` y ejecutar `python src/manage.py verify_restore`;
 6. reanudar sólo después del preflight.
 
 Si PostgreSQL reporta ENOSPC, detener workers/beat, recuperar espacio y seguir el procedimiento del
@@ -92,13 +90,13 @@ motor; no reencolar efectos Gmail hasta reconciliar estados `SENDING|RECONCILING
 
 Los mensajes Celery son señales. Las tareas vuelven a leer estado y los barridos reconstruyen runs,
 pipeline, mensajes preparados, decisiones automáticas, seguimientos, notificaciones,
-reconciliaciones y sync desde PostgreSQL. Después de un reinicio:
+reconciliaciones y sync desde PostgreSQL. Después de un reinicio del backend unificado:
 
 1. comprobar readiness;
 2. revisar Jobs `RUNNING|RETRY_WAIT|FAILED`;
 3. revisar campañas pausadas/errores parciales;
 4. confirmar que no haya `SENDING` vencido fuera de reconciliación;
-5. ejecutar `make smoke-worker`.
+5. comprobar health Supervisor y ejecutar el smoke de general y maintenance.
 
 ## 7. Sincronización y retención Overture
 
