@@ -38,6 +38,14 @@ class ViewSummaryPermission(CapabilityPermission):
     required_capability = Capability.VIEW_SUMMARY
 
 
+class ViewCampaignsPermission(CapabilityPermission):
+    required_capability = Capability.VIEW_CAMPAIGNS
+
+
+class ManageCampaignsPermission(CapabilityPermission):
+    required_capability = Capability.MANAGE_CAMPAIGNS
+
+
 class ViewContactsPermission(CapabilityPermission):
     required_capability = Capability.VIEW_CONTACTS
 

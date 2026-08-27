@@ -20,6 +20,7 @@ from apps.api.auth import (
     ReauthenticateView,
     SessionView,
 )
+from apps.api.campaigns import CampaignActionView, CampaignDetailView, CampaignListView
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
 from apps.api.contacts import (
     ContactDetailView,
@@ -71,6 +72,17 @@ urlpatterns = [
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="api-dashboard-summary"),
+    path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
+    path(
+        "campaigns/<uuid:campaign_id>/",
+        CampaignDetailView.as_view(),
+        name="api-campaign-detail",
+    ),
+    path(
+        "campaigns/<uuid:campaign_id>/actions/<str:action>/",
+        CampaignActionView.as_view(),
+        name="api-campaign-action",
+    ),
     path("audit-events/", AuditEventListView.as_view(), name="api-audit-events"),
     path("background-jobs/", BackgroundJobListView.as_view(), name="api-background-jobs"),
     path(

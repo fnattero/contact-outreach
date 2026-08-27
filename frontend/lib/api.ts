@@ -30,6 +30,31 @@ export type DashboardCampaign = {
   delivery_mode: string;
 };
 
+export type CampaignDetail = DashboardCampaign & {
+  approval_mode: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  location_text?: string;
+  objective?: number;
+  daily_limit?: number;
+  message_interval_minutes?: number;
+  status_reason?: string;
+  categories?: Array<{ id: string; name: string; sort_order: number }>;
+  zones?: Array<{ id: string; name: string; sort_order: number }>;
+  attachments?: Array<{ catalog_id: string; name: string; version: number; position: number }>;
+  metrics?: {
+    enrollments: number;
+    prospects: number;
+    initial_messages: number;
+    sent: number;
+    review_ready: number;
+    queued: number;
+    errors: number;
+  };
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -81,6 +106,9 @@ export type DashboardSummary = {
 };
 
 type ApiEnvelope<T> = { data: T };
+type ApiPage<T> = ApiEnvelope<T> & {
+  meta: { page: number; page_size: number; total: number };
+};
 
 let csrfToken: string | null = null;
 
@@ -117,7 +145,10 @@ export async function getCsrfToken(): Promise<string> {
   return csrfToken;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function requestEnvelope<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<ApiEnvelope<T> & Partial<Pick<ApiPage<T>, "meta">>> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
@@ -143,10 +174,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw problem;
   }
   if (response.status === 204) {
-    return undefined as T;
+    return { data: undefined as T };
   }
-  const body = (await response.json()) as ApiEnvelope<T>;
-  return body.data;
+  return (await response.json()) as ApiEnvelope<T> & Partial<Pick<ApiPage<T>, "meta">>;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await requestEnvelope<T>(path, init)).data;
 }
 
 export function getSession(): Promise<UserSession> {
@@ -156,6 +190,16 @@ export function getSession(): Promise<UserSession> {
 export function getDashboardSummary(campaignId?: string): Promise<DashboardSummary> {
   const query = campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : "";
   return request<DashboardSummary>(`/api/v1/dashboard/summary/${query}`);
+}
+
+export function getCampaigns(): Promise<ApiPage<DashboardCampaign[]>> {
+  return requestEnvelope<DashboardCampaign[]>("/api/v1/campaigns/") as Promise<
+    ApiPage<DashboardCampaign[]>
+  >;
+}
+
+export function getCampaign(id: string): Promise<CampaignDetail> {
+  return request<CampaignDetail>(`/api/v1/campaigns/${encodeURIComponent(id)}/`);
 }
 
 export function login(username: string, password: string): Promise<UserSession> {

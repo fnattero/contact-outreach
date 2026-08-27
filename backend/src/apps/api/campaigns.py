@@ -1,0 +1,334 @@
+from __future__ import annotations
+
+import uuid
+from typing import Any, cast
+
+from django.core.exceptions import ValidationError
+from django.db.models import Q, QuerySet
+from rest_framework import serializers, status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.accounts.permissions import Capability, has_capability, workspace_for_user
+from apps.api.permissions import (
+    ManageCampaignsPermission,
+    ViewCampaignsPermission,
+    authenticated_user,
+)
+from apps.campaigns.approval import approve_campaign, start_per_message_campaign
+from apps.campaigns.forms import CampaignForm
+from apps.campaigns.models import Campaign, OutboundMessage
+from apps.campaigns.services import create_campaign, transition_campaign
+from apps.campaigns.tasks import orchestrate_extraction
+from apps.configuration.integrations import runtime_integration_configuration
+from apps.configuration.models import BusinessProfile
+
+
+class CampaignListQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    q = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    state = serializers.ChoiceField(required=False, choices=Campaign.State.choices)
+    page = serializers.IntegerField(required=False, min_value=1, default=1)
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=100, default=25)
+
+
+def _initial_values(owner_id: int, workspace_id: uuid.UUID | str) -> dict[str, object]:
+    runtime = runtime_integration_configuration(owner_id)
+    initial: dict[str, object] = {
+        "extractor_provider": runtime.extractor_provider,
+        "overture_min_confidence": runtime.overture_min_confidence,
+        "website_fetcher": runtime.website_fetcher,
+        "llm_provider": runtime.llm_provider,
+        "llm_model": runtime.llm_model,
+        "llm_base_url": runtime.llm_base_url(),
+    }
+    profile = BusinessProfile.objects.filter(workspace_id=workspace_id).first()
+    if profile is not None:
+        initial["relevance_threshold"] = profile.relevance_threshold
+    return initial
+
+
+def _page(
+    queryset: QuerySet[Campaign], *, page: int, page_size: int
+) -> tuple[list[Campaign], dict[str, int]]:
+    total = queryset.count()
+    start = (page - 1) * page_size
+    return list(queryset[start : start + page_size]), {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
+
+
+def _campaign_data(campaign: Campaign, *, include_admin: bool) -> dict[str, object]:
+    first_messages = campaign.messages.filter(
+        kind__in=(OutboundMessage.Kind.FIRST_CONTACT, OutboundMessage.Kind.INITIAL)
+    )
+    data: dict[str, object] = {
+        "id": str(campaign.pk),
+        "name": campaign.name,
+        "state": campaign.state,
+        "state_label": campaign.get_state_display(),
+        "discovery_state": campaign.discovery_state,
+        "discovery_state_label": campaign.get_discovery_state_display(),
+        "delivery_mode": campaign.delivery_mode,
+        "approval_mode": campaign.approval_mode,
+        "created_at": campaign.created_at.isoformat(),
+        "updated_at": campaign.updated_at.isoformat(),
+        "started_at": campaign.started_at.isoformat() if campaign.started_at else None,
+        "finished_at": campaign.finished_at.isoformat() if campaign.finished_at else None,
+    }
+    if not include_admin:
+        return data
+
+    data.update(
+        {
+            "location_text": campaign.location_text,
+            "objective": campaign.objective,
+            "max_raw_records": campaign.max_raw_records,
+            "daily_limit": campaign.daily_limit,
+            "message_interval_minutes": campaign.message_interval_minutes,
+            "weekdays": campaign.weekdays,
+            "window_start": campaign.window_start.strftime("%H:%M"),
+            "window_end": campaign.window_end.strftime("%H:%M"),
+            "timezone_name": campaign.timezone_name,
+            "relevance_threshold": campaign.relevance_threshold,
+            "reminder_enabled": campaign.reminder_enabled,
+            "reminder_delay_days": campaign.reminder_delay_days,
+            "status_reason": campaign.status_reason,
+            "catalog": {
+                "id": str(campaign.catalog_id),
+                "name": campaign.catalog.name,
+                "version": campaign.catalog.version,
+            },
+            "categories": [
+                {
+                    "id": str(selection.category_id),
+                    "name": selection.name_snapshot,
+                    "sort_order": selection.sort_order,
+                }
+                for selection in campaign.category_selections.order_by("sort_order", "created_at")
+            ],
+            "zones": [
+                {
+                    "id": str(selection.zone_id),
+                    "name": selection.name_snapshot,
+                    "sort_order": selection.sort_order,
+                }
+                for selection in campaign.zone_selections.order_by("sort_order", "created_at")
+            ],
+            "attachments": [
+                {
+                    "catalog_id": str(attachment.catalog_id),
+                    "name": attachment.catalog.name,
+                    "version": attachment.catalog.version,
+                    "position": attachment.position,
+                }
+                for attachment in campaign.attachments.select_related("catalog").order_by(
+                    "position", "created_at"
+                )
+            ],
+            "metrics": {
+                "enrollments": campaign.enrollments.count(),
+                "prospects": campaign.prospects.count(),
+                "initial_messages": first_messages.count(),
+                "sent": first_messages.filter(state=OutboundMessage.State.SENT).count(),
+                "review_ready": first_messages.filter(
+                    state=OutboundMessage.State.REVIEW_READY
+                ).count(),
+                "queued": first_messages.filter(
+                    state__in=(
+                        OutboundMessage.State.PREPARED,
+                        OutboundMessage.State.QUEUED,
+                        OutboundMessage.State.SENDING,
+                        OutboundMessage.State.RECONCILING,
+                    )
+                ).count(),
+                "errors": first_messages.filter(state=OutboundMessage.State.SEND_FAILED).count(),
+            },
+            "audience_hash": campaign.audience_hash or None,
+            "content_hash": campaign.content_hash or None,
+            "attachment_hash": campaign.attachment_hash or None,
+            "schedule_hash": campaign.schedule_hash or None,
+        }
+    )
+    return data
+
+
+def _campaign_queryset(
+    workspace_id: uuid.UUID | str, *, include_drafts: bool
+) -> QuerySet[Campaign]:
+    queryset = Campaign.objects.select_related("catalog").filter(workspace_id=workspace_id)
+    return queryset if include_drafts else queryset.exclude(state=Campaign.State.DRAFT)
+
+
+class CampaignListView(APIView):
+    permission_classes = (IsAuthenticated, ViewCampaignsPermission)
+
+    def get(self, request: Request) -> Response:
+        query = CampaignListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        values = query.validated_data
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
+        is_admin = has_capability(user, Capability.MANAGE_CAMPAIGNS)
+        campaigns = _campaign_queryset(workspace.pk, include_drafts=is_admin)
+        if values.get("q"):
+            search = values["q"]
+            campaigns = campaigns.filter(
+                Q(name__icontains=search) | Q(location_text__icontains=search)
+            )
+        if values.get("state"):
+            campaigns = campaigns.filter(state=values["state"])
+        rows, meta = _page(campaigns, page=values["page"], page_size=values["page_size"])
+        return Response(
+            {
+                "data": [_campaign_data(campaign, include_admin=is_admin) for campaign in rows],
+                "meta": meta,
+            }
+        )
+
+    def post(self, request: Request) -> Response:
+        permission = ManageCampaignsPermission()
+        if not permission.has_permission(request, self):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.MANAGE_CAMPAIGNS)
+        form = CampaignForm(
+            data=request.data,
+            initial=_initial_values(user.pk, workspace.pk),
+            workspace=workspace,
+        )
+        for field_name in (
+            "extractor_provider",
+            "website_fetcher",
+            "llm_provider",
+            "llm_model",
+            "llm_base_url",
+        ):
+            form.fields[field_name].disabled = True
+        if not form.is_valid():
+            raise serializers.ValidationError(form.errors.get_json_data())
+        cleaned = form.cleaned_data
+        values = {
+            field: cleaned[field]
+            for field in (
+                "name",
+                "delivery_mode",
+                "approval_mode",
+                "reminder_enabled",
+                "reminder_delay_days",
+                "location_text",
+                "objective",
+                "max_raw_records",
+                "overture_min_confidence",
+                "daily_limit",
+                "message_interval_minutes",
+                "weekdays",
+                "window_start",
+                "window_end",
+                "timezone_name",
+                "relevance_threshold",
+                "extractor_provider",
+                "website_fetcher",
+                "llm_provider",
+                "llm_base_url",
+                "llm_model",
+                "catalog",
+            )
+        }
+        try:
+            campaign = create_campaign(
+                actor=user,
+                values=values,
+                category_ids=[item.pk for item in cleaned["categories"]],
+                zone_ids=[item.pk for item in cleaned["zones"]],
+                catalog_ids=[item.pk for item in cleaned["catalogs"]],
+            )
+        except ValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return Response(
+            {"data": _campaign_data(campaign, include_admin=True)},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CampaignDetailView(APIView):
+    permission_classes = (IsAuthenticated, ViewCampaignsPermission)
+
+    def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
+        queryset = _campaign_queryset(
+            workspace.pk,
+            include_drafts=has_capability(user, Capability.MANAGE_CAMPAIGNS),
+        ).prefetch_related("category_selections", "zone_selections", "attachments__catalog")
+        try:
+            campaign = queryset.get(pk=campaign_id)
+        except Campaign.DoesNotExist as exc:
+            raise serializers.ValidationError({"campaign_id": "La campaña no existe."}) from exc
+        return Response(
+            {
+                "data": _campaign_data(
+                    campaign,
+                    include_admin=has_capability(user, Capability.MANAGE_CAMPAIGNS),
+                )
+            }
+        )
+
+
+class CampaignActionView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    allowed_actions = frozenset(
+        {"start-discovery", "approve", "start-approved", "pause", "resume", "cancel"}
+    )
+
+    def post(self, request: Request, campaign_id: uuid.UUID, action: str) -> Response:
+        if action not in self.allowed_actions:
+            raise serializers.ValidationError({"action": "La acción no existe."})
+        key = request.headers.get("Idempotency-Key", "")
+        try:
+            uuid.UUID(key)
+        except ValueError as exc:
+            raise serializers.ValidationError(
+                {"Idempotency-Key": "Enviá una clave UUID para esta acción."}
+            ) from exc
+        user = authenticated_user(request)
+        capability = (
+            Capability.APPROVE_CAMPAIGNS
+            if action in {"approve", "start-approved"}
+            else Capability.MANAGE_CAMPAIGNS
+        )
+        workspace = workspace_for_user(user, capability)
+        if not Campaign.objects.filter(pk=campaign_id, workspace=workspace).exists():
+            raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
+        try:
+            if action == "approve":
+                campaign = approve_campaign(campaign_id, actor=user)
+            elif action == "start-approved":
+                campaign = start_per_message_campaign(campaign_id, actor=user)
+            else:
+                targets = {
+                    "start-discovery": Campaign.State.DISCOVERING,
+                    "pause": Campaign.State.PAUSED,
+                    "resume": Campaign.State.RUNNING,
+                    "cancel": Campaign.State.CANCELLED,
+                }
+                campaign = transition_campaign(
+                    campaign_id=campaign_id,
+                    target_state=targets[action],
+                    actor=user,
+                    reason=str(cast(dict[str, Any], request.data).get("reason", "")),
+                )
+                if action == "start-discovery":
+                    orchestrate_extraction.delay(str(campaign.pk))
+        except (Campaign.DoesNotExist, ValidationError) as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return Response(
+            {"data": _campaign_data(campaign, include_admin=True)},
+            status=status.HTTP_200_OK,
+        )
