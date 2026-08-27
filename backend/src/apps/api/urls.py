@@ -22,6 +22,12 @@ from apps.api.auth import (
 )
 from apps.api.campaigns import CampaignActionView, CampaignDetailView, CampaignListView
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
+from apps.api.configuration import (
+    SearchCategoryListView,
+    SearchCategoryRulesView,
+    SearchZoneGeometryView,
+    SearchZoneListView,
+)
 from apps.api.contacts import (
     ContactDetailView,
     ContactEmailCreateView,
@@ -80,6 +86,18 @@ urlpatterns = [
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
     path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
+    path("search-categories/", SearchCategoryListView.as_view(), name="api-search-categories"),
+    path(
+        "search-categories/<uuid:category_id>/rules/",
+        SearchCategoryRulesView.as_view(),
+        name="api-search-category-rules",
+    ),
+    path("search-zones/", SearchZoneListView.as_view(), name="api-search-zones"),
+    path(
+        "search-zones/<uuid:zone_id>/geometry/",
+        SearchZoneGeometryView.as_view(),
+        name="api-search-zone-geometry",
+    ),
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="api-dashboard-summary"),
     path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
     path(
