@@ -54,6 +54,10 @@ class ViewSentMessagesPermission(CapabilityPermission):
     required_capability = Capability.VIEW_SENT_MESSAGES
 
 
+class SendRepliesPermission(CapabilityPermission):
+    required_capability = Capability.SEND_REPLIES
+
+
 class ViewContactsPermission(CapabilityPermission):
     required_capability = Capability.VIEW_CONTACTS
 

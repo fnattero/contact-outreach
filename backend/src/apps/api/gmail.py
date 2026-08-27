@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hmac
+from datetime import datetime, timedelta
 from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.http import HttpResponseRedirect
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -27,6 +29,8 @@ from apps.mailbox.services import (
 
 OAUTH_STATE_SESSION_KEY = "api_gmail_oauth_state"
 OAUTH_VERIFIER_SESSION_KEY = "api_gmail_oauth_verifier"
+OAUTH_STARTED_AT_SESSION_KEY = "api_gmail_oauth_started_at"
+OAUTH_STATE_LIFETIME = timedelta(minutes=10)
 
 
 def _connection_data(connection: GmailConnection | None) -> dict[str, object]:
@@ -73,6 +77,7 @@ class GmailOAuthStartView(APIView):
         state, verifier, challenge = oauth_material()
         request.session[OAUTH_STATE_SESSION_KEY] = state
         request.session[OAUTH_VERIFIER_SESSION_KEY] = verifier
+        request.session[OAUTH_STARTED_AT_SESSION_KEY] = timezone.now().isoformat()
         try:
             url = authorization_url(
                 owner=owner,
@@ -84,6 +89,7 @@ class GmailOAuthStartView(APIView):
         except (ValidationError, ProviderError, ValueError) as exc:
             request.session.pop(OAUTH_STATE_SESSION_KEY, None)
             request.session.pop(OAUTH_VERIFIER_SESSION_KEY, None)
+            request.session.pop(OAUTH_STARTED_AT_SESSION_KEY, None)
             raise serializers.ValidationError(str(exc)) from exc
         return Response({"data": {"authorization_url": url}})
 
@@ -96,11 +102,24 @@ class GmailOAuthCallbackView(APIView):
         code = request.query_params.get("code", "")
         expected_state = request.session.pop(OAUTH_STATE_SESSION_KEY, "")
         verifier = request.session.pop(OAUTH_VERIFIER_SESSION_KEY, "")
+        started_at_value = request.session.pop(OAUTH_STARTED_AT_SESSION_KEY, "")
+        started_at: datetime | None = None
+        if isinstance(started_at_value, str):
+            try:
+                started_at = datetime.fromisoformat(started_at_value)
+            except ValueError:
+                started_at = None
+        if started_at is not None and timezone.is_naive(started_at):
+            started_at = timezone.make_aware(started_at, timezone=timezone.get_current_timezone())
+        state_is_fresh = (
+            started_at is not None and started_at + OAUTH_STATE_LIFETIME > timezone.now()
+        )
         if (
             not state
             or not hmac.compare_digest(state, str(expected_state))
             or not code
             or not verifier
+            or not state_is_fresh
         ):
             return HttpResponseRedirect("/settings/integrations?gmail=oauth_failed")
         try:

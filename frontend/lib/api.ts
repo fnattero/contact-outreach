@@ -408,6 +408,20 @@ export function getInboundThread(id: string): Promise<InboundThread> {
   return request<InboundThread>(`/api/v1/inbound-messages/${encodeURIComponent(id)}/thread/`);
 }
 
+export function sendManualReply(
+  inboundId: string,
+  bodyText: string,
+  idempotencyKey: string,
+): Promise<{ created: boolean; message: OutboundMessage }> {
+  return request<{ created: boolean; message: OutboundMessage }>(
+    `/api/v1/inbound-messages/${encodeURIComponent(inboundId)}/manual-reply/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body_text: bodyText, idempotency_key: idempotencyKey }),
+    },
+  );
+}
+
 export function getOutboundMessages(): Promise<ApiPage<OutboundMessage[]>> {
   return requestEnvelope<OutboundMessage[]>("/api/v1/outbound-messages/") as Promise<
     ApiPage<OutboundMessage[]>

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.mailbox.models import GmailConnection
 
@@ -78,7 +80,28 @@ def test_gmail_oauth_start_stores_one_time_session_material(owner: User) -> None
     assert response.json()["data"]["authorization_url"].startswith("https://accounts.google")
     assert client.session.get("api_gmail_oauth_state")
     assert client.session.get("api_gmail_oauth_verifier")
+    assert client.session.get("api_gmail_oauth_started_at")
     authorization.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_gmail_oauth_callback_rejects_expired_state(owner: User) -> None:
+    client = Client()
+    client.force_login(owner)
+    session = client.session
+    session["api_gmail_oauth_state"] = "expected-state"
+    session["api_gmail_oauth_verifier"] = "verifier"
+    session["api_gmail_oauth_started_at"] = (timezone.now() - timedelta(minutes=11)).isoformat()
+    session.save()
+
+    response = client.get(
+        reverse("api-gmail-oauth-callback"),
+        {"state": "expected-state", "code": "provider-code"},
+    )
+
+    assert response.status_code == 302
+    assert response["Location"].endswith("gmail=oauth_failed")
+    assert "api_gmail_oauth_state" not in client.session
 
 
 @pytest.mark.django_db

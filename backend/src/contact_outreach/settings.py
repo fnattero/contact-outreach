@@ -389,12 +389,18 @@ CSRF_FAILURE_VIEW = "apps.core.views.csrf_failure"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ("apps.api.authentication.ApiSessionAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_THROTTLE_CLASSES": ("apps.api.throttling.ApiRateThrottle",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.api.exceptions.api_exception_handler",
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
 }
+API_PUBLIC_THROTTLE_RATE = os.getenv("API_PUBLIC_THROTTLE_RATE", "30/h")
+API_READ_THROTTLE_RATE = os.getenv("API_READ_THROTTLE_RATE", "300/5m")
+API_MUTATION_THROTTLE_RATE = os.getenv("API_MUTATION_THROTTLE_RATE", "60/5m")
+API_SENSITIVE_THROTTLE_RATE = os.getenv("API_SENSITIVE_THROTTLE_RATE", "10/h")
+API_EXPORT_THROTTLE_RATE = os.getenv("API_EXPORT_THROTTLE_RATE", "5/h")
 SPECTACULAR_SETTINGS = {
     "TITLE": "Contact Outreach API",
     "DESCRIPTION": "REST API for the private outreach dashboard.",

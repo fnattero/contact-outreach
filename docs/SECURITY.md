@@ -51,6 +51,12 @@ técnicos. No puede POST salvo logout. Ocultar navegación no sustituye enforcem
 CSRF es obligatorio en toda mutación REST, incluido login. Acciones críticas (habilitar LIVE IA,
 usuarios/roles/estado y Gmail connect/disconnect) exigen reautenticación admin. GET nunca muta.
 
+La autenticación tiene además límites Redis complementarios: endpoints públicos de CSRF/activación
+usan 30 solicitudes por hora y login 10 por hora; lecturas autenticadas usan 300 por cinco minutos,
+mutaciones 60 por cinco minutos, acciones sensibles 10 por hora y exports 5 por hora. Las claves se
+generan con HMAC y nunca contienen la IP cruda. Estos límites reducen abuso, pero no sustituyen los
+lockouts durables de login ni las claves de idempotencia/transacciones que protegen efectos.
+
 ## 4. Sesiones, headers e Internet readiness
 
 Producción define listas exactas de `ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS`; no wildcards. La

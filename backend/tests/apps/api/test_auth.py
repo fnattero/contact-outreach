@@ -5,6 +5,7 @@ import json
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
@@ -40,6 +41,21 @@ def test_csrf_endpoint_uses_a_session_and_does_not_set_a_csrf_cookie() -> None:
     assert settings.CSRF_USE_SESSIONS is True
     assert settings.CSRF_COOKIE_NAME not in response.cookies
     assert settings.SESSION_COOKIE_NAME in response.cookies
+
+
+@pytest.mark.django_db
+@override_settings(API_PUBLIC_THROTTLE_RATE="2/m")
+def test_public_csrf_endpoint_has_a_supplemental_rate_limit() -> None:
+    cache.clear()
+    client = Client()
+
+    assert client.get(reverse("api-auth-csrf")).status_code == 200
+    assert client.get(reverse("api-auth-csrf")).status_code == 200
+    limited = client.get(reverse("api-auth-csrf"))
+
+    assert limited.status_code == 429
+    assert limited.json()["code"] == "rate_limited"
+    assert int(limited["Retry-After"]) > 0
 
 
 @pytest.mark.django_db

@@ -3,8 +3,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import QuerySet
-from rest_framework import serializers
+from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -12,13 +14,17 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.permissions import (
+    SendRepliesPermission,
     ViewContactsPermission,
     ViewSentMessagesPermission,
     authenticated_user,
 )
 from apps.campaigns.models import OutboundMessage
 from apps.dashboard.queries import outbound_queryset, outbound_workspace_filter, response_queryset
+from apps.integrations.contracts import ProviderError
+from apps.mailbox.manual import authorize_manual_reply
 from apps.mailbox.models import InboundMessage
+from apps.mailbox.tasks import deliver_manual_reply_task
 
 
 class MessageQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -29,6 +35,11 @@ class MessageQuerySerializer(serializers.Serializer[dict[str, Any]]):
         required=False,
         choices=InboundMessage.Classification.choices,
     )
+
+
+class ManualReplySerializer(serializers.Serializer[dict[str, Any]]):
+    body_text = serializers.CharField(max_length=10_000, trim_whitespace=True)
+    idempotency_key = serializers.UUIDField()
 
 
 def _page(
@@ -169,6 +180,36 @@ class InboundMessageThreadView(APIView):
                     "timeline": timeline,
                 }
             }
+        )
+
+
+class InboundManualReplyView(APIView):
+    permission_classes = (IsAuthenticated, SendRepliesPermission)
+
+    def post(self, request: Request, inbound_id: uuid.UUID) -> Response:
+        serializer = ManualReplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            message, created = authorize_manual_reply(
+                actor=authenticated_user(request),
+                inbound_id=inbound_id,
+                body_text=str(serializer.validated_data["body_text"]),
+                request_key=serializer.validated_data["idempotency_key"],
+            )
+        except (InboundMessage.DoesNotExist, ValidationError, ProviderError) as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+        if created:
+            transaction.on_commit(lambda: deliver_manual_reply_task.delay(str(message.pk)))
+
+        return Response(
+            {
+                "data": {
+                    "created": created,
+                    "message": _outbound_data(message, include_admin=True),
+                }
+            },
+            status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
         )
 
 

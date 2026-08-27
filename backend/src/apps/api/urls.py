@@ -48,6 +48,7 @@ from apps.api.gmail import (
 from apps.api.health import DegradedHealthView
 from apps.api.integrations import IntegrationStatusView
 from apps.api.mailbox import (
+    InboundManualReplyView,
     InboundMessageListView,
     InboundMessageThreadView,
     OutboundMessageDetailView,
@@ -150,6 +151,11 @@ urlpatterns = [
         "inbound-messages/<uuid:inbound_id>/thread/",
         InboundMessageThreadView.as_view(),
         name="api-inbound-message-thread",
+    ),
+    path(
+        "inbound-messages/<uuid:inbound_id>/manual-reply/",
+        InboundManualReplyView.as_view(),
+        name="api-inbound-message-manual-reply",
     ),
     path("outbound-messages/", OutboundMessageListView.as_view(), name="api-outbound-messages"),
     path(

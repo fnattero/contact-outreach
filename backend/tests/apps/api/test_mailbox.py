@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import json
+import uuid
+from unittest.mock import Mock
+
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client
+from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.catalogs.services import create_catalog
+from apps.contacts.models import Contact, EmailAddress, Organization
+from apps.integrations.gmail import GMAIL_SCOPES
+from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection, InboundMessage
 
 
@@ -73,6 +80,87 @@ def test_inbound_list_and_thread_serialize_messages(owner: User) -> None:
             "classification": inbound.classification,
         }
     ]
+
+
+@pytest.mark.django_db
+@override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
+def test_manual_reply_api_authorizes_once_and_queues_delivery(
+    owner: User,
+    monkeypatch: pytest.MonkeyPatch,
+    django_capture_on_commit_callbacks,
+) -> None:
+    workspace = owner.membership.workspace
+    connection = GmailConnection.objects.create(
+        workspace=workspace,
+        owner=owner,
+        email="owner@example.invalid",
+        scopes=list(GMAIL_SCOPES),
+        refresh_token_encrypted=encrypt_token("fake-refresh-token"),
+        status=GmailConnection.Status.CONNECTED,
+        last_tested_at=timezone.now(),
+    )
+    organization = Organization.objects.create(
+        workspace=workspace,
+        name="Contacto manual",
+        normalized_name="contacto manual",
+    )
+    email = EmailAddress.objects.create(
+        workspace=workspace,
+        organization=organization,
+        original_email="reply-contact@example.com",
+        normalized_email="reply-contact@example.com",
+        domain="example.com",
+        is_preferred=True,
+        validity=EmailAddress.Validity.VALID,
+    )
+    Contact.objects.create(
+        workspace=workspace,
+        organization=organization,
+        preferred_email=email,
+        name="Contacto manual",
+        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
+        created_by=owner,
+    )
+    inbound = InboundMessage.objects.create(
+        connection=connection,
+        gmail_message_id="gmail-manual-api",
+        gmail_thread_id="thread-manual-api",
+        message_id="<gmail-manual-api@example.com>",
+        sender=email.original_email,
+        subject="Consulta",
+        external_at=timezone.now(),
+        received_at=timezone.now(),
+        body_text="¿Podemos conversar?",
+        is_human=True,
+    )
+    client = Client()
+    client.force_login(owner)
+    deliver = Mock()
+    monkeypatch.setattr("apps.api.mailbox.deliver_manual_reply_task.delay", deliver)
+    payload = {
+        "body_text": "Sí, coordinemos una llamada.",
+        "idempotency_key": str(uuid.uuid4()),
+    }
+
+    with django_capture_on_commit_callbacks(execute=True):
+        first = client.post(
+            reverse("api-inbound-message-manual-reply", args=(inbound.pk,)),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+    second = client.post(
+        reverse("api-inbound-message-manual-reply", args=(inbound.pk,)),
+        data=json.dumps(payload),
+        content_type="application/json",
+    )
+
+    assert first.status_code == 202
+    assert first.json()["data"]["created"] is True
+    assert first.json()["data"]["message"]["state"] == OutboundMessage.State.QUEUED
+    assert second.status_code == 200
+    assert second.json()["data"]["created"] is False
+    assert deliver.call_count == 1
+    assert OutboundMessage.objects.filter(kind=OutboundMessage.Kind.MANUAL_REPLY).count() == 1
 
 
 @pytest.mark.django_db
