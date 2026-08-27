@@ -3,10 +3,11 @@
 import { Alert, Button, Card, Empty, Flex, List, Skeleton, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AuthError } from "@/components/auth-provider";
+import { AuthError, useAuth } from "@/components/auth-provider";
 import { getCampaigns, type DashboardCampaign } from "@/lib/api";
 
 export default function CampaignsPage() {
+  const { session } = useAuth();
   const [campaigns, setCampaigns] = useState<DashboardCampaign[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -40,9 +41,11 @@ export default function CampaignsPage() {
             Audiencias, aprobaciones y entregas de la empresa.
           </Typography.Paragraph>
         </div>
-        <Button type="primary" disabled>
-          Nueva campaña
-        </Button>
+        {session?.role === "ADMIN" ? (
+          <Link href="/campaigns/new">
+            <Button type="primary">Nueva campaña</Button>
+          </Link>
+        ) : null}
       </Flex>
       <Card>
         {campaigns.length ? (
@@ -62,11 +65,7 @@ export default function CampaignsPage() {
           <Empty description="Todavía no hay campañas." />
         )}
       </Card>
-      <Alert
-        type="info"
-        showIcon
-        message="La creación y aprobación paso a paso se está incorporando de forma segura."
-      />
+      <Alert type="info" showIcon message="La aprobación fija audiencia, contenido, adjuntos y calendario antes de cualquier efecto." />
     </Flex>
   );
 }

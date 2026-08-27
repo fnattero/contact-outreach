@@ -214,6 +214,34 @@ export type IntegrationStatus = {
   revision: number;
 };
 
+export type SearchCategory = {
+  id: string;
+  name: string;
+  sort_order: number;
+  rules_revision: number;
+  rules: Array<{
+    id: string;
+    taxonomy_code: string;
+    name_terms: string[];
+    active: boolean;
+    sort_order: number;
+  }>;
+};
+
+export type SearchZone = {
+  id: string;
+  name: string;
+  official_code: string;
+  level: string;
+  province_code: string;
+  province_name: string;
+  parent_id: string | null;
+  selectable: boolean;
+  location_text: string;
+  boundary_revision: number;
+  boundary_hash: string;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -463,6 +491,22 @@ export function updateUserStatus(id: number, isActive: boolean): Promise<Managed
 
 export function getIntegrationStatus(): Promise<IntegrationStatus> {
   return request<IntegrationStatus>("/api/v1/integrations/status/");
+}
+
+export function getSearchCategories(): Promise<SearchCategory[]> {
+  return request<SearchCategory[]>("/api/v1/search-categories/");
+}
+
+export function getSearchZones(level?: string): Promise<SearchZone[]> {
+  const query = level ? `?level=${encodeURIComponent(level)}` : "";
+  return request<SearchZone[]>(`/api/v1/search-zones/${query}`);
+}
+
+export function createCampaign(input: Record<string, unknown>): Promise<CampaignDetail> {
+  return request<CampaignDetail>("/api/v1/campaigns/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export function login(username: string, password: string): Promise<UserSession> {
