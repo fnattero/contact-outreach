@@ -183,6 +183,21 @@ export type BusinessProfile = {
   profile_version: number;
 };
 
+export type ManagedUser = {
+  id: number;
+  username: string;
+  email: string;
+  role: "ADMIN" | "VENDEDOR";
+  is_active: boolean;
+  date_joined: string;
+};
+
+export type CreatedUser = {
+  user: ManagedUser;
+  activation_url: string;
+  expires_at: string;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -398,6 +413,35 @@ export function updateBusinessProfile(values: Partial<BusinessProfile>): Promise
   return request<BusinessProfile>("/api/v1/workspace/profile/", {
     method: "PATCH",
     body: JSON.stringify(values),
+  });
+}
+
+export function getUsers(): Promise<ManagedUser[]> {
+  return request<ManagedUser[]>("/api/v1/users/");
+}
+
+export function createUser(input: {
+  username: string;
+  email: string;
+  role: "ADMIN" | "VENDEDOR";
+}): Promise<CreatedUser> {
+  return request<CreatedUser>("/api/v1/users/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateUserRole(id: number, role: "ADMIN" | "VENDEDOR"): Promise<ManagedUser> {
+  return request<ManagedUser>(`/api/v1/users/${id}/role/`, {
+    method: "PATCH",
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function updateUserStatus(id: number, isActive: boolean): Promise<ManagedUser> {
+  return request<ManagedUser>(`/api/v1/users/${id}/status/`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_active: isActive }),
   });
 }
 
