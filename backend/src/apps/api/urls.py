@@ -30,6 +30,12 @@ from apps.api.contacts import (
     ContactRestrictionView,
     RestrictionRevokeView,
 )
+from apps.api.dashboard import DashboardSummaryView
+from apps.api.operations import (
+    AuditEventListView,
+    BackgroundJobDetailView,
+    BackgroundJobListView,
+)
 from apps.api.workspace import BusinessProfileView
 from apps.health.views import degraded, liveness, readiness
 
@@ -64,6 +70,14 @@ urlpatterns = [
         name="api-user-activation-link",
     ),
     path("workspace/profile/", BusinessProfileView.as_view(), name="api-workspace-profile"),
+    path("dashboard/summary/", DashboardSummaryView.as_view(), name="api-dashboard-summary"),
+    path("audit-events/", AuditEventListView.as_view(), name="api-audit-events"),
+    path("background-jobs/", BackgroundJobListView.as_view(), name="api-background-jobs"),
+    path(
+        "background-jobs/<uuid:job_id>/",
+        BackgroundJobDetailView.as_view(),
+        name="api-background-job-detail",
+    ),
     path("catalogs/", CatalogListView.as_view(), name="api-catalogs"),
     path(
         "catalogs/<uuid:catalog_id>/download/",

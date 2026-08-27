@@ -34,6 +34,10 @@ class ManageConfigurationPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_CONFIGURATION
 
 
+class ViewSummaryPermission(CapabilityPermission):
+    required_capability = Capability.VIEW_SUMMARY
+
+
 class ViewContactsPermission(CapabilityPermission):
     required_capability = Capability.VIEW_CONTACTS
 
@@ -44,6 +48,14 @@ class ManageContactsPermission(CapabilityPermission):
 
 class DownloadPdfsPermission(CapabilityPermission):
     required_capability = Capability.DOWNLOAD_PDFS
+
+
+class ViewJobsPermission(CapabilityPermission):
+    required_capability = Capability.VIEW_JOBS
+
+
+class ViewAuditPermission(CapabilityPermission):
+    required_capability = Capability.VIEW_AUDIT
 
 
 def authenticated_user(request: Request) -> User:
