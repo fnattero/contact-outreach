@@ -86,3 +86,27 @@ class BackgroundJob(TimestampedUUIDModel):
         constraints = [
             models.CheckConstraint(condition=Q(attempts__gte=0), name="job_attempts_nonnegative")
         ]
+
+
+class ApiIdempotencyRecord(TimestampedUUIDModel):
+    """Durable replay record for effect-bearing API requests."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="api_idempotency_records",
+    )
+    key = models.UUIDField()
+    request_fingerprint = models.CharField(max_length=64)
+    response_status = models.PositiveSmallIntegerField()
+    response_body = models.JSONField(default=dict)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "key"),
+                name="api_idempotency_user_key_unique",
+            )
+        ]
+        indexes = [models.Index(fields=("expires_at",))]

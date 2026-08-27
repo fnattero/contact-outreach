@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
+from hashlib import sha256
 from typing import Any, cast
 
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -17,6 +22,7 @@ from apps.api.permissions import (
     ViewCampaignsPermission,
     authenticated_user,
 )
+from apps.audit.models import ApiIdempotencyRecord
 from apps.campaigns.approval import approve_campaign, start_per_message_campaign
 from apps.campaigns.forms import CampaignForm
 from apps.campaigns.models import Campaign, OutboundMessage
@@ -290,7 +296,7 @@ class CampaignActionView(APIView):
     def post(self, request: Request, campaign_id: uuid.UUID, action: str) -> Response:
         if action not in self.allowed_actions:
             raise serializers.ValidationError({"action": "La acción no existe."})
-        key = request.headers.get("Idempotency-Key", "")
+        key = request.headers.get("Idempotency-Key") or ""
         try:
             uuid.UUID(key)
         except ValueError as exc:
@@ -298,6 +304,10 @@ class CampaignActionView(APIView):
                 {"Idempotency-Key": "Enviá una clave UUID para esta acción."}
             ) from exc
         user = authenticated_user(request)
+        method = request.method or ""
+        fingerprint = sha256(
+            b"|".join((method.encode(), request.path.encode(), request.body))
+        ).hexdigest()
         capability = (
             Capability.APPROVE_CAMPAIGNS
             if action in {"approve", "start-approved"}
@@ -306,29 +316,50 @@ class CampaignActionView(APIView):
         workspace = workspace_for_user(user, capability)
         if not Campaign.objects.filter(pk=campaign_id, workspace=workspace).exists():
             raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
-        try:
-            if action == "approve":
-                campaign = approve_campaign(campaign_id, actor=user)
-            elif action == "start-approved":
-                campaign = start_per_message_campaign(campaign_id, actor=user)
-            else:
-                targets = {
-                    "start-discovery": Campaign.State.DISCOVERING,
-                    "pause": Campaign.State.PAUSED,
-                    "resume": Campaign.State.RUNNING,
-                    "cancel": Campaign.State.CANCELLED,
-                }
-                campaign = transition_campaign(
-                    campaign_id=campaign_id,
-                    target_state=targets[action],
-                    actor=user,
-                    reason=str(cast(dict[str, Any], request.data).get("reason", "")),
-                )
-                if action == "start-discovery":
-                    orchestrate_extraction.delay(str(campaign.pk))
-        except (Campaign.DoesNotExist, ValidationError) as exc:
-            raise serializers.ValidationError(str(exc)) from exc
-        return Response(
-            {"data": _campaign_data(campaign, include_admin=True)},
-            status=status.HTTP_200_OK,
-        )
+        with transaction.atomic():
+            locked_user = User.objects.select_for_update().get(pk=user.pk)
+            existing = (
+                ApiIdempotencyRecord.objects.select_for_update()
+                .filter(user=locked_user, key=uuid.UUID(key), expires_at__gt=timezone.now())
+                .first()
+            )
+            if existing is not None:
+                if existing.request_fingerprint != fingerprint:
+                    raise serializers.ValidationError(
+                        {"Idempotency-Key": "La clave ya fue usada para otra solicitud."}
+                    )
+                return Response(existing.response_body, status=existing.response_status)
+            try:
+                if action == "approve":
+                    campaign = approve_campaign(campaign_id, actor=locked_user)
+                elif action == "start-approved":
+                    campaign = start_per_message_campaign(campaign_id, actor=locked_user)
+                else:
+                    targets = {
+                        "start-discovery": Campaign.State.DISCOVERING,
+                        "pause": Campaign.State.PAUSED,
+                        "resume": Campaign.State.RUNNING,
+                        "cancel": Campaign.State.CANCELLED,
+                    }
+                    campaign = transition_campaign(
+                        campaign_id=campaign_id,
+                        target_state=targets[action],
+                        actor=locked_user,
+                        reason=str(cast(dict[str, Any], request.data).get("reason", "")),
+                    )
+                    if action == "start-discovery":
+                        transaction.on_commit(
+                            lambda: orchestrate_extraction.delay(str(campaign.pk))
+                        )
+            except (Campaign.DoesNotExist, ValidationError) as exc:
+                raise serializers.ValidationError(str(exc)) from exc
+            body = {"data": _campaign_data(campaign, include_admin=True)}
+            ApiIdempotencyRecord.objects.create(
+                user=locked_user,
+                key=uuid.UUID(key),
+                request_fingerprint=fingerprint,
+                response_status=status.HTTP_200_OK,
+                response_body=body,
+                expires_at=timezone.now() + timedelta(hours=24),
+            )
+        return Response(body, status=status.HTTP_200_OK)

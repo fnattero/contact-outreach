@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
 from django.contrib.auth.models import User
@@ -8,6 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
+from apps.audit.models import AuditEvent
 from apps.campaigns.models import Campaign
 from apps.catalogs.services import create_catalog
 from apps.configuration.models import SearchCategory, SearchZone
@@ -127,3 +129,51 @@ def test_campaign_actions_require_uuid_idempotency_key(owner: User) -> None:
         HTTP_IDEMPOTENCY_KEY="not-a-uuid",
     )
     assert invalid.status_code == 400
+
+
+@pytest.mark.django_db
+def test_campaign_action_replays_the_persisted_result_for_the_same_key(
+    owner: User,
+    private_catalog_dir,
+) -> None:
+    catalog = create_catalog(
+        name="General",
+        upload=SimpleUploadedFile(
+            "catalog.pdf",
+            b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF",
+            content_type="application/pdf",
+        ),
+        actor=owner,
+    )
+    campaign = Campaign.objects.create(
+        workspace=owner.membership.workspace,
+        name="Campaña repetible",
+        catalog=catalog,
+        created_by=owner,
+    )
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf_token = _csrf(client)
+    url = reverse("api-campaign-action", args=(campaign.pk, "cancel"))
+    key = str(uuid.uuid4())
+
+    first = client.post(
+        url,
+        data="{}",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf_token,
+        HTTP_IDEMPOTENCY_KEY=key,
+    )
+    second = client.post(
+        url,
+        data="{}",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf_token,
+        HTTP_IDEMPOTENCY_KEY=key,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert Campaign.objects.get(pk=campaign.pk).state == Campaign.State.CANCELLED
+    assert AuditEvent.objects.filter(action="campaign.transitioned").count() == 1
