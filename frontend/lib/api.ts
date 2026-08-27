@@ -242,6 +242,15 @@ export type SearchZone = {
   boundary_hash: string;
 };
 
+export type GmailConnection = {
+  connected: boolean;
+  status: string;
+  email: string | null;
+  scopes: string[];
+  last_tested_at: string | null;
+  error: string | null;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -491,6 +500,31 @@ export function updateUserStatus(id: number, isActive: boolean): Promise<Managed
 
 export function getIntegrationStatus(): Promise<IntegrationStatus> {
   return request<IntegrationStatus>("/api/v1/integrations/status/");
+}
+
+export function getGmailConnection(): Promise<GmailConnection> {
+  return request<GmailConnection>("/api/v1/integrations/gmail/connection/");
+}
+
+export function startGmailOAuth(): Promise<{ authorization_url: string }> {
+  return request<{ authorization_url: string }>("/api/v1/integrations/gmail/oauth/start/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function testGmailConnection(): Promise<{ status: string; email: string }> {
+  return request<{ status: string; email: string }>("/api/v1/integrations/gmail/test/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function disconnectGmail(): Promise<GmailConnection> {
+  return request<GmailConnection>("/api/v1/integrations/gmail/disconnect/", {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function getSearchCategories(): Promise<SearchCategory[]> {

@@ -1,9 +1,19 @@
 "use client";
 
-import { Alert, Card, Descriptions, Flex, Skeleton, Tag, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Flex, Skeleton, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { AuthError } from "@/components/auth-provider";
-import { getIntegrationStatus, type IntegrationStatus } from "@/lib/api";
+import {
+  disconnectGmail,
+  getGmailConnection,
+  getIntegrationStatus,
+  problemMessage,
+  startGmailOAuth,
+  testGmailConnection,
+  type GmailConnection,
+  type IntegrationStatus,
+  type Problem,
+} from "@/lib/api";
 
 function configured(value: boolean): string {
   return value ? "Configurada" : "No configurada";
@@ -11,14 +21,58 @@ function configured(value: boolean): string {
 
 export default function IntegrationsSettingsPage() {
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
+  const [gmail, setGmail] = useState<GmailConnection | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [gmailBusy, setGmailBusy] = useState(false);
 
   useEffect(() => {
-    void getIntegrationStatus().then(setStatus).catch(setError);
+    void Promise.all([getIntegrationStatus(), getGmailConnection()])
+      .then(([nextStatus, nextGmail]) => {
+        setStatus(nextStatus);
+        setGmail(nextGmail);
+      })
+      .catch(setError);
   }, []);
 
-  if (error) return <AuthError error={error} />;
+  if (error && !status) return <AuthError error={error} />;
   if (!status) return <Skeleton active paragraph={{ rows: 10 }} />;
+
+  async function connect() {
+    setGmailBusy(true);
+    setError(null);
+    try {
+      const result = await startGmailOAuth();
+      window.location.assign(result.authorization_url);
+    } catch (problem) {
+      setError(problem);
+      setGmailBusy(false);
+    }
+  }
+
+  async function test() {
+    setGmailBusy(true);
+    setError(null);
+    try {
+      await testGmailConnection();
+      setGmail(await getGmailConnection());
+    } catch (problem) {
+      setError(problem);
+    } finally {
+      setGmailBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    setGmailBusy(true);
+    setError(null);
+    try {
+      setGmail(await disconnectGmail());
+    } catch (problem) {
+      setError(problem);
+    } finally {
+      setGmailBusy(false);
+    }
+  }
 
   return (
     <Flex vertical gap="large">
@@ -28,6 +82,7 @@ export default function IntegrationsSettingsPage() {
           Estado operativo seguro. Las credenciales pertenecen al entorno y nunca se muestran aquí.
         </Typography.Paragraph>
       </div>
+      {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       <Alert
         type="info"
         showIcon
@@ -47,9 +102,19 @@ export default function IntegrationsSettingsPage() {
         </Descriptions>
       </Card>
       <Card title="Gmail">
+        <Flex gap="small" wrap style={{ marginBottom: 16 }}>
+          {gmail?.connected ? (
+            <>
+              <Button onClick={() => void test()} loading={gmailBusy}>Probar conexión</Button>
+              <Button danger onClick={() => void disconnect()} loading={gmailBusy}>Desconectar</Button>
+            </>
+          ) : (
+            <Button type="primary" onClick={() => void connect()} loading={gmailBusy}>Conectar Gmail</Button>
+          )}
+        </Flex>
         <Descriptions column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item label="Proveedor">{status.gmail.provider}</Descriptions.Item>
-          <Descriptions.Item label="Cuenta conectada">{status.gmail.email ?? "Ninguna"}</Descriptions.Item>
+          <Descriptions.Item label="Cuenta conectada">{gmail?.email ?? status.gmail.email ?? "Ninguna"}</Descriptions.Item>
           <Descriptions.Item label="Cliente OAuth">
             <Tag color={status.gmail.oauth_client_id_configured ? "green" : "default"}>
               {configured(status.gmail.oauth_client_id_configured)}
@@ -60,7 +125,7 @@ export default function IntegrationsSettingsPage() {
               {configured(status.gmail.credential_configured)}
             </Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="Estado">{status.gmail.connection_status}</Descriptions.Item>
+          <Descriptions.Item label="Estado">{gmail?.status ?? status.gmail.connection_status}</Descriptions.Item>
         </Descriptions>
       </Card>
     </Flex>
