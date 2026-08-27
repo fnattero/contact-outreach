@@ -8,19 +8,19 @@ Do not silently change architectural decisions or product invariants. When a cha
 
 ## Project Structure & Module Organization
 
-The Django modular monolith is implemented under `src/contact_outreach/` and `src/apps/`; templates live in `templates/`, static assets in `static/`, and tests in `tests/` with paths mirroring source modules. Follow `docs/IMPLEMENTATION_PLAN.md` in order. Keep domain logic in services, HTTP handling in views/forms, and external SDKs behind the provider interfaces documented in `docs/INTEGRATIONS.md`.
+The Django backend is implemented under `backend/src/contact_outreach/` and `backend/src/apps/`; its tests live in `backend/tests/`. The Next.js frontend lives in `frontend/`, and local infrastructure is defined in `infra/`. Follow `docs/IMPLEMENTATION_PLAN.md` in order. Keep domain logic in backend services, HTTP handling in DRF views/serializers, and external SDKs behind the provider interfaces documented in `docs/INTEGRATIONS.md`.
 
 ## Build, Test, and Development Commands
 
-- `make lint` runs Ruff lint and formatting checks.
-- `make typecheck` runs mypy with `django-stubs`.
-- `make test` runs the network-blocked pytest suite.
+- `make backend-check` runs Ruff, formatting, mypy, network-blocked pytest, migrations, and Django checks.
+- `make frontend-check` runs ESLint, strict TypeScript, Vitest, and a production Next.js build.
 - `make test-e2e` runs fake-provider end-to-end tests.
-- `make check` runs the full gate plus migration and Django checks.
+- `make security-check` audits production Python and Node dependencies.
+- `make check` runs both backend and frontend gates.
 - `git diff --check` detects whitespace errors.
 - `rg "FR-[0-9]+|DM-[0-9]+|SEC|OPS|QA" docs/` audits requirement references.
 
-Use Docker Compose for Django, PostgreSQL, Redis, Celery Worker, and Beat; do not install a Node build unless a documented need appears.
+Use Docker Compose for the frontend, unified backend, PostgreSQL, Redis, and MinIO. The backend container supervises Uvicorn, both Celery worker classes, and Beat.
 
 ## Coding Style & Naming Conventions
 

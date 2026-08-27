@@ -1,0 +1,41 @@
+:root {
+  color-scheme: light;
+  background: #f2f4f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgb(21 94 239 / 10%), transparent 32rem),
+    #f2f4f7;
+}
+
+.centered-page {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px;
+}
+
+.welcome-card,
+.auth-card {
+  width: min(100%, 520px);
+  box-shadow: 0 20px 50px rgb(16 24 40 / 8%);
+}
+
+@media (max-width: 480px) {
+  .centered-page {
+    align-items: start;
+    padding: 16px;
+    padding-top: 48px;
+  }
+}

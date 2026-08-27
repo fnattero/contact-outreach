@@ -17,3 +17,11 @@ backups/
 postgres_data/
 redis_data/
 celerybeat-schedule*
+node_modules/
+.pnpm-store/
+.next/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+minio_data/
+*.tsbuildinfo

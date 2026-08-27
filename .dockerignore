@@ -13,3 +13,10 @@ __pycache__
 postgres_data
 redis_data
 private
+node_modules
+.next
+frontend/coverage
+frontend/playwright-report
+frontend/test-results
+minio_data
+backups

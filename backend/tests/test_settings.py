@@ -21,7 +21,9 @@ from contact_outreach.settings import (
 
 
 def test_delivery_worker_mounts_private_catalogs_read_only() -> None:
-    compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text()
+    compose = (
+        Path(__file__).resolve().parents[2] / "infra" / "docker-compose.yml"
+    ).read_text()
     worker_section = compose.split("  worker:\n", maxsplit=1)[1].split("  beat:\n", maxsplit=1)[0]
 
     assert "- private_catalogs:/app/private:ro" in worker_section
