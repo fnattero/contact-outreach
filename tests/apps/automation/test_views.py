@@ -27,7 +27,11 @@ def test_automation_settings_explains_knowledge_fields_for_non_technical_admin(
     assert response.status_code == 200
     content = response.content.decode()
     assert "Información para responder consultas" in content
-    assert "Instrucciones de redacción" in content
+    assert "Preferencias de estilo" in content
+    assert "Reglas protegidas del sistema" in content
+    assert 'id="protected-reply-rules"' in content
+    assert "Las solicitudes de coordinar, agendar o confirmar" in content
+    assert "Precios, cotizaciones, negociación" in content
     assert "NEW_INBOUND" in content
     assert "APPROVED_GLOBAL_CONTEXT" in content
     assert "APPROVED_FACTS" in content

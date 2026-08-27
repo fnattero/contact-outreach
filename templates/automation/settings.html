@@ -22,10 +22,28 @@
     </div>
 </section>
 
+<section class="panel" id="protected-reply-rules">
+    <div class="panel__header">
+        <div>
+            <h2>Reglas protegidas del sistema</h2>
+            <p class="muted">Estas reglas siempre se aplican y no se pueden modificar desde el dashboard.</p>
+        </div>
+        <span class="badge">Fijas</span>
+    </div>
+    <div class="panel__body">
+        <ul class="cross-list">
+            <li>Las solicitudes de coordinar, agendar o confirmar una llamada o reunión, y las preguntas por disponibilidad del equipo, pasan a una persona.</li>
+            <li>Las consultas generales sobre horario de atención, teléfono, envíos o retiros no se bloquean por sí solas.</li>
+            <li>Precios, cotizaciones, negociación, quejas, asuntos legales, privacidad y consejo técnico no respaldado pasan a una persona.</li>
+            <li>Sólo puede afirmar información aprobada; nunca inventa datos ni promete condiciones no confirmadas.</li>
+        </ul>
+    </div>
+</section>
+
 <section class="panel" id="reply-prompt">
     <div class="panel__header">
         <div>
-            <h2>Instrucciones de redacción</h2>
+            <h2>Preferencias de estilo</h2>
             <p class="muted">Definen cómo escribe cuando la decisión final es responder.</p>
         </div>
         <span class="badge">{% if automatic_reply_prompt_revision %}Revisión {{ automatic_reply_prompt_revision }}{% else %}Predeterminado{% endif %}</span>
@@ -35,7 +53,7 @@
             <form method="post" action="{% url 'automatic-reply-prompt-save' %}" class="card knowledge-editor" novalidate>
                 {% csrf_token %}
                 {% include "includes/field.html" with field=automatic_reply_prompt_form.automatic_reply_prompt %}
-                <div class="actions"><button class="button" type="submit">Guardar instrucciones</button></div>
+                <div class="actions"><button class="button" type="submit">Guardar preferencias</button></div>
             </form>
             <aside class="knowledge-help card" aria-labelledby="reply-context-title">
                 <h3 id="reply-context-title">Qué entra al agente</h3>
@@ -44,12 +62,6 @@
                     <li><code>APPROVED_GLOBAL_CONTEXT</code>: el contexto general guardado.</li>
                     <li><code>APPROVED_FACTS</code>: hasta tres datos puntuales relacionados.</li>
                     <li><code>EMAIL_CANDIDATES</code>: emails literales detectados en el mensaje.</li>
-                </ul>
-                <h3>Qué queda fijo</h3>
-                <ul class="cross-list">
-                    <li>No puede inventar datos.</li>
-                    <li>No puede usar información no aprobada.</li>
-                    <li>Precios, reuniones o ambigüedad quedan para una persona.</li>
                 </ul>
             </aside>
         </div>

@@ -9,20 +9,20 @@ from apps.configuration.services import MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
 class AutomaticReplyPromptForm(forms.Form):
     automatic_reply_prompt = forms.CharField(
         max_length=MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
-        label="Instrucciones para redactar respuestas automáticas",
+        label="Preferencias de estilo para respuestas automáticas",
         widget=forms.Textarea(
             attrs={
                 "rows": 8,
                 "spellcheck": "true",
                 "placeholder": (
-                    "Ej.: Respondé de forma cordial y directa. Contestá primero la pregunta "
-                    "del cliente. Si faltan datos, pedí sólo los mínimos necesarios."
+                    "Ej.: Usá un tono cordial y consultivo, respondé en dos párrafos cortos "
+                    "y no agregues llamados a la acción comerciales innecesarios."
                 ),
             }
         ),
         help_text=(
-            "Define tono y forma de escritura. No puede permitir respuestas sin datos aprobados "
-            "ni evitar revisión humana."
+            "Define sólo tono, extensión, idioma y nivel de iniciativa. Las reglas de seguridad "
+            "y los casos que requieren una persona no se pueden cambiar desde acá."
         ),
     )
 
