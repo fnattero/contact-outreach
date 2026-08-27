@@ -32,6 +32,12 @@ from apps.api.contacts import (
     RestrictionRevokeView,
 )
 from apps.api.dashboard import DashboardSummaryView
+from apps.api.mailbox import (
+    InboundMessageListView,
+    InboundMessageThreadView,
+    OutboundMessageDetailView,
+    OutboundMessageListView,
+)
 from apps.api.operations import (
     AuditEventListView,
     BackgroundJobDetailView,
@@ -89,6 +95,18 @@ urlpatterns = [
         "background-jobs/<uuid:job_id>/",
         BackgroundJobDetailView.as_view(),
         name="api-background-job-detail",
+    ),
+    path("inbound-messages/", InboundMessageListView.as_view(), name="api-inbound-messages"),
+    path(
+        "inbound-messages/<uuid:inbound_id>/thread/",
+        InboundMessageThreadView.as_view(),
+        name="api-inbound-message-thread",
+    ),
+    path("outbound-messages/", OutboundMessageListView.as_view(), name="api-outbound-messages"),
+    path(
+        "outbound-messages/<uuid:message_id>/",
+        OutboundMessageDetailView.as_view(),
+        name="api-outbound-message-detail",
     ),
     path("catalogs/", CatalogListView.as_view(), name="api-catalogs"),
     path(

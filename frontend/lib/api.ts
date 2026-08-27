@@ -55,6 +55,48 @@ export type CampaignDetail = DashboardCampaign & {
   };
 };
 
+export type InboundMessage = {
+  id: string;
+  external_at: string;
+  sender: string;
+  subject: string;
+  classification: string;
+  classification_label: string;
+  is_human: boolean;
+  is_read: boolean;
+  gmail_thread_id: string;
+  campaign_id: string | null;
+  body_preview: string;
+};
+
+export type InboundThread = {
+  inbound: InboundMessage & { body_text: string };
+  timeline: Array<{
+    direction: "inbound" | "outbound";
+    at: string;
+    sender: string;
+    body_text: string;
+    classification: string;
+  }>;
+};
+
+export type OutboundMessage = {
+  id: string;
+  created_at: string;
+  recipient: string;
+  subject: string;
+  kind: string;
+  kind_label: string;
+  state: string;
+  state_label: string;
+  sent_at: string | null;
+  simulated_at: string | null;
+  campaign_id: string | null;
+  body_text: string;
+  approved_at?: string | null;
+  error?: string | null;
+};
+
 export type DashboardMetrics = {
   unique_initial_recipients: number;
   initial_messages_sent: number;
@@ -200,6 +242,26 @@ export function getCampaigns(): Promise<ApiPage<DashboardCampaign[]>> {
 
 export function getCampaign(id: string): Promise<CampaignDetail> {
   return request<CampaignDetail>(`/api/v1/campaigns/${encodeURIComponent(id)}/`);
+}
+
+export function getInboundMessages(): Promise<ApiPage<InboundMessage[]>> {
+  return requestEnvelope<InboundMessage[]>("/api/v1/inbound-messages/") as Promise<
+    ApiPage<InboundMessage[]>
+  >;
+}
+
+export function getInboundThread(id: string): Promise<InboundThread> {
+  return request<InboundThread>(`/api/v1/inbound-messages/${encodeURIComponent(id)}/thread/`);
+}
+
+export function getOutboundMessages(): Promise<ApiPage<OutboundMessage[]>> {
+  return requestEnvelope<OutboundMessage[]>("/api/v1/outbound-messages/") as Promise<
+    ApiPage<OutboundMessage[]>
+  >;
+}
+
+export function getOutboundMessage(id: string): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/`);
 }
 
 export function login(username: string, password: string): Promise<UserSession> {

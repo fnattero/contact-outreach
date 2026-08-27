@@ -46,6 +46,10 @@ class ManageCampaignsPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_CAMPAIGNS
 
 
+class ViewSentMessagesPermission(CapabilityPermission):
+    required_capability = Capability.VIEW_SENT_MESSAGES
+
+
 class ViewContactsPermission(CapabilityPermission):
     required_capability = Capability.VIEW_CONTACTS
 
