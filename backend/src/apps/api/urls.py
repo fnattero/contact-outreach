@@ -64,7 +64,9 @@ from apps.api.mailbox import (
     InboundManualReplyView,
     InboundMessageListView,
     InboundMessageThreadView,
+    OutboundMessageAuthorizeView,
     OutboundMessageDetailView,
+    OutboundMessageDraftView,
     OutboundMessageListView,
 )
 from apps.api.operations import (
@@ -204,6 +206,16 @@ urlpatterns = [
         "outbound-messages/<uuid:message_id>/",
         OutboundMessageDetailView.as_view(),
         name="api-outbound-message-detail",
+    ),
+    path(
+        "outbound-messages/<uuid:message_id>/draft/",
+        OutboundMessageDraftView.as_view(),
+        name="api-outbound-message-draft",
+    ),
+    path(
+        "outbound-messages/<uuid:message_id>/authorize/",
+        OutboundMessageAuthorizeView.as_view(),
+        name="api-outbound-message-authorize",
     ),
     path("catalogs/", CatalogListView.as_view(), name="api-catalogs"),
     path(

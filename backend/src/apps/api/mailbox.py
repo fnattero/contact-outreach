@@ -20,6 +20,8 @@ from apps.api.permissions import (
     authenticated_user,
 )
 from apps.campaigns.models import OutboundMessage
+from apps.campaigns.review import approve_message_for_delivery, edit_message_draft
+from apps.campaigns.tasks import deliver_message_task
 from apps.dashboard.queries import outbound_queryset, outbound_workspace_filter, response_queryset
 from apps.integrations.contracts import ProviderError
 from apps.mailbox.manual import authorize_manual_reply
@@ -40,6 +42,11 @@ class MessageQuerySerializer(serializers.Serializer[dict[str, Any]]):
 class ManualReplySerializer(serializers.Serializer[dict[str, Any]]):
     body_text = serializers.CharField(max_length=10_000, trim_whitespace=True)
     idempotency_key = serializers.UUIDField()
+
+
+class OutboundDraftSerializer(serializers.Serializer[dict[str, Any]]):
+    subject = serializers.CharField(max_length=255)
+    body_text = serializers.CharField(max_length=12_000)
 
 
 def _page(
@@ -256,3 +263,48 @@ class OutboundMessageDetailView(APIView):
         except OutboundMessage.DoesNotExist as exc:
             raise serializers.ValidationError({"message_id": "El mensaje no existe."}) from exc
         return Response({"data": _outbound_data(message, include_admin=is_admin)})
+
+
+class OutboundMessageDraftView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def patch(self, request: Request, message_id: uuid.UUID) -> Response:
+        serializer = OutboundDraftSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not has_capability(authenticated_user(request), Capability.MANAGE_CAMPAIGNS):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied
+        try:
+            message = edit_message_draft(
+                message_id,
+                actor=authenticated_user(request),
+                subject=str(serializer.validated_data["subject"]),
+                body_text=str(serializer.validated_data["body_text"]),
+            )
+        except ValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return Response({"data": _outbound_data(message, include_admin=True)})
+
+
+class OutboundMessageAuthorizeView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request: Request, message_id: uuid.UUID) -> Response:
+        actor = authenticated_user(request)
+        if not has_capability(actor, Capability.APPROVE_CAMPAIGNS):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied
+        key = request.headers.get("Idempotency-Key", "")
+        try:
+            uuid.UUID(key)
+        except ValueError as exc:
+            raise serializers.ValidationError({"Idempotency-Key": "Enviá una clave UUID."}) from exc
+        try:
+            message = approve_message_for_delivery(message_id, actor=actor)
+        except ValidationError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        if message.campaign_id and message.campaign.state == message.campaign.State.RUNNING:
+            transaction.on_commit(lambda: deliver_message_task.delay(str(message.pk)))
+        return Response({"data": _outbound_data(message, include_admin=True)})

@@ -541,6 +541,21 @@ export function getOutboundMessage(id: string): Promise<OutboundMessage> {
   return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/`);
 }
 
+export function updateOutboundDraft(id: string, subject: string, bodyText: string): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/draft/`, {
+    method: "PATCH",
+    body: JSON.stringify({ subject, body_text: bodyText }),
+  });
+}
+
+export function authorizeOutboundMessage(id: string): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/authorize/`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: "{}",
+  });
+}
+
 export function getContacts(): Promise<ApiPage<Contact[]>> {
   return requestEnvelope<Contact[]>("/api/v1/contacts/") as Promise<ApiPage<Contact[]>>;
 }
