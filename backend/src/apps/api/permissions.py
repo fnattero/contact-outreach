@@ -34,6 +34,10 @@ class ManageConfigurationPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_CONFIGURATION
 
 
+class ManageIntegrationsPermission(CapabilityPermission):
+    required_capability = Capability.MANAGE_INTEGRATIONS
+
+
 class ViewSummaryPermission(CapabilityPermission):
     required_capability = Capability.VIEW_SUMMARY
 

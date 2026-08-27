@@ -32,6 +32,7 @@ from apps.api.contacts import (
     RestrictionRevokeView,
 )
 from apps.api.dashboard import DashboardSummaryView
+from apps.api.health import DegradedHealthView
 from apps.api.mailbox import (
     InboundMessageListView,
     InboundMessageThreadView,
@@ -44,7 +45,7 @@ from apps.api.operations import (
     BackgroundJobListView,
 )
 from apps.api.workspace import BusinessProfileView
-from apps.health.views import degraded, liveness, readiness
+from apps.health.views import liveness, readiness
 
 
 def _csrf_protected_api_view(
@@ -143,5 +144,5 @@ urlpatterns = [
     ),
     path("health/live/", liveness, name="api-health-live"),
     path("health/ready/", readiness, name="api-health-ready"),
-    path("health/degraded/", degraded, name="api-health-degraded"),
+    path("health/degraded/", DegradedHealthView.as_view(), name="api-health-degraded"),
 ]
