@@ -28,6 +28,16 @@ export type DashboardCampaign = {
   discovery_state: string;
   discovery_state_label: string;
   delivery_mode: string;
+  approval_mode?: string;
+  metrics?: {
+    enrollments: number;
+    prospects: number;
+    initial_messages: number;
+    sent: number;
+    review_ready: number;
+    queued: number;
+    errors: number;
+  };
 };
 
 export type CampaignDetail = DashboardCampaign & {
@@ -39,20 +49,25 @@ export type CampaignDetail = DashboardCampaign & {
   location_text?: string;
   objective?: number;
   daily_limit?: number;
-  message_interval_minutes?: number;
   status_reason?: string;
   categories?: Array<{ id: string; name: string; sort_order: number }>;
   zones?: Array<{ id: string; name: string; sort_order: number }>;
   attachments?: Array<{ catalog_id: string; name: string; version: number; position: number }>;
-  metrics?: {
-    enrollments: number;
-    prospects: number;
-    initial_messages: number;
-    sent: number;
-    review_ready: number;
-    queued: number;
-    errors: number;
-  };
+  catalog?: { id: string; name: string; version: number };
+  max_raw_records?: number;
+  message_interval_minutes?: number;
+  weekdays?: number[];
+  window_start?: string;
+  window_end?: string;
+  timezone_name?: string;
+  relevance_threshold?: number;
+  reminder_enabled?: boolean;
+  reminder_delay_days?: number;
+  audience_hash?: string | null;
+  content_hash?: string | null;
+  attachment_hash?: string | null;
+  schedule_hash?: string | null;
+  approved_at?: string | null;
 };
 
 export type InboundMessage = {
@@ -596,8 +611,18 @@ export function sendManualReply(
   );
 }
 
-export function getOutboundMessages(): Promise<ApiPage<OutboundMessage[]>> {
-  return requestEnvelope<OutboundMessage[]>("/api/v1/outbound-messages/") as Promise<
+export type OutboundFilters = {
+  state?: string;
+  campaign?: string;
+  date_from?: string;
+  date_to?: string;
+};
+
+export function getOutboundMessages(filters: OutboundFilters = {}): Promise<ApiPage<OutboundMessage[]>> {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return requestEnvelope<OutboundMessage[]>(`/api/v1/outbound-messages/${suffix}`) as Promise<
     ApiPage<OutboundMessage[]>
   >;
 }

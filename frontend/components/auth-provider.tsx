@@ -1,7 +1,6 @@
 "use client";
 
-import { Alert, Button, Card, Flex, Layout, Menu, Spin, Typography } from "antd";
-import Link from "next/link";
+import { Alert } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -12,6 +11,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppShell } from "@/components/app-shell";
+import { ErrorState, LoadingState } from "@/components/design-system/states";
 import { getSession, logout, problemMessage, type Problem, type UserSession } from "@/lib/api";
 
 type AuthContextValue = {
@@ -84,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <main className="centered-page" aria-label="Cargando aplicación">
-        <Spin size="large" />
+      <main className="shell-loading-page">
+        <LoadingState layout="shell" label="Cargando aplicación" />
       </main>
     );
   }
@@ -93,66 +94,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   if (!session) {
     return (
       <main className="centered-page">
-        <Card className="auth-card">
-          <Flex vertical gap="middle">
-            <Alert type="warning" message="La sesión expiró" description="Volvé a iniciar sesión para continuar." />
-            <Button type="primary" onClick={() => router.replace("/login")}>
-              Ir a iniciar sesión
-            </Button>
-          </Flex>
-        </Card>
+        <ErrorState
+          failed="La sesión expiró"
+          instruction="Iniciá sesión de nuevo para continuar trabajando."
+          retryLabel="Ir a iniciar sesión"
+          onRetry={() => router.replace("/login")}
+        />
       </main>
     );
   }
 
   return (
     <AuthContext.Provider value={value}>
-      <Layout className="app-layout">
-        <Layout.Sider breakpoint="lg" collapsedWidth={0} theme="light">
-          <div className="app-brand">Contact Outreach</div>
-          <Menu
-            mode="inline"
-            selectedKeys={[pathname]}
-            items={[
-              { key: "/dashboard", label: <Link href="/dashboard">Resumen</Link> },
-              { key: "/contacts", label: <Link href="/contacts">Contactos</Link> },
-              { key: "/campaigns", label: <Link href="/campaigns">Campañas</Link> },
-              { key: "/responses", label: <Link href="/responses">Respuestas</Link> },
-              { key: "/attention", label: <Link href="/attention">Atención</Link> },
-              { key: "/outbound", label: <Link href="/outbound">Envíos</Link> },
-              ...(session.role === "ADMIN"
-                ? [
-                    { key: "/catalogs", label: <Link href="/catalogs">Catálogos</Link> },
-                    { key: "/settings/profile", label: <Link href="/settings/profile">Perfil comercial</Link> },
-                    { key: "/settings/message-templates", label: <Link href="/settings/message-templates">Mensajes de campaña</Link> },
-                    { key: "/settings/prompts", label: <Link href="/settings/prompts">Instrucciones</Link> },
-                    { key: "/settings/categories", label: <Link href="/settings/categories">Rubros</Link> },
-                    { key: "/automation", label: <Link href="/automation">Automatización</Link> },
-                    { key: "/settings/integrations", label: <Link href="/settings/integrations">Integraciones</Link> },
-                    { key: "/settings/overture", label: <Link href="/settings/overture">Cobertura Overture</Link> },
-                    { key: "/settings/users", label: <Link href="/settings/users">Usuarios</Link> },
-                    { key: "/audit", label: <Link href="/audit">Auditoría</Link> },
-                    { key: "/jobs", label: <Link href="/jobs">Tareas</Link> },
-                  ]
-                : []),
-            ]}
-          />
-        </Layout.Sider>
-        <Layout>
-          <Layout.Header className="app-header">
-            <Flex justify="space-between" align="center" wrap>
-              <Typography.Text strong>{session.workspace_name}</Typography.Text>
-              <Flex align="center" gap="small">
-                <Typography.Text>{session.username}</Typography.Text>
-                <Button type="text" onClick={() => void signOut()}>
-                  Cerrar sesión
-                </Button>
-              </Flex>
-            </Flex>
-          </Layout.Header>
-          <Layout.Content className="app-content">{children}</Layout.Content>
-        </Layout>
-      </Layout>
+      <AppShell session={session} onSignOut={signOut}>{children}</AppShell>
     </AuthContext.Provider>
   );
 }
