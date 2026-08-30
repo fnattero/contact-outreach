@@ -271,6 +271,14 @@ export type SearchZone = {
   boundary_hash: string;
 };
 
+export type SearchZoneGeometry = {
+  id: string;
+  boundary_revision: number;
+  boundary_hash: string;
+  geojson: unknown;
+  bbox: unknown;
+};
+
 export type GmailConnection = {
   connected: boolean;
   status: string;
@@ -1004,6 +1012,10 @@ export function updateSearchCategoryRules(
 export function getSearchZones(level?: string): Promise<SearchZone[]> {
   const query = level ? `?level=${encodeURIComponent(level)}` : "";
   return request<SearchZone[]>(`/api/v1/search-zones/${query}`);
+}
+
+export function getSearchZoneGeometry(id: string): Promise<SearchZoneGeometry> {
+  return request<SearchZoneGeometry>(`/api/v1/search-zones/${encodeURIComponent(id)}/geometry/`);
 }
 
 export function createCampaign(input: Record<string, unknown>): Promise<CampaignDetail> {
