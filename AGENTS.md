@@ -34,7 +34,10 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 - Never send a campaign message without one selected, validated `EmailAddress` and an eligible `CampaignEnrollment`.
 - Never contact an Organization that is already a Contact, and never send two campaign initial/reminder messages to the same normalized email on the same Buenos Aires local date.
 - Never contact a suppressed or invalidated address; unsubscribe cannot be overridden.
-- Never authorize an automatic reply outside the documented allowlist, approved facts, bounded context, qualified `LIVE` mode, rate limits, conversation state and independent kill switch. Risky, ambiguous or unsupported requests always create a human task.
+- Never authorize an automatic reply whose intent is outside `SAFE_REPLY_INTENTS` (`APPROVED_PRODUCT_INFORMATION`, `APPROVED_COMPANY_FACT`, `GROUNDED_SIMPLE_CLARIFICATION`) or, for a redirection, `EXPLICIT_PROPOSAL_REDIRECTION` with exactly one authorized candidate address.
+- Never authorize an automatic reply that is not grounded in approved, versioned `KnowledgeFactRevision` rows recorded in the decision's `context_manifest`, or whose `context_hash` no longer matches the context it was built from.
+- Never authorize an automatic reply outside qualified `LIVE` mode, the bounded context, the conversation and workspace daily limits, and the independent `AUTO_REPLY_KILL_SWITCH`. Re-validate the full policy immediately before the Gmail effect; a failed recheck is `POLICY_RECHECK_FAILED` and becomes a human task.
+- Never send an automatic reply for a contact that has an open `HumanTask`. Anything needing commercial judgment or carrying risk — meetings and dates, pricing or quotes, negotiation, complaints, legal or privacy questions, unsupported technical advice, multiple or ambiguous intents, insufficient context — always opens a `HumanTask` instead of a reply.
 - Never invent prospect facts, products, people, or claims in generated copy.
 - Never call Gmail send/reply unless effective `SEND_MODE=live`, the relevant independent kill switch is disabled, and the durable campaign/reply/contact policy permits live delivery.
 - Never log credentials, OAuth tokens, API keys, or unredacted sensitive payloads.
@@ -52,17 +55,17 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 
 ## Testing Guidelines
 
-Use pytest and pytest-django. Tests must not make real HTTP, DNS, Gmail, Overture dataset, or LLM calls; use fakes and block network access. Add focused regression tests for state transitions, idempotency, suppression, SSRF, MIME, quotas, and CSRF. Run `make check` before review once available.
+Use pytest and pytest-django. Tests must not make real HTTP, DNS, Gmail, Overture dataset, or LLM calls; use fakes and block network access. Add focused regression tests for state transitions, idempotency, suppression, SSRF, MIME, quotas, and CSRF. Run `make check` before review.
 
 ## Quality Gates
 
-Before completing a task, run formatting checks, Ruff, type checking, unit tests, fake-provider integration tests, and relevant security tests. Until Phase 0 provides those commands, run the available documentation and Git checks and state what could not be run.
+Before completing a task, run formatting checks, Ruff, type checking, unit tests, fake-provider integration tests, and relevant security tests — `make check` and, when the change touches delivery or automation, `make test-e2e`. State anything you could not run.
 
 Review the final diff for duplicate sends, invalid state transitions, leaked secrets, missing retries, unsafe URLs, missing suppression checks, missing migrations, and missing tests.
 
 ## Commit & Pull Request Guidelines
 
-History currently has only `Initial commit`; use short imperative subjects such as `Document campaign state transitions`. Keep migrations with their model changes. Pull requests must state purpose, affected requirement IDs, migrations, verification commands, security/cost/deliverability impact, and screenshots for UI changes.
+Use short imperative subjects such as `Document campaign state transitions`. Keep migrations with their model changes. Pull requests must state purpose, affected requirement IDs, migrations, verification commands, security/cost/deliverability impact, and screenshots for UI changes.
 
 ## Security & Live Sending
 

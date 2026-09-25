@@ -1,5 +1,10 @@
 # Despliegue seguro en Railway — frontend y backend separados
 
+> **Nota.** Este documento es una guía de despliegue, no la descripción de un entorno en
+> funcionamiento. Actualmente no hay ninguna instancia pública del sistema corriendo: los
+> pasos de abajo describen cómo se desplegaría, y las variables, dominios y servicios que
+> menciona son ejemplos a completar.
+
 Railway aloja dos deployables de aplicación y tres servicios de infraestructura. Sólo el frontend
 tiene dominio público. Backend, PostgreSQL, Redis y Bucket usan private networking; no se crean TCP
 proxies ni dominios públicos para ellos. La instalación v2 usa DB/Bucket nuevos y no copia datos.
