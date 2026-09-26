@@ -2,106 +2,227 @@
 
 ## 1. Regla general
 
-Los estados se separan por agregado para no perder información. Un prospecto puede conservar pipeline `ANALYZED`, tener mensaje `SENT` y engagement `INTERESTED` simultáneamente. El dashboard proyecta las etiquetas solicitadas desde estas máquinas.
+Cada agregado conserva su propia máquina para no perder historia. Sólo servicios de dominio
+ejecutan transiciones dentro de `transaction.atomic`, bloquean las filas, revalidan invariantes y
+crean auditoría. Views/tasks nunca asignan estados. Toda transición no enumerada falla cerrada.
 
-Sólo servicios de dominio ejecutan transiciones dentro de una transacción, bloquean la fila, validan precondiciones y crean `AuditEvent`. Toda transición no enumerada es inválida.
+Los estados legacy se preservan para lectura/migración, pero campañas nuevas y acciones nuevas usan
+las máquinas de este documento.
+
+La API REST nunca acepta un estado destino arbitrario. Cada acción semántica llama el servicio de
+transición y devuelve `409` si el estado cambió, `412` si el ETag del draft/config quedó obsoleto o
+`202` con `BackgroundJob` durable si continúa fuera del request. El publish Celery ocurre sólo en
+`transaction.on_commit`; pérdida de Redis deja `PENDING` recuperable en PostgreSQL.
 
 ## 2. Campaña
 
-Estados operativos: `DRAFT`, `RUNNING`, `PAUSED`, `CANCELLED`, `COMPLETED`, `STOPPED_ERROR`.
-
-| Desde | Hacia | Disparador y condiciones |
-| --- | --- | --- |
-| DRAFT | RUNNING | Usuario inicia; snapshots, catálogo, queries y configuración válidos |
-| RUNNING | PAUSED | Usuario, kill switch, Gmail/catálogo inválido o safety threshold |
-| PAUSED | RUNNING | Usuario reanuda y todas las precondiciones vuelven a ser válidas |
-| DRAFT/RUNNING/PAUSED | CANCELLED | Usuario cancela; terminal, sin nuevos efectos externos |
-| RUNNING | COMPLETED | Descubrimiento terminó por cualquier razón prevista y la cola autorizada fue procesada |
-| RUNNING | STOPPED_ERROR | Error de integridad/seguridad que impide continuar cualquier etapa |
-
-Pausar es reversible; `CANCELLED`, `COMPLETED` y `STOPPED_ERROR` son terminales. Los mensajes ya aceptados por Gmail no se revierten.
-
-La etapa de descubrimiento tiene estado independiente: `PENDING`, `RUNNING`, `TARGET_REACHED`, `EXHAUSTED_QUERIES`, `EXHAUSTED_RAW_LIMIT`, `EXHAUSTED_COST`, `FAILED_PROVIDER`. Los últimos cinco son terminales para extracción. La campaña permanece `RUNNING` mientras drena mensajes ya calificados y registra ese estado como `discovery_stop_reason`; `FAILED_PROVIDER` no invalida resultados ya persistidos.
-
-## 3. Pipeline del prospecto
-
-Estados: `DISCOVERED`, `EMAIL_FOUND`, `ENRICHED`, `ANALYZED`, `SKIPPED_NO_EMAIL`, `SKIPPED_DUPLICATE`, `SKIPPED_IRRELEVANT`, `QUEUED`, `ERROR`.
+Estados: `DRAFT`, `DISCOVERING`, `AWAITING_APPROVAL`, `RUNNING`, `PAUSED`, `CANCELLED`,
+`COMPLETED`, `STOPPED_ERROR`.
 
 | Desde | Hacia | Condición |
 | --- | --- | --- |
-| DISCOVERED | EMAIL_FOUND | Email principal pasa sintaxis, exclusiones y MX |
-| DISCOVERED | SKIPPED_NO_EMAIL | No queda candidato utilizable |
-| DISCOVERED/EMAIL_FOUND | SKIPPED_DUPLICATE | Identidad resuelve a canónico ya procesado |
-| EMAIL_FOUND | ENRICHED | Snapshot web exitoso o fallback registrado |
-| ENRICHED | ANALYZED | Output IA válido y persistido |
-| ANALYZED | SKIPPED_IRRELEVANT | Score menor al umbral snapshot |
-| ANALYZED | QUEUED | Score suficiente, slot de objetivo y elegibilidad de contacto |
-| DISCOVERED/EMAIL_FOUND/ENRICHED | ERROR | Reintentos de la etapa actual agotados; se persiste `error_stage` |
-| ERROR | DISCOVERED/EMAIL_FOUND/ENRICHED | Reintento manual explícito vuelve a `error_stage`, con causa corregida y auditada |
+| DRAFT | DISCOVERING | Admin inicia; contenido/firma/PDFs/reglas/zonas y particiones READY válidos |
+| DISCOVERING | AWAITING_APPROVAL | Todas las queries terminaron y audiencia final quedó persistida |
+| DISCOVERING | PAUSED | Admin o fallo recuperable de cobertura/integración/seguridad |
+| AWAITING_APPROVAL | RUNNING | Aprobación campaign-level válida o inicio explícito de per-message con filas aprobadas |
+| AWAITING_APPROVAL | PAUSED | Admin o preflight recuperable |
+| RUNNING | PAUSED | Admin, kill switch, Gmail/PDF inválido, cuotas de seguridad o error recuperable |
+| PAUSED | estado_anterior | Admin reanuda y todas las precondiciones vuelven a ser válidas |
+| DRAFT/DISCOVERING/AWAITING_APPROVAL/RUNNING/PAUSED | CANCELLED | Admin cancela; no empiezan nuevos efectos |
+| RUNNING | COMPLETED | Discovery terminó y cada initial/recordatorio posible quedó terminal |
+| DISCOVERING/AWAITING_APPROVAL/RUNNING/PAUSED | STOPPED_ERROR | Integridad irrecuperable impide continuar |
 
-Una falla web no lleva a `ERROR`: produce un snapshot fallback y avanza a `ENRICHED`. `QUEUED` significa que existe un `OutboundMessage` único.
+`CANCELLED`, `COMPLETED` y `STOPPED_ERROR` son terminales. Pausa guarda `resume_state`; nunca salta
+aprobación. Un mensaje ya aceptado por Gmail no se revierte.
+
+Discovery mantiene subestado `PENDING|RUNNING|TARGET_REACHED|EXHAUSTED_QUERIES|
+EXHAUSTED_RAW_LIMIT|FAILED_PROVIDER`. Los últimos cuatro cierran búsqueda; sólo los resultados
+persistidos pasan a audiencia. Si falta una provincia READY, el inicio no sale de DRAFT.
+
+## 3. Enrollment
+
+Estados de elegibilidad: `DISCOVERED`, `EMAIL_SELECTED`, `PREPARED`, `EXCLUDED_DUPLICATE`,
+`EXCLUDED_CONTACT`, `EXCLUDED_RESTRICTED`, `EXCLUDED_NO_EMAIL`, `APPROVED`, `QUEUED`, `CONTACTED`,
+`RESPONDED`, `CANCELLED`, `ERROR`.
+
+| Desde | Hacia | Condición |
+| --- | --- | --- |
+| DISCOVERED | EMAIL_SELECTED | Dirección validada resuelta hacia Organization |
+| DISCOVERED/EMAIL_SELECTED | EXCLUDED_* | Dedupe, Contact, restricción o falta de email |
+| EMAIL_SELECTED | PREPARED | Mensaje fijo y adjuntos exactos congelados; cero LLM |
+| PREPARED | APPROVED | Aprobación campaign-level o per-message incluye la fila y sigue elegible |
+| PREPARED | CANCELLED | Per-message no aprobado al iniciar o campaña cancelada |
+| APPROVED | QUEUED | Recheck + reserva de fecha/ventana válida |
+| QUEUED | CONTACTED | Initial confirmado/reconciliado SENT |
+| CONTACTED | RESPONDED | Primera respuesta humana asociada |
+| cualquier no terminal | EXCLUDED_CONTACT/EXCLUDED_RESTRICTED/CANCELLED/ERROR | Cambio de elegibilidad o error correspondiente |
+
+Crear Contact cancela cualquier trabajo de campaña aún no enviado para la Organization.
 
 ## 4. Mensaje saliente
 
-Estados: `PREPARED`, `QUEUED`, `SENDING`, `RECONCILING`, `SENT`, `DRY_RUN_COMPLETED`, `SEND_FAILED`, `CANCELLED`.
+Estados: `DRAFT`, `REVIEW_READY`, `AUTHORIZED`, `QUEUED`, `SENDING`, `RECONCILING`, `SENT`,
+`DRY_RUN_COMPLETED`, `SEND_FAILED`, `CANCELLED`, `INELIGIBLE`.
 
 | Desde | Hacia | Condición |
 | --- | --- | --- |
-| PREPARED | QUEUED | Campaña activa, no suprimido, catálogo íntegro |
-| QUEUED | SENDING | Scheduler obtiene lock, cupo, intervalo y ventana válidos |
-| QUEUED | DRY_RUN_COMPLETED | Modo dry-run; MIME construido/validado sin Gmail |
-| SENDING | SENT | Gmail confirma y se persisten IDs |
-| SENDING | RECONCILING | Resultado externo ambiguo; queda prohibido reenviar |
-| RECONCILING | SENT | Gmail encuentra el Message-ID ya aceptado |
-| RECONCILING | QUEUED | Búsqueda concluyente confirma ausencia y quedan intentos |
-| QUEUED/SENDING/RECONCILING | SEND_FAILED | Error permanente o reintentos agotados |
-| PREPARED/QUEUED | CANCELLED | Campaña cancelada antes de iniciar efecto externo |
-| SEND_FAILED | QUEUED | Reintento manual con causa resuelta y misma fila/idempotency key |
+| DRAFT | AUTHORIZED | Aprobación CAMPAIGN congela fila/hash |
+| DRAFT | REVIEW_READY | PER_MESSAGE o comunicación programada requiere revisión |
+| REVIEW_READY | REVIEW_READY | Edición admin válida incrementa revisión |
+| REVIEW_READY | AUTHORIZED | Aprobación explícita válida |
+| AUTHORIZED | QUEUED | Recheck final previo, agenda y reserva aplicable |
+| QUEUED | SENDING | Scheduler obtiene lock, ventana/cupo/kill switches válidos |
+| QUEUED | DRY_RUN_COMPLETED | Modo dry-run; MIME válido local, cero Gmail |
+| SENDING | SENT | Gmail confirma IDs |
+| SENDING | RECONCILING | Resultado ambiguo; prohibido reenviar |
+| RECONCILING | SENT | Message-ID encontrado |
+| RECONCILING | QUEUED | Ausencia concluyente y retry permitido |
+| QUEUED/SENDING/RECONCILING | SEND_FAILED | Error permanente o presupuesto agotado |
+| DRAFT/REVIEW_READY/AUTHORIZED/QUEUED | CANCELLED | Campaña/task cancelada antes del efecto |
+| DRAFT/REVIEW_READY/AUTHORIZED/QUEUED | INELIGIBLE | Contact/restricción/header/context/PDF vuelve inválido el efecto |
+| SEND_FAILED | QUEUED | Retry admin sobre misma fila tras resolver causa y reconciliar |
 
-`SENDING` vencido siempre pasa primero por `RECONCILING`. `SENT` y `DRY_RUN_COMPLETED` son terminales para ese mensaje. Una respuesta manual usa la misma máquina pero sólo puede originarse por POST explícito del usuario: el POST crea `QUEUED`, el worker ejecuta el efecto autorizado y `SENDING|RECONCILING` nunca vuelven a enviar sin buscar antes el `Message-ID`.
+`SENT` y `DRY_RUN_COMPLETED` son terminales. Todos los kinds usan la misma frontera durable, pero:
 
-## 5. Engagement
+- INITIAL y CAMPAIGN_REMINDER requieren reserva same-day.
+- INITIAL y REFERRED_PROPOSAL requieren todos los PDFs congelados.
+- MANUAL_REPLY sólo nace por POST admin.
+- AUTOMATIC_REPLY, REFERRED_PROPOSAL y REDIRECT_ACK sólo nacen de una ReplyDecision LIVE que el
+  policy engine autorizó, con semantic action key única.
+- SCHEDULED_CONTACT nace de plan vencido y modo review/automatic.
 
-Estado derivado por prospecto/campaña: `NONE`, `REPLIED`, `INTERESTED`, `NOT_INTERESTED`, `UNSUBSCRIBED`, `BOUNCED`.
+## 5. Recordatorio de campaña
 
-| Evento clasificado | Resultado |
+Estados: `NOT_APPLICABLE`, `PENDING`, `SCHEDULED`, `QUEUED`, `SENT`, `CANCELLED`, `INELIGIBLE`,
+`FAILED`.
+
+| Desde | Hacia | Condición |
+| --- | --- | --- |
+| NOT_APPLICABLE | PENDING | Initial confirmado y campaña habilita recordatorio |
+| PENDING | SCHEDULED | due = sent_at + delay, desplazado a ventana laboral |
+| PENDING/SCHEDULED | CANCELLED | Respuesta humana, Contact manual, unsubscribe o bounce |
+| SCHEDULED | QUEUED | Vence, sigue elegible y reserva email/fecha local |
+| SCHEDULED | SCHEDULED | Conflicto same-day mueve al próximo día permitido |
+| QUEUED | SENT | Reply Gmail en hilo original confirmado |
+| PENDING/SCHEDULED/QUEUED | INELIGIBLE | Restricción/Contact/campaña impide envío |
+| QUEUED | FAILED | Error terminal después de reconciliación/retries |
+
+AUTO_REPLY no cancela. Única fila/OutboundMessage por initial; nunca se crea un segundo reminder.
+
+## 6. Mensaje entrante y Contacto
+
+Procesamiento inbound: `PERSISTED -> DETERMINISTIC_APPLIED -> DECISION_PENDING -> DECIDED|
+HUMAN_REQUIRED|FAILED`.
+
+| Evento | Efecto determinístico |
 | --- | --- |
-| INTERESTED | INTERESTED, `responded=true` |
-| NOT_INTERESTED | NOT_INTERESTED, `responded=true` |
-| OTHER humano | REPLIED, `responded=true` |
-| UNSUBSCRIBE | UNSUBSCRIBED, `responded=true`, supresión permanente |
-| BOUNCE | BOUNCED, `responded=false`, email inválido |
-| AUTO_REPLY | Sin cambio de engagement, `responded=false` |
+| Respuesta humana genuina | Crear/promover Contact, vincular Conversation, cancelar reminders |
+| Mail directo de Contacto existente | Vincular Contact/Organization/Conversation; sin campaña ni outbound padre |
+| UNSUBSCRIBE humano | Lo anterior + restricción irreversible y estado “Baja solicitada” |
+| BOUNCE | Invalidar sólo EmailAddress; cancelar reminder; no crear Contact por sí solo |
+| AUTO_REPLY | Persistir evento; no Contact, no respuesta humana, no cancelar reminder |
+| Gmail `SENT` que responde un inbound conocido | Persistir `MANUAL_REPLY` `SENT`, resolver `REPLY_REVIEW` y cancelar automáticos en cola |
 
-`UNSUBSCRIBED` prevalece sobre cualquier clasificación posterior. `BOUNCED` bloquea envíos al email, aunque una respuesta humana previa permanezca visible en el hilo.
+La transacción termina antes de publicar `DECISION_PENDING` con `on_commit`. Un reintento sobre el
+mismo Gmail ID reutiliza mensaje, candidatos, Contact y task/decision existentes.
 
-## 6. SearchRun y jobs
+Contacto no es una máquina de campaña: `ACTIVE|NO_CONTACT|UNSUBSCRIBED|INCOMPLETE`. Puede cambiar
+sus datos/preferencias, pero nunca deja de excluir la Organization de campañas. `UNSUBSCRIBED` no
+retrocede. Una restricción manual reversible no elimina Contact.
 
-`SearchRun`: `PENDING -> RUNNING -> SUCCEEDED|RETRY_WAIT|FAILED_PERMANENT|CANCELLED`. `RETRY_WAIT -> RUNNING` conserva request ID e idempotency key.
+## 7. ReplyDecision y automatización
 
-`BackgroundJob`: `PENDING -> RUNNING -> SUCCEEDED|RETRY_WAIT|FAILED|CANCELLED`. Un heartbeat vencido lleva a recuperación; no autoriza repetir un efecto externo sin consultar el agregado correspondiente.
+Estados: `PENDING`, `SHADOW_RECORDED`, `NO_ACTION`, `AUTO_ELIGIBLE`, `AUTHORIZED`, `EXECUTING`,
+`COMPLETED`, `MANUAL_REPLY_RECORDED`, `HUMAN_REQUIRED`, `REJECTED_POLICY`, `FAILED`.
 
-## 7. Invariantes de concurrencia
+| Desde | Hacia | Condición |
+| --- | --- | --- |
+| PENDING | SHADOW_RECORDED | Output válido en modo SHADOW; cero Gmail |
+| PENDING | NO_ACTION | POLITE_ACKNOWLEDGEMENT, NOT_INTERESTED o acción NONE |
+| PENDING | HUMAN_REQUIRED | Intent/riesgo/contexto/provider/schema exige admin |
+| PENDING | AUTO_ELIGIBLE | Intent allowlisted, facts/candidate/confidence válidos |
+| AUTO_ELIGIBLE | REJECTED_POLICY | OFF/SHADOW, gate, kill switch, límite o recheck falla |
+| AUTO_ELIGIBLE | AUTHORIZED | LIVE calificado y policy/rechecks completos |
+| AUTHORIZED | EXECUTING | Outbound durable creado y worker reclama lock |
+| EXECUTING | COMPLETED | Efecto(s) Gmail confirmados/reconciliados |
+| PENDING/AUTO_ELIGIBLE/AUTHORIZED/EXECUTING | MANUAL_REPLY_RECORDED | Sync confirma una respuesta escrita directamente en Gmail |
+| EXECUTING | HUMAN_REQUIRED | Fallo o ambigüedad requiere intervención |
+| PENDING/AUTO_ELIGIBLE/AUTHORIZED/EXECUTING | FAILED | Error persistido; sin reclamo de éxito |
 
-- Una campaña reserva objetivo y costo bajo lock antes de crear trabajo.
-- Sólo un worker puede procesar un prospecto/etapa o mensaje a la vez.
-- Un `ContactLedger` único se bloquea justo antes de live para asignar `contact_sequence` y consumir un override; dry-run no lo modifica.
-- Sólo un sync Gmail corre por conexión.
-- Supresión e invalidez se verifican al preparar, encolar y justo antes de enviar.
-- Catálogo se verifica por storage key, tamaño y SHA-256 justo antes de construir MIME.
-- El límite diario se reserva transaccionalmente; una reserva expirada se libera sólo tras reconciliar Gmail.
-- Las tareas reciben IDs, vuelven a leer estado y terminan sin efecto si la transición ya ocurrió.
-- El pipeline reserva cada prospecto en base de datos antes de publicar la task; una reserva expirada puede recuperarse, pero un mismo token sólo se reclama una vez.
-- Cada análisis usa una generación monotónica. Una regeneración manual incrementa la generación antes de llamar al proveedor y cualquier resultado anterior se descarta bajo lock. El actor manual habilita campañas `RUNNING|PAUSED`, nunca estados terminales.
-- Un límite transitorio del LLM deja `AIAnalysis.RETRY_WAIT` con próximo intento persistido; Beat recupera intentos vencidos después de reinicios.
+Confianza >=0,90 es necesaria, nunca suficiente. IDs no incluidos o campos extra producen
+`HUMAN_REQUIRED/FAILED`, no fallback. El contexto válido incluye contexto global vigente y, para
+respuestas fundamentadas, facts puntuales activos seleccionados por embeddings; si llegan por
+similitud baja o selección ambigua se marcan como posibles y no autorizan una respuesta por sí
+solos. El recheck de una decisión previa no considera respuestas automáticas posteriores de otros
+hilos del mismo Contacto como contexto humano nuevo. Una Conversation `SUSPENDED_HUMAN` impide
+nuevas autorizaciones automáticas.
 
-## 8. Proyecciones del dashboard
+### Saga de redirección
 
-- `crudos`: registros almacenados en `SearchRun.response_json`/métricas.
-- `con email`: prospectos que alcanzaron `EMAIL_FOUND`.
-- `duplicados`, `irrelevantes`: estados `SKIPPED_*` correspondientes.
-- `calificados`: análisis sobre umbral con slot aceptado.
-- `en cola`: mensajes `PREPARED|QUEUED|SENDING|RECONCILING`.
-- `enviados`: sólo `SENT`; `DRY_RUN_COMPLETED` se muestra como simulado.
-- `fallidos`: prospectos `ERROR` y mensajes `SEND_FAILED`, separados por filtro.
-- `respondidos`, `interesados`: engagement derivado, nunca contadores mutables independientes.
+`VALIDATING -> PROPOSAL_AUTHORIZED -> PROPOSAL_SENDING -> PROPOSAL_CONFIRMED -> ACK_AUTHORIZED ->
+ACK_SENDING -> COMPLETED`.
+
+Desde cualquier paso previo a confirmación puede ir a `HUMAN_REQUIRED`; no se crea ACK. Tras
+`PROPOSAL_CONFIRMED`, recovery siempre reconcilia/continúa ACK con su propia key y no repite la
+propuesta. Un semantic action por inbound impide dos sagas.
+
+## 8. HumanTask y NotificationDelivery
+
+HumanTask: `OPEN -> RESOLVED|DISMISSED`. Abrir pone Conversation en `SUSPENDED_HUMAN`. Resolver o
+descartar puede restaurar `ACTIVE` sólo si no queda otro task abierto; no dispara envío salvo una
+acción admin separada y explícita.
+
+Una respuesta manual confirmada (`MANUAL_REPLY -> SENT`) resuelve automáticamente las tareas
+`REPLY_REVIEW` abiertas para ese inbound. Si la respuesta fue escrita directamente en Gmail, el
+sync usa el dueño de la conexión como actor de auditoría. Si el envío manual de la aplicación falla
+o queda `RECONCILING`, la tarea sigue `OPEN`.
+
+NotificationDelivery: `PENDING -> SENDING -> SENT|RECONCILING|FAILED`; `RECONCILING -> SENT|PENDING|
+FAILED`. El task sigue OPEN aunque todas las notificaciones fallen.
+
+## 9. Plan de comunicación
+
+Tema global: `active|inactive`. Aprobación por Contacto: `DISABLED|ACTIVE|PAUSED`; snooze conserva
+ACTIVE pero no es due. Attempt:
+`DUE -> DRAFT_REVIEW|AUTHORIZED|HUMAN_REQUIRED|INELIGIBLE|CANCELLED`; `DRAFT_REVIEW -> AUTHORIZED|
+CANCELLED`; `AUTHORIZED -> SENT|HUMAN_REQUIRED|INELIGIBLE` mediante OutboundMessage.
+
+Interacción genuina recalcula `next_due_at >= interaction_at + cadence` usando la cadencia del tema
+global; envío confirmado usa `sent_at + cadence`. Tema inactivo, restricción, task abierto,
+suspensión, contexto insuficiente o kill switch impiden autorización.
+
+## 10. Overture y jobs
+
+`OvertureCoveragePartition`: `IMPORTING -> READY|FAILED`; una READY anterior sólo pasa a
+`SUPERSEDED` después de activar atómicamente la nueva de esa provincia. Releases no mezclan filas
+ejecutables de distintas versiones.
+
+`SearchRun`: `PENDING -> RUNNING -> SUCCEEDED|RETRY_WAIT|FAILED_PERMANENT|CANCELLED`.
+`BackgroundJob`: `PENDING -> RUNNING -> SUCCEEDED|RETRY_WAIT|FAILED|CANCELLED`. Recovery de
+heartbeat sólo repite operaciones internas/idempotentes; efectos externos consultan su agregado.
+
+Migration runner no es una máquina de negocio: toma advisory lock, aplica sólo migraciones forward
+y debe completar antes de iniciar Uvicorn/workers/Beat. Un fallo deja el backend no-ready y nunca
+sirve schema parcial.
+
+## 11. Invariantes de concurrencia
+
+- Un Workspace singleton y un último admin activo se protegen bajo lock.
+- Lockout fijo no desliza al recibir intentos bloqueados.
+- OrganizationIdentity y EmailAddress únicas convergen bajo conflicto concurrente.
+- Una campaña congela audiencia/configuración bajo lock; filas posteriores no entran solas.
+- CampaignDeliveryReservation permite un INITIAL/REMINDER por email/fecha local.
+- Un initial posee como máximo un reminder.
+- Cada Gmail Message-ID ambiguo se reconcilia antes de requeue.
+- Un inbound Gmail ID posee una sola acción semántica; propuesta y ACK tienen keys separadas.
+- Una Conversation con HumanTask OPEN no autoriza automatización.
+- Los límites de tres respuestas/Conversation/24 h y veinte/Workspace/día se reservan
+  transaccionalmente y se revalidan antes de Gmail.
+- Tareas reciben IDs, reabren estado y no producen efecto si la transición ya ocurrió.
+
+## 12. Proyecciones del dashboard
+
+Los estados técnicos se traducen a resultados: `SENT` = “Enviado”; `DRY_RUN_COMPLETED` = “Modo de
+prueba: no se envió”; decisión automática completa = “Respondido automáticamente”; HumanTask OPEN
+= “Necesita que lo revises”; reminder rescheduled = “Se pasó al próximo día permitido para evitar
+correos duplicados”. Detalles técnicos quedan colapsados y sólo para admin.

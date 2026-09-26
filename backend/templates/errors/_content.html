@@ -1,0 +1,6 @@
+<section class="card error-page" role="alert">
+    <h1>{{ error_title }}</h1>
+    <p>{{ error_message }}</p>
+    {% if correlation_id %}<p class="muted">Código de diagnóstico: <code>{{ correlation_id }}</code></p>{% endif %}
+    <p><a class="button" href="{% url 'dashboard' %}">Volver al panel principal</a></p>
+</section>

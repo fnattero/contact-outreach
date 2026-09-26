@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}Respuesta automática · Contact Outreach{% endblock %}
+{% block breadcrumb %}Configuración / Respuesta automática{% endblock %}
+{% block page_title %}Respuesta automática{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div class="page-header__copy">
+        <h1>Respuesta automática</h1>
+        <p>Configurá qué puede responder el sistema y cuándo puede hacerlo sin pedirte intervención.</p>
+    </div>
+</header>
+
+<section class="panel">
+    <div class="panel__header"><div><h2>Modo actual</h2><p class="muted">Cada opción explica exactamente qué puede ocurrir.</p></div><span class="badge badge--{{ configuration.mode|lower }}">{{ configuration.get_mode_display }}</span></div>
+    <div class="panel__body">
+        <form method="post" action="{% url 'automation-mode' %}" class="section-stack">
+            {% csrf_token %}
+            <fieldset class="field"><legend class="field__label">Modo de respuesta</legend><div class="radio-cards">{% for radio in mode_form.mode %}<label class="radio-card" for="{{ radio.id_for_label }}">{{ radio.tag }}<span class="radio-card__content"><strong>{{ radio.choice_label }}</strong><small>{% if radio.data.value == 'OFF' %}Sólo se aplican bajas, rebotes y respuestas automáticas detectadas por reglas; no se consulta a la IA.{% elif radio.data.value == 'SHADOW' %}La IA propone qué haría para que puedas evaluarla, pero no autoriza ningún correo.{% else %}Las respuestas que superen todas las reglas pueden enviarse sin intervención humana. Las demás crean una tarea.{% endif %}</small></span></label>{% endfor %}</div></fieldset>
+            <div class="field"><label class="field__label" for="{{ mode_form.current_password.id_for_label }}">{{ mode_form.current_password.label }}</label>{{ mode_form.current_password }}<p class="field__help">{{ mode_form.current_password.help_text }}</p></div>
+            <div class="actions"><button class="button" type="submit">Guardar modo</button></div>
+        </form>
+    </div>
+</section>
+
+<section class="panel" id="protected-reply-rules">
+    <div class="panel__header">
+        <div>
+            <h2>Reglas protegidas del sistema</h2>
+            <p class="muted">Estas reglas siempre se aplican y no se pueden modificar desde el dashboard.</p>
+        </div>
+        <span class="badge">Fijas</span>
+    </div>
+    <div class="panel__body">
+        <ul class="cross-list">
+            <li>Las solicitudes de coordinar, agendar o confirmar una llamada o reunión, y las preguntas por disponibilidad del equipo, pasan a una persona.</li>
+            <li>Las consultas generales sobre horario de atención, teléfono, envíos o retiros no se bloquean por sí solas.</li>
+            <li>Precios, cotizaciones, negociación, quejas, asuntos legales, privacidad y consejo técnico no respaldado pasan a una persona.</li>
+            <li>Sólo puede afirmar información aprobada; nunca inventa datos ni promete condiciones no confirmadas.</li>
+        </ul>
+    </div>
+</section>
+
+<section class="panel" id="reply-prompt">
+    <div class="panel__header">
+        <div>
+            <h2>Preferencias de estilo</h2>
+            <p class="muted">Definen cómo escribe cuando la decisión final es responder.</p>
+        </div>
+        <span class="badge">{% if automatic_reply_prompt_revision %}Revisión {{ automatic_reply_prompt_revision }}{% else %}Predeterminado{% endif %}</span>
+    </div>
+    <div class="panel__body">
+        <div class="knowledge-layout">
+            <form method="post" action="{% url 'automatic-reply-prompt-save' %}" class="card knowledge-editor" novalidate>
+                {% csrf_token %}
+                {% include "includes/field.html" with field=automatic_reply_prompt_form.automatic_reply_prompt %}
+                <div class="actions"><button class="button" type="submit">Guardar preferencias</button></div>
+            </form>
+            <aside class="knowledge-help card" aria-labelledby="reply-context-title">
+                <h3 id="reply-context-title">Qué entra al agente</h3>
+                <ul class="check-list">
+                    <li><code>NEW_INBOUND</code>: el texto nuevo del correo recibido.</li>
+                    <li><code>APPROVED_GLOBAL_CONTEXT</code>: el contexto general guardado.</li>
+                    <li><code>APPROVED_FACTS</code>: hasta tres datos puntuales relacionados.</li>
+                    <li><code>EMAIL_CANDIDATES</code>: emails literales detectados en el mensaje.</li>
+                </ul>
+            </aside>
+        </div>
+    </div>
+</section>
+
+<section class="panel" id="follow-up-topics">
+    <div class="panel__header">
+        <div>
+            <h2>Temas de seguimiento</h2>
+            <p class="muted">La fecha, periodicidad y modo se configuran acá. En cada contacto sólo se aprueban los temas aplicables.</p>
+        </div>
+        <span class="badge">{{ follow_up_topics|length }} tema{{ follow_up_topics|length|pluralize }}</span>
+    </div>
+    <div class="panel__body section-stack">
+        <form method="post" action="{% url 'follow-up-topic-save' %}" class="section-stack" novalidate>
+            {% csrf_token %}
+            {% if selected_follow_up_topic %}<input type="hidden" name="topic_id" value="{{ selected_follow_up_topic.pk }}">{% endif %}
+            <div class="filters__grid">
+                {% include "includes/field.html" with field=follow_up_topic_form.name %}
+                {% include "includes/field.html" with field=follow_up_topic_form.cadence_days %}
+                {% include "includes/field.html" with field=follow_up_topic_form.mode %}
+                {% include "includes/field.html" with field=follow_up_topic_form.next_due_at %}
+            </div>
+            {% include "includes/field.html" with field=follow_up_topic_form.objective %}
+            {% include "includes/field.html" with field=follow_up_topic_form.instructions %}
+            <div class="checkbox-line">{{ follow_up_topic_form.active }} <label for="{{ follow_up_topic_form.active.id_for_label }}">{{ follow_up_topic_form.active.label }}</label></div>
+            <p class="field__help">{{ follow_up_topic_form.active.help_text }}</p>
+            <div class="actions">
+                <button class="button" type="submit">{% if selected_follow_up_topic %}Guardar tema{% else %}Crear tema{% endif %}</button>
+                {% if selected_follow_up_topic %}<a class="button button--secondary" href="{% url 'automation-settings' %}#follow-up-topics">Cancelar edición</a>{% endif %}
+            </div>
+        </form>
+
+        {% if follow_up_topics %}
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Tema</th><th>Periodicidad</th><th>Próxima fecha global</th><th>Modo</th><th>Estado</th><th></th></tr></thead>
+                    <tbody>
+                        {% for topic in follow_up_topics %}
+                            <tr>
+                                <td><strong>{{ topic.name }}</strong><span class="table-meta">{{ topic.objective }}</span></td>
+                                <td>Cada {{ topic.cadence_days }} días</td>
+                                <td>{% if topic.next_due_at %}{{ topic.next_due_at|date:"d M Y · H:i" }}{% else %}Según la periodicidad{% endif %}</td>
+                                <td>{{ topic.get_mode_display }}</td>
+                                <td><span class="badge{% if topic.active %} badge--success{% else %} badge--paused{% endif %}">{% if topic.active %}Activo{% else %}Inactivo{% endif %}</span></td>
+                                <td><a class="button button--secondary button--small" href="?edit_topic={{ topic.pk }}#follow-up-topics">Editar</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state empty-state--compact">
+                <h3>No hay temas de seguimiento</h3>
+                <p>Creá un tema global y después aprobalo en los contactos que correspondan.</p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<section class="panel automation-knowledge">
+    <div class="panel__header">
+        <div>
+            <h2>Información para responder consultas</h2>
+            <p class="muted">El contexto general se usa siempre. Las tarjetas puntuales sólo se suman cuando coinciden con la consulta.</p>
+        </div>
+    </div>
+    <div class="panel__body section-stack">
+        <div class="automation-guide" aria-label="Cómo funciona esta información">
+            <article class="automation-guide__item">
+                <span class="automation-guide__number" aria-hidden="true">1</span>
+                <div><h3>Contexto general</h3><p>Quiénes son, qué venden, tono y límites. Se agrega a todas las respuestas.</p></div>
+            </article>
+            <article class="automation-guide__item">
+                <span class="automation-guide__number" aria-hidden="true">2</span>
+                <div><h3>Datos puntuales</h3><p>FAQ cortas: productos, medidas, envíos o qué pedirle al cliente.</p></div>
+            </article>
+            <article class="automation-guide__item">
+                <span class="automation-guide__number" aria-hidden="true">3</span>
+                <div><h3>Si falta contexto, no responde</h3><p>Precios, reuniones, dudas ambiguas o datos no cargados quedan para una persona.</p></div>
+            </article>
+        </div>
+
+        <form id="global-context" method="post" action="{% url 'global-context-create' %}" class="card knowledge-editor" novalidate>
+            {% csrf_token %}
+            <div class="knowledge-editor__header">
+                <h3>Contexto general de la empresa</h3>
+                <p class="muted">Quiénes son, qué venden, tono y límites. Se usa en todas las respuestas.</p>
+            </div>
+            {% include "includes/field.html" with field=global_context_form.context_text %}
+            <div class="actions"><button class="button" type="submit">Guardar contexto</button></div>
+        </form>
+
+        <div class="knowledge-layout">
+            <form id="knowledge-create" method="post" action="{% url 'knowledge-create' %}" class="card knowledge-editor" novalidate>
+                {% csrf_token %}
+                <div class="knowledge-editor__header">
+                    <h3>Agregar dato puntual</h3>
+                    <p class="muted">Usalo para una respuesta frecuente o un dato confirmado. Una idea por tarjeta.</p>
+                </div>
+                {% include "includes/field.html" with field=knowledge_form.title %}
+                {% include "includes/field.html" with field=knowledge_form.text %}
+                <div class="alert alert--warning">
+                    <div><strong>Antes de guardar:</strong><br>No cargues precios, promesas especiales ni datos dudosos. Si requiere criterio comercial, debe responderlo una persona.</div>
+                </div>
+                <div class="actions">
+                    <button class="button" type="submit">Guardar</button>
+                </div>
+            </form>
+
+            <aside class="knowledge-help card" aria-labelledby="knowledge-help-title">
+                <h3 id="knowledge-help-title">Qué conviene escribir</h3>
+                <ul class="check-list">
+                    <li>Preguntas frecuentes con respuesta clara.</li>
+                    <li>Productos, medidas o aplicaciones que ofrecés.</li>
+                    <li>Datos necesarios para avanzar una consulta.</li>
+                </ul>
+                <h3>Qué conviene evitar</h3>
+                <ul class="cross-list">
+                    <li>Precios o cotizaciones.</li>
+                    <li>Promesas que cambian por cliente.</li>
+                    <li>Datos sin confirmar.</li>
+                    <li>Catálogos copiados completos.</li>
+                </ul>
+            </aside>
+        </div>
+
+        <div class="knowledge-layout">
+            <form id="knowledge-preview" method="post" action="{% url 'knowledge-search-preview' %}#knowledge-preview" class="card knowledge-editor" novalidate>
+                {% csrf_token %}
+                <div class="knowledge-editor__header">
+                    <h3>Probar qué datos encontraría</h3>
+                    <p class="muted">Pegá una pregunta de cliente y revisá qué tarjetas aparecerían.</p>
+                </div>
+                {% include "includes/field.html" with field=knowledge_preview_form.query %}
+                <div class="actions"><button class="button button--secondary" type="submit">Probar búsqueda</button></div>
+            </form>
+            <aside class="knowledge-help card" aria-live="polite">
+                <h3>Resultado de la prueba</h3>
+                {% if knowledge_preview %}
+                    <p>{{ knowledge_preview.message }}</p>
+                    {% if knowledge_preview.scores %}
+                        <ul class="plain-list">
+                            {% for score in knowledge_preview.scores %}
+                                <li>
+                                    <strong>{{ score.revision.fact.title }}</strong>
+                                    <span class="muted">· similitud {{ score.score|floatformat:2 }} · {% if score.selected %}{% if score.may_be_irrelevant %}contexto posible{% else %}entraría al contexto{% endif %}{% else %}no entraría automáticamente{% endif %}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                {% else %}
+                    <p class="muted">Todavía no probaste ninguna consulta. Pegá una pregunta de ejemplo y mirá qué tarjetas aparecerían.</p>
+                {% endif %}
+            </aside>
+        </div>
+
+        <div id="knowledge-list">
+            <div class="section-heading section-heading--inline">
+                <div><h3>Datos puntuales guardados</h3><p class="muted">El agente recibe como máximo tres tarjetas por consulta.</p></div>
+            </div>
+            <div class="knowledge-card-grid">
+            {% for revision in revisions %}
+                <article class="card knowledge-card">
+                    <div class="knowledge-card__header">
+                        <div>
+                            <h4>{{ revision.fact.title }}</h4>
+                            <p class="muted">Versión {{ revision.version }}</p>
+                        </div>
+                        {% if revision.superseded_at %}<span class="badge">Reemplazada</span>{% else %}<span class="badge badge--active">Activa</span>{% endif %}
+                    </div>
+                    <div class="knowledge-card__body">{{ revision.text|linebreaksbr }}</div>
+                    <div class="knowledge-card__footer">
+                        {% if revision.superseded_at %}
+                            <span class="muted">Ya no se usa porque existe una versión más nueva.</span>
+                        {% else %}
+                            <span class="muted">Disponible para futuras respuestas desde {{ revision.approved_at|date:"d/m/Y H:i" }}.</span>
+                        {% endif %}
+                    </div>
+                </article>
+            {% empty %}<div class="empty-state"><h3>Todavía no cargaste información</h3><p>Empezá por una pregunta frecuente, por ejemplo: “¿Qué productos ofrecen?” o “¿Qué datos necesitan para recomendar una medida?”.</p></div>{% endfor %}
+            </div>
+        </div>
+    </div>
+</section>
+
+{% endblock %}

@@ -1,0 +1,1054 @@
+export type Problem = {
+  type?: string;
+  title?: string;
+  status?: number;
+  code?: string;
+  detail?: string;
+  correlation_id?: string;
+  field_errors?: Record<string, string | string[]>;
+};
+
+export type UserSession = {
+  id: number;
+  username: string;
+  email: string;
+  role: "ADMIN" | "VENDEDOR";
+  workspace_id: string;
+  workspace_name: string;
+  capabilities: string[];
+  session_expires_at: string;
+  reauthentication_active: boolean;
+};
+
+export type DashboardCampaign = {
+  id: string;
+  name: string;
+  state: string;
+  state_label: string;
+  discovery_state: string;
+  discovery_state_label: string;
+  delivery_mode: string;
+  approval_mode?: string;
+  metrics?: {
+    enrollments: number;
+    prospects: number;
+    initial_messages: number;
+    sent: number;
+    review_ready: number;
+    queued: number;
+    errors: number;
+  };
+};
+
+export type CampaignDetail = DashboardCampaign & {
+  approval_mode: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  location_text?: string;
+  objective?: number;
+  daily_limit?: number;
+  status_reason?: string;
+  categories?: Array<{ id: string; name: string; sort_order: number }>;
+  zones?: Array<{ id: string; name: string; sort_order: number }>;
+  attachments?: Array<{ catalog_id: string; name: string; version: number; position: number }>;
+  catalog?: { id: string; name: string; version: number };
+  max_raw_records?: number;
+  message_interval_minutes?: number;
+  weekdays?: number[];
+  window_start?: string;
+  window_end?: string;
+  timezone_name?: string;
+  reminder_enabled?: boolean;
+  reminder_delay_days?: number;
+  audience_hash?: string | null;
+  content_hash?: string | null;
+  attachment_hash?: string | null;
+  schedule_hash?: string | null;
+  approved_at?: string | null;
+};
+
+export type InboundMessage = {
+  id: string;
+  external_at: string;
+  sender: string;
+  subject: string;
+  classification: string;
+  classification_label: string;
+  is_human: boolean;
+  is_read: boolean;
+  gmail_thread_id: string;
+  campaign_id: string | null;
+  body_preview: string;
+};
+
+export type InboundThread = {
+  inbound: InboundMessage & { body_text: string };
+  timeline: Array<{
+    direction: "inbound" | "outbound";
+    at: string;
+    sender: string;
+    body_text: string;
+    classification: string;
+  }>;
+};
+
+export type OutboundMessage = {
+  id: string;
+  created_at: string;
+  recipient: string;
+  subject: string;
+  kind: string;
+  kind_label: string;
+  state: string;
+  state_label: string;
+  sent_at: string | null;
+  simulated_at: string | null;
+  campaign_id: string | null;
+  body_text: string;
+  approved_at?: string | null;
+  error?: string | null;
+};
+
+export type Contact = {
+  id: string;
+  name: string;
+  organization_name: string;
+  preferred_email: string | null;
+  status: string;
+  last_interaction_at: string | null;
+  open_task_count: number;
+  next_follow_up_at: string | null;
+};
+
+export type ContactEmail = {
+  id: string;
+  original_email: string;
+  label: string;
+  is_preferred: boolean;
+  validity: string;
+  validated_at: string | null;
+  invalid_reason: string;
+  active_restriction_count: number;
+};
+
+export type ContactRestriction = {
+  id: string;
+  scope: string;
+  kind: string;
+  evidence: string;
+  revoked_at: string | null;
+  created_at: string;
+  email_address_id: string | null;
+};
+
+export type ContactTimeline = {
+  subject: string;
+  first_at: string;
+  last_at: string;
+  automation_label: string;
+  open_task_count: number;
+  items: Array<{
+    direction: string;
+    happened_at: string;
+    sender: string;
+    recipient: string;
+    subject: string;
+    body: string;
+    outcome: string;
+    simulated: boolean;
+    needs_attention: boolean;
+  }>;
+};
+
+export type ContactDetail = Contact & {
+  organization_id: string;
+  emails: ContactEmail[];
+  restrictions: ContactRestriction[];
+  timelines: ContactTimeline[];
+};
+
+export type CommunicationPlan = {
+  id: string;
+  contact_id: string;
+  topic_id: string;
+  topic_name: string;
+  preferred_email_id: string;
+  state: string;
+  state_label: string;
+  mode: string;
+  next_due_at: string | null;
+  snoozed_until: string | null;
+};
+
+export type Catalog = {
+  id: string;
+  name: string;
+  version: number;
+  original_filename: string;
+  detected_mime: string;
+  byte_size: number;
+  sha256: string;
+  active: boolean;
+  missing: boolean;
+  created_at: string;
+};
+
+export type BusinessProfile = {
+  company_name: string;
+  salesperson_name: string;
+  phone: string;
+  whatsapp: string;
+  description: string;
+  products: string;
+  differentiators: string;
+  address: string;
+  website: string;
+  signature: string;
+  additional_instructions: string;
+  profile_version: number;
+};
+
+export type ManagedUser = {
+  id: number;
+  username: string;
+  email: string;
+  role: "ADMIN" | "VENDEDOR";
+  is_active: boolean;
+  date_joined: string;
+};
+
+export type CreatedUser = {
+  user: ManagedUser;
+  activation_url: string;
+  expires_at: string;
+};
+
+export type IntegrationStatus = {
+  extractor: { provider: string; overture_min_confidence: string };
+  website_fetcher: { provider: string };
+  llm: { provider: string; model: string; credential_source: string; configured: boolean };
+  embeddings: { provider: string; model: string; dimensions: number };
+  gmail: {
+    provider: string;
+    oauth_client_id_configured: boolean;
+    credential_source: string;
+    credential_configured: boolean;
+    connection_status: string;
+    email: string | null;
+  };
+  revision: number;
+};
+
+export type SearchCategory = {
+  id: string;
+  name: string;
+  sort_order: number;
+  rules_revision: number;
+  rules: Array<{
+    id: string;
+    taxonomy_code: string;
+    name_terms: string[];
+    active: boolean;
+    sort_order: number;
+  }>;
+};
+
+export type SearchZone = {
+  id: string;
+  name: string;
+  official_code: string;
+  level: string;
+  province_code: string;
+  province_name: string;
+  parent_id: string | null;
+  selectable: boolean;
+  location_text: string;
+  boundary_revision: number;
+  boundary_hash: string;
+};
+
+export type SearchZoneGeometry = {
+  id: string;
+  boundary_revision: number;
+  boundary_hash: string;
+  geojson: unknown;
+  bbox: unknown;
+};
+
+export type GmailConnection = {
+  connected: boolean;
+  status: string;
+  email: string | null;
+  scopes: string[];
+  last_tested_at: string | null;
+  error: string | null;
+};
+
+export type MessageTemplate = {
+  id: string;
+  kind: "INITIAL" | "REMINDER" | "REFERRED_PROPOSAL";
+  subject: string;
+  body: string;
+  revision: number;
+  content_hash: string;
+  approved_at: string;
+  active: boolean;
+};
+
+export type PromptConfiguration = {
+  email_drafting_prompt: string;
+  automatic_reply_prompt: string;
+  revision: number;
+};
+
+export type AutomationConfiguration = {
+  mode: "OFF" | "SHADOW" | "LIVE";
+  mode_label: string;
+  policy_version: string;
+  live_enabled_at: string | null;
+  live_enabled_by: string | null;
+};
+
+export type KnowledgeFactRevision = {
+  id: string;
+  fact_id: string;
+  title: string;
+  category: string;
+  version: number;
+  text: string;
+  source_notes: string;
+  content_hash: string;
+  approved: boolean;
+  approved_at: string | null;
+};
+
+export type KnowledgeContextRevision = {
+  id: string;
+  version: number;
+  context_text: string;
+  source_notes: string;
+  content_hash: string;
+  approved: boolean;
+  approved_at: string | null;
+};
+
+export type AttentionTask = {
+  id: string;
+  contact_id: string;
+  contact_name: string;
+  kind: string;
+  reason: string;
+  status: string;
+  title: string;
+  summary: string;
+  next_step: string;
+  opened_at: string;
+};
+
+export type OvertureStatus = {
+  latest_snapshot_id: string | null;
+  active_snapshot_id: string | null;
+  release_checks: Array<{ status: string; latest_release: string; created_at: string }>;
+  partitions: Array<{
+    id: string;
+    release_id: string;
+    province_code: string;
+    province_name: string;
+    status: string;
+    is_active: boolean;
+    place_count: number;
+    imported_at: string | null;
+    error: string;
+  }>;
+};
+
+export type BackgroundJob = {
+  id: string;
+  created_at: string;
+  task_name: string;
+  entity_type: string;
+  entity_id: string;
+  queue: string;
+  state: string;
+  state_label: string;
+  attempts: number;
+  heartbeat_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  next_retry_at: string | null;
+  error: string | null;
+};
+
+export type AuditEvent = {
+  id: string;
+  created_at: string;
+  actor: string | null;
+  actor_type: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  correlation_id: string;
+};
+
+export type DashboardMetrics = {
+  unique_initial_recipients: number;
+  initial_messages_sent: number;
+  reminders_sent: number;
+  automatic_replies_sent: number;
+  scheduled_contacts_sent: number;
+  unique_human_responders: number;
+  response_rate: number | null;
+  positive_response_rate: number | null;
+  contacts_created: number;
+  bounce_rate: number | null;
+  unsubscribe_rate: number | null;
+  automatically_resolved: number;
+  human_required: number;
+  open_human_tasks: number;
+  median_first_response_seconds: number | null;
+  median_human_intervention_seconds: number | null;
+  responses_after_initial: number;
+  responses_after_reminder: number;
+};
+
+export type DashboardSummary = {
+  metrics: DashboardMetrics;
+  campaigns: DashboardCampaign[];
+  summary: {
+    campaigns: number;
+    catalogs: number;
+    categories: number;
+    zones: number;
+    responses: number;
+  };
+  attention: {
+    open_human_tasks: number;
+    paused_campaigns: number;
+  };
+  safety: {
+    send_mode: string;
+    send_kill_switch: boolean;
+    auto_reply_kill_switch: boolean;
+    relationship_kill_switch: boolean;
+  };
+  admin?: {
+    profile_configured: boolean;
+    gmail_connected: boolean;
+    problem_jobs: number;
+    prospects: number;
+    sent_messages: number;
+  };
+};
+
+type ApiEnvelope<T> = { data: T };
+type ApiPage<T> = ApiEnvelope<T> & {
+  meta: { page: number; page_size: number; total: number };
+};
+
+let csrfToken: string | null = null;
+
+export type VersionedResource<T> = {
+  data: T;
+  etag: string | null;
+};
+
+function correlationId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function responseError(response: Response): Promise<Problem> {
+  try {
+    return (await response.json()) as Problem;
+  } catch {
+    return {
+      status: response.status,
+      code: "invalid_response",
+      detail: "No fue posible interpretar la respuesta del servidor.",
+    };
+  }
+}
+
+export async function getCsrfToken(): Promise<string> {
+  const response = await fetch("/api/v1/auth/csrf/", {
+    credentials: "include",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw await responseError(response);
+  }
+  const body = (await response.json()) as ApiEnvelope<{ csrf_token: string }>;
+  csrfToken = body.data.csrf_token;
+  return csrfToken;
+}
+
+async function requestEnvelope<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<ApiEnvelope<T> & Partial<Pick<ApiPage<T>, "meta">>> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  headers.set("X-Correlation-ID", correlationId());
+  if (init.body && !(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers.set("X-CSRFToken", csrfToken ?? (await getCsrfToken()));
+  }
+  const response = await fetch(path, {
+    ...init,
+    method,
+    headers,
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const problem = await responseError(response);
+    if (response.status === 401) {
+      csrfToken = null;
+    }
+    throw problem;
+  }
+  if (response.status === 204) {
+    return { data: undefined as T };
+  }
+  return (await response.json()) as ApiEnvelope<T> & Partial<Pick<ApiPage<T>, "meta">>;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await requestEnvelope<T>(path, init)).data;
+}
+
+async function requestVersioned<T>(path: string, init: RequestInit = {}): Promise<VersionedResource<T>> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  headers.set("X-Correlation-ID", correlationId());
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers.set("X-CSRFToken", csrfToken ?? (await getCsrfToken()));
+  }
+  const response = await fetch(path, {
+    ...init,
+    method,
+    headers,
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) throw await responseError(response);
+  const body = (await response.json()) as ApiEnvelope<T>;
+  const etag = response.headers.get("ETag");
+  return { data: body.data, etag };
+}
+
+export function getSession(): Promise<UserSession> {
+  return request<UserSession>("/api/v1/auth/session/");
+}
+
+export function getDashboardSummary(campaignId?: string): Promise<DashboardSummary> {
+  const query = campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : "";
+  return request<DashboardSummary>(`/api/v1/dashboard/summary/${query}`);
+}
+
+export function getCampaigns(): Promise<ApiPage<DashboardCampaign[]>> {
+  return requestEnvelope<DashboardCampaign[]>("/api/v1/campaigns/") as Promise<
+    ApiPage<DashboardCampaign[]>
+  >;
+}
+
+export function getCampaign(id: string): Promise<CampaignDetail> {
+  return request<CampaignDetail>(`/api/v1/campaigns/${encodeURIComponent(id)}/`);
+}
+
+export type CampaignAction =
+  | "start-discovery"
+  | "approve"
+  | "start-approved"
+  | "pause"
+  | "resume"
+  | "cancel";
+
+export function runCampaignAction(
+  id: string,
+  action: CampaignAction,
+  reason = "",
+): Promise<CampaignDetail> {
+  const idempotencyKey =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return request<CampaignDetail>(
+    `/api/v1/campaigns/${encodeURIComponent(id)}/actions/${action}/`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+}
+
+export function getInboundMessages(): Promise<ApiPage<InboundMessage[]>> {
+  return requestEnvelope<InboundMessage[]>("/api/v1/inbound-messages/") as Promise<
+    ApiPage<InboundMessage[]>
+  >;
+}
+
+export function getInboundThread(id: string): Promise<InboundThread> {
+  return request<InboundThread>(`/api/v1/inbound-messages/${encodeURIComponent(id)}/thread/`);
+}
+
+export function sendManualReply(
+  inboundId: string,
+  bodyText: string,
+  idempotencyKey: string,
+): Promise<{ created: boolean; message: OutboundMessage }> {
+  return request<{ created: boolean; message: OutboundMessage }>(
+    `/api/v1/inbound-messages/${encodeURIComponent(inboundId)}/manual-reply/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body_text: bodyText, idempotency_key: idempotencyKey }),
+    },
+  );
+}
+
+export type OutboundFilters = {
+  state?: string;
+  campaign?: string;
+  date_from?: string;
+  date_to?: string;
+};
+
+export function getOutboundMessages(filters: OutboundFilters = {}): Promise<ApiPage<OutboundMessage[]>> {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return requestEnvelope<OutboundMessage[]>(`/api/v1/outbound-messages/${suffix}`) as Promise<
+    ApiPage<OutboundMessage[]>
+  >;
+}
+
+export function getOutboundMessage(id: string): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/`);
+}
+
+export function updateOutboundDraft(id: string, subject: string, bodyText: string): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/draft/`, {
+    method: "PATCH",
+    body: JSON.stringify({ subject, body_text: bodyText }),
+  });
+}
+
+export function authorizeOutboundMessage(id: string): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/outbound-messages/${encodeURIComponent(id)}/authorize/`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: "{}",
+  });
+}
+
+export function getContacts(): Promise<ApiPage<Contact[]>> {
+  return requestEnvelope<Contact[]>("/api/v1/contacts/") as Promise<ApiPage<Contact[]>>;
+}
+
+export function getContact(id: string): Promise<ContactDetail> {
+  return request<ContactDetail>(`/api/v1/contacts/${encodeURIComponent(id)}/`);
+}
+
+export function createContact(input: {
+  email: string;
+  organization_name?: string;
+  contact_name?: string;
+}): Promise<Contact> {
+  return request<Contact>("/api/v1/contacts/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateContact(id: string, name: string): Promise<Contact> {
+  return request<Contact>(`/api/v1/contacts/${encodeURIComponent(id)}/`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function addContactEmail(
+  contactId: string,
+  email: string,
+  label: string,
+  makePreferred: boolean,
+): Promise<ContactEmail> {
+  return request<ContactEmail>(`/api/v1/contacts/${encodeURIComponent(contactId)}/emails/`, {
+    method: "POST",
+    body: JSON.stringify({ email, label, make_preferred: makePreferred }),
+  });
+}
+
+export function setPreferredEmail(contactId: string, emailId: string): Promise<Contact> {
+  return request<Contact>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/emails/${encodeURIComponent(emailId)}/preferred/`,
+    { method: "PATCH", body: "{}" },
+  );
+}
+
+export function validateContactEmail(contactId: string, emailId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/emails/${encodeURIComponent(emailId)}/validate/`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export function createContactRestriction(
+  contactId: string,
+  scope: "CONTACT" | "EMAIL",
+  reason: string,
+  emailAddressId?: string,
+): Promise<ContactRestriction> {
+  return request<ContactRestriction>(`/api/v1/contacts/${encodeURIComponent(contactId)}/restrictions/`, {
+    method: "POST",
+    body: JSON.stringify({ scope, reason, email_address_id: emailAddressId }),
+  });
+}
+
+export function revokeContactRestriction(
+  contactId: string,
+  restrictionId: string,
+  reason: string,
+): Promise<ContactRestriction> {
+  return request<ContactRestriction>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/restrictions/${encodeURIComponent(restrictionId)}/revoke/`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
+export function getCommunicationPlans(contactId: string): Promise<CommunicationPlan[]> {
+  return request<CommunicationPlan[]>(`/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/`);
+}
+
+export function createCommunicationPlan(
+  contactId: string,
+  input: { preferred_email_id: string; purpose: string; goal_text?: string; cadence_days: number; mode: string; enabled: boolean },
+): Promise<CommunicationPlan> {
+  return request<CommunicationPlan>(`/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function changeCommunicationPlan(
+  contactId: string,
+  planId: string,
+  action: "pause" | "disable" | "active" | "snooze",
+  body: Record<string, unknown> = {},
+): Promise<CommunicationPlan> {
+  return request<CommunicationPlan>(
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/${encodeURIComponent(planId)}/${action}/`,
+    { method: "POST", body: JSON.stringify(action === "active" || action === "pause" || action === "disable" ? { state: action === "active" ? "ACTIVE" : action === "pause" ? "PAUSED" : "DISABLED" } : body) },
+  );
+}
+
+export function getCatalogs(): Promise<Catalog[]> {
+  return request<Catalog[]>("/api/v1/catalogs/");
+}
+
+export function uploadCatalog(name: string, file: File): Promise<Catalog> {
+  const formData = new FormData();
+  formData.set("name", name);
+  formData.set("file", file);
+  return request<Catalog>("/api/v1/catalogs/", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function getBusinessProfile(): Promise<BusinessProfile | null> {
+  return request<BusinessProfile | null>("/api/v1/workspace/profile/");
+}
+
+export function getBusinessProfileVersioned(): Promise<VersionedResource<BusinessProfile | null>> {
+  return requestVersioned<BusinessProfile | null>("/api/v1/workspace/profile/");
+}
+
+export function updateBusinessProfile(
+  values: Partial<BusinessProfile>,
+  etag?: string,
+): Promise<BusinessProfile> {
+  return request<BusinessProfile>("/api/v1/workspace/profile/", {
+    method: "PATCH",
+    headers: etag ? { "If-Match": etag } : undefined,
+    body: JSON.stringify(values),
+  });
+}
+
+export function getUsers(): Promise<ManagedUser[]> {
+  return request<ManagedUser[]>("/api/v1/users/");
+}
+
+export function createUser(input: {
+  username: string;
+  email: string;
+  role: "ADMIN" | "VENDEDOR";
+}): Promise<CreatedUser> {
+  return request<CreatedUser>("/api/v1/users/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateUserRole(id: number, role: "ADMIN" | "VENDEDOR"): Promise<ManagedUser> {
+  return request<ManagedUser>(`/api/v1/users/${id}/role/`, {
+    method: "PATCH",
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function updateUserStatus(id: number, isActive: boolean): Promise<ManagedUser> {
+  return request<ManagedUser>(`/api/v1/users/${id}/status/`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return request<IntegrationStatus>("/api/v1/integrations/status/");
+}
+
+export function getGmailConnection(): Promise<GmailConnection> {
+  return request<GmailConnection>("/api/v1/integrations/gmail/connection/");
+}
+
+export function startGmailOAuth(): Promise<{ authorization_url: string }> {
+  return request<{ authorization_url: string }>("/api/v1/integrations/gmail/oauth/start/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function testGmailConnection(): Promise<{ status: string; email: string }> {
+  return request<{ status: string; email: string }>("/api/v1/integrations/gmail/test/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function disconnectGmail(): Promise<GmailConnection> {
+  return request<GmailConnection>("/api/v1/integrations/gmail/disconnect/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function getMessageTemplates(): Promise<MessageTemplate[]> {
+  return request<MessageTemplate[]>("/api/v1/message-template-revisions/");
+}
+
+export function createMessageTemplate(input: {
+  kind: MessageTemplate["kind"];
+  subject: string;
+  body: string;
+}): Promise<MessageTemplate> {
+  return request<MessageTemplate>("/api/v1/message-template-revisions/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getPromptConfiguration(): Promise<PromptConfiguration> {
+  return request<PromptConfiguration>("/api/v1/prompts/");
+}
+
+export function updatePromptConfiguration(emailDraftingPrompt: string): Promise<PromptConfiguration> {
+  return request<PromptConfiguration>("/api/v1/prompts/", {
+    method: "PATCH",
+    body: JSON.stringify({ email_drafting_prompt: emailDraftingPrompt }),
+  });
+}
+
+export function updateAutomaticReplyPrompt(prompt: string): Promise<{ automatic_reply_prompt: string }> {
+  return request<{ automatic_reply_prompt: string }>("/api/v1/automation/writing-instructions/", {
+    method: "PATCH",
+    body: JSON.stringify({ automatic_reply_prompt: prompt }),
+  });
+}
+
+export function getAutomationConfiguration(): Promise<AutomationConfiguration> {
+  return request<AutomationConfiguration>("/api/v1/automation/configuration/");
+}
+
+export function getKnowledgeFacts(): Promise<KnowledgeFactRevision[]> {
+  return request<KnowledgeFactRevision[]>("/api/v1/knowledge/facts/");
+}
+
+export function createKnowledgeFact(input: {
+  title: string;
+  category?: string;
+  text: string;
+  source_notes?: string;
+}): Promise<KnowledgeFactRevision> {
+  return request<KnowledgeFactRevision>("/api/v1/knowledge/facts/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getKnowledgeContexts(): Promise<KnowledgeContextRevision[]> {
+  return request<KnowledgeContextRevision[]>("/api/v1/knowledge/global-context-revisions/");
+}
+
+export function createKnowledgeContext(contextText: string): Promise<KnowledgeContextRevision> {
+  return request<KnowledgeContextRevision>("/api/v1/knowledge/global-context-revisions/", {
+    method: "POST",
+    body: JSON.stringify({ context_text: contextText }),
+  });
+}
+
+export function previewKnowledge(query: string): Promise<{
+  status: string;
+  matches: Array<{ revision_id: string; title: string; score: number; selected: boolean; may_be_irrelevant: boolean }>;
+}> {
+  return request(`/api/v1/knowledge/search-preview/`, {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  });
+}
+
+export function getAttention(): Promise<AttentionTask[]> {
+  return request<AttentionTask[]>("/api/v1/attention/");
+}
+
+export function getOvertureStatus(): Promise<OvertureStatus> {
+  return request<OvertureStatus>("/api/v1/overture/status/");
+}
+
+export function getBackgroundJobs(): Promise<ApiPage<BackgroundJob[]>> {
+  return requestEnvelope<BackgroundJob[]>("/api/v1/background-jobs/") as Promise<
+    ApiPage<BackgroundJob[]>
+  >;
+}
+
+export function retryBackgroundJob(
+  id: string,
+  reason: string,
+): Promise<OutboundMessage> {
+  return request<OutboundMessage>(`/api/v1/background-jobs/${encodeURIComponent(id)}/retry/`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function getAuditEvents(): Promise<ApiPage<AuditEvent[]>> {
+  return requestEnvelope<AuditEvent[]>("/api/v1/audit-events/") as Promise<
+    ApiPage<AuditEvent[]>
+  >;
+}
+
+export function syncOverture(releaseId: string, provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
+  return request<{ status: string; celery_task_id: string; province_code: string }>("/api/v1/overture/sync/", {
+    method: "POST",
+    body: JSON.stringify({ release_id: releaseId, province_code: provinceCode }),
+  });
+}
+
+export function resolveHumanTask(id: string, action: "resolve" | "dismiss", note: string): Promise<{ id: string; status: string }> {
+  return request<{ id: string; status: string }>(`/api/v1/human-tasks/${encodeURIComponent(id)}/${action}/`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+}
+
+export function updateAutomationMode(
+  mode: "OFF" | "SHADOW",
+): Promise<AutomationConfiguration> {
+  return request<AutomationConfiguration>("/api/v1/automation/configuration/", {
+    method: "PATCH",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function setAutomationLive(action: "enable-live" | "disable-live"): Promise<AutomationConfiguration> {
+  return request<AutomationConfiguration>(`/api/v1/automation/actions/${action}/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function reauthenticate(password: string): Promise<{ reauthentication_active: boolean }> {
+  return request<{ reauthentication_active: boolean }>("/api/v1/auth/reauthenticate/", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function getSearchCategories(): Promise<SearchCategory[]> {
+  return request<SearchCategory[]>("/api/v1/search-categories/");
+}
+
+export function createSearchCategory(name: string, sortOrder = 0): Promise<SearchCategory> {
+  return request<SearchCategory>("/api/v1/search-categories/", {
+    method: "POST",
+    body: JSON.stringify({ name, sort_order: sortOrder }),
+  });
+}
+
+export function updateSearchCategoryRules(
+  id: string,
+  rules: Array<{ taxonomy_code?: string; name_terms: string[] }>,
+): Promise<SearchCategory> {
+  return request<SearchCategory>(`/api/v1/search-categories/${encodeURIComponent(id)}/rules/`, {
+    method: "PATCH",
+    body: JSON.stringify({ rules }),
+  });
+}
+
+export function getSearchZones(level?: string): Promise<SearchZone[]> {
+  const query = level ? `?level=${encodeURIComponent(level)}` : "";
+  return request<SearchZone[]>(`/api/v1/search-zones/${query}`);
+}
+
+export function getSearchZoneGeometry(id: string): Promise<SearchZoneGeometry> {
+  return request<SearchZoneGeometry>(`/api/v1/search-zones/${encodeURIComponent(id)}/geometry/`);
+}
+
+export function createCampaign(input: Record<string, unknown>): Promise<CampaignDetail> {
+  return request<CampaignDetail>("/api/v1/campaigns/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function login(username: string, password: string): Promise<UserSession> {
+  return request<UserSession>("/api/v1/auth/login/", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function activate(
+  token: string,
+  password: string,
+  passwordConfirmation: string,
+): Promise<UserSession> {
+  return request<UserSession>("/api/v1/auth/activate/", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      password,
+      password_confirmation: passwordConfirmation,
+    }),
+  });
+}
+
+export function logout(): Promise<void> {
+  return request<void>("/api/v1/auth/logout/", { method: "POST", body: "{}" });
+}
+
+export function problemMessage(problem: Problem): string {
+  return problem.detail ?? "No fue posible completar la solicitud.";
+}

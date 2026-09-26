@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Resumen · Contact Outreach{% endblock %}
+{% block breadcrumb %}Resumen{% endblock %}
+{% block page_title %}Centro de operación{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div class="page-header__copy">
+        <h1>Panel operativo</h1>
+        <p>Supervisá el proceso, resolvé alertas y prepará la próxima campaña desde un solo lugar.</p>
+    </div>
+    {% if can_administer %}<div class="page-header__actions"><a class="button" href="{% url 'campaign-create' %}"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nueva campaña</a></div>{% endif %}
+</header>
+
+{% if can_administer %}
+<section class="safety-banner{% if runtime_send_mode == 'live' %} safety-banner--live{% endif %}" aria-labelledby="safety-title">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7v5c0 5 3.8 8 9 9 5.2-1 9-4 9-9V7l-9-4Z"/><path d="M9 12h6m-3-3v6"/></svg>
+    <div>
+        {% if runtime_send_mode == 'live' %}
+            <h2 id="safety-title">El despliegue está configurado para envío real</h2>
+            <p>{% if runtime_kill_switch %}El bloqueo general sigue activo: Gmail no puede enviar hasta desactivarlo y superar todos los controles.{% else %}El bloqueo general está inactivo. Sólo los correos autorizados según la aprobación elegida para cada campaña o conversación pueden entregarse de forma real.{% endif %}</p>
+        {% else %}
+            <h2 id="safety-title">Estás trabajando en simulación</h2>
+            <p>Los mensajes de simulación se preparan y validan sin usar Gmail. Las campañas Solo revisión también quedan aisladas del formato técnico de envío, del registro global de contactos y de la entrega.</p>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+<form method="get" class="panel filters" aria-label="Alcance de las métricas">
+    <div class="filters__grid">
+        <div class="field"><label class="field__label" for="dashboard-campaign">Campaña analizada</label><select id="dashboard-campaign" name="campaign"><option value="">Todas las campañas</option>{% for campaign in campaigns %}<option value="{{ campaign.pk }}" {% if selected_campaign == campaign.pk|stringformat:"s" %}selected{% endif %}>{{ campaign.name }}</option>{% endfor %}</select></div>
+        <div class="filters__actions"><button class="button" type="submit">Actualizar métricas</button>{% if selected_campaign %}<a class="button button--secondary" href="{% url 'dashboard' %}">Ver todas</a>{% endif %}</div>
+    </div>
+</form>
+
+<section class="metrics-grid" aria-label="Indicadores principales">
+    <article class="card metric"><p class="metric__label">Empresas contactadas</p><p class="metric__value">{{ informative_metrics.unique_initial_recipients }}</p><p class="metric__context">Cada destinatario se cuenta una sola vez</p></article>
+    <article class="card metric"><p class="metric__label">Propuestas enviadas</p><p class="metric__value">{{ informative_metrics.initial_messages_sent }}</p><p class="metric__context">Envíos iniciales confirmados por Gmail</p></article>
+    <article class="card metric"><p class="metric__label">Tasa de respuesta</p><p class="metric__value">{{ informative_metric_display.response_rate }}</p><p class="metric__context">{% if informative_metrics.response_rate == None %}Todavía no hay propuestas enviadas para calcularla{% else %}Empresas que respondieron al menos una vez{% endif %}</p></article>
+    <article class="card metric"><p class="metric__label">Respuestas positivas</p><p class="metric__value">{{ informative_metric_display.positive_response_rate }}</p><p class="metric__context">{% if informative_metrics.positive_response_rate == None %}Todavía no hay propuestas enviadas para calcularla{% else %}Respuestas clasificadas como interesadas{% endif %}</p></article>
+    <article class="card metric"><p class="metric__label">Contactos creados</p><p class="metric__value">{{ informative_metrics.contacts_created }}</p><p class="metric__context">Por respuesta, carga manual o restricción</p></article>
+    <article class="card metric"><p class="metric__label">Necesita atención</p><p class="metric__value">{{ informative_metrics.open_human_tasks }}</p><p class="metric__context">Tareas abiertas para una persona</p></article>
+</section>
+
+<section class="panel" aria-labelledby="informative-metrics-title">
+    <div class="panel__header"><div><h2 id="informative-metrics-title">Actividad y tiempos</h2><p class="muted">Todos los valores se calculan desde correos, respuestas y tareas guardadas. Varias respuestas de la misma empresa no se duplican en las tasas.</p></div></div>
+    <div class="panel__body"><div class="form-summary">
+        <div class="summary-item"><span class="summary-item__label">Personas que respondieron</span><span class="summary-item__value">{{ informative_metrics.unique_human_responders }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Recordatorios enviados</span><span class="summary-item__value">{{ informative_metrics.reminders_sent }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Respondidas automáticamente</span><span class="summary-item__value">{{ informative_metrics.automatically_resolved }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Respuestas automáticas enviadas</span><span class="summary-item__value">{{ informative_metrics.automatic_replies_sent }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Contactos programados enviados</span><span class="summary-item__value">{{ informative_metrics.scheduled_contacts_sent }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Casos que requirieron una persona</span><span class="summary-item__value">{{ informative_metrics.human_required }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Tiempo habitual hasta la primera respuesta</span><span class="summary-item__value">{{ informative_metric_display.median_first_response }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Tiempo habitual de intervención humana</span><span class="summary-item__value">{{ informative_metric_display.median_human_intervention }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Respondieron después de la propuesta inicial</span><span class="summary-item__value">{{ informative_metrics.responses_after_initial }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Respondieron después del recordatorio</span><span class="summary-item__value">{{ informative_metrics.responses_after_reminder }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Rebotes</span><span class="summary-item__value">{{ informative_metric_display.bounce_rate }}</span></div>
+        <div class="summary-item"><span class="summary-item__label">Bajas solicitadas</span><span class="summary-item__value">{{ informative_metric_display.unsubscribe_rate }}</span></div>
+    </div></div>
+</section>
+
+<section class="panel" aria-labelledby="pipeline-title">
+    <div class="panel__header"><div><h2 id="pipeline-title">Proceso de campaña</h2><p class="muted">Conteos calculados desde registros guardados; cada etapa conserva su significado operativo.</p></div></div>
+    <div class="panel__body">
+        <div class="pipeline">
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.raw }}</span><span class="pipeline__label">Registros iniciales</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.with_email }}</span><span class="pipeline__label">Con correo válido</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.qualified }}</span><span class="pipeline__label">Destinatarios listos</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.review_ready }}</span><span class="pipeline__label">Listos para revisar</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.queued }}</span><span class="pipeline__label">En cola</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.sent }}</span><span class="pipeline__label">Enviados</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.simulated }}</span><span class="pipeline__label">Simulados</span></div>
+            <div class="pipeline__stage"><span class="pipeline__number">{{ metrics.responded }}</span><span class="pipeline__label">Respondidos</span></div>
+        </div>
+        {% if metrics.raw == 0 %}<p class="muted flush-top">Todavía no hay extracción en este alcance. Creá e iniciá una campaña para comenzar el proceso.</p>{% endif %}
+    </div>
+</section>
+
+<div class="dashboard-layout">
+    <div class="section-stack">
+        <section class="panel" aria-labelledby="recent-campaigns-title">
+            <div class="panel__header"><div><h2 id="recent-campaigns-title">Campañas recientes</h2><p class="muted">Estado, modo y progreso configurado de las últimas campañas.</p></div><a href="{% url 'campaigns' %}">Ver todas</a></div>
+            {% if recent_campaigns %}
+            <div class="table-scroll table-scroll--flush"><table><thead><tr><th>Campaña</th><th>Estado</th><th>Modo</th><th data-align="right">Objetivo</th><th>Creada</th></tr></thead><tbody>{% for campaign in recent_campaigns %}<tr><td><a class="table-primary" href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a><span class="table-meta">{{ campaign.location_text }}</span></td><td><span class="badge badge--{{ campaign.state|lower }}">{{ campaign.get_state_display }}</span></td><td><span class="badge badge--{{ campaign.delivery_mode|lower }}">{{ campaign.get_delivery_mode_display }}</span></td><td data-align="right">{{ campaign.objective }}</td><td>{{ campaign.created_at|date:"d M Y" }}</td></tr>{% endfor %}</tbody></table></div>
+            {% else %}<div class="empty-state"><div class="empty-state__icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 3v4m8-4v4M4 10h16"/></svg></div><h3>No hay campañas disponibles</h3><p>{% if can_administer %}Definí una audiencia, límites seguros y una versión de catálogo. El borrador no ejecuta nada hasta que lo inicies.{% else %}Cuando una campaña deje de ser borrador, vas a poder verla acá.{% endif %}</p>{% if can_administer %}<a class="button" href="{% url 'campaign-create' %}">Crear primera campaña</a>{% endif %}</div>{% endif %}
+        </section>
+
+        {% if attention_campaigns or attention_task_rows or problem_jobs %}
+        <section class="panel" aria-labelledby="attention-title">
+            <div class="panel__header"><div><h2 id="attention-title">Necesita atención</h2><p class="muted">Revisiones, pausas, errores finales o reintentos diferidos que requieren seguimiento.</p></div></div>
+            <div class="panel__body">
+                {% for campaign in attention_campaigns %}<div class="checklist__item"><span class="checklist__marker">!</span><div class="checklist__content"><strong><a href="{% url 'campaign-detail' campaign.pk %}">{{ campaign.name }}</a> · {{ campaign.get_state_display }}</strong><small>{{ campaign.status_reason|default:"Revisá el detalle y las precondiciones antes de continuar." }}</small></div></div>{% endfor %}
+                {% for row in attention_task_rows %}<div class="checklist__item"><span class="checklist__marker">!</span><div class="checklist__content"><strong>{% if row.task.inbound_id %}<a href="{% url 'response-thread' row.task.inbound_id %}">{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</a>{% else %}<a href="{% url 'contact-detail' row.task.contact_id %}#attention">{{ row.task.contact.name|default:row.task.contact.organization.name|default:"Contacto sin nombre" }}</a>{% endif %} · {{ row.review_reason.title }}</strong><small>{{ row.review_reason.summary }}</small></div></div>{% endfor %}
+                {% for job in problem_jobs %}<div class="checklist__item"><span class="checklist__marker">!</span><div class="checklist__content"><strong><a href="{% url 'jobs' %}?q={{ job.pk }}">{{ job.task_name|etiqueta_es }}</a> · {{ job.get_state_display }}</strong><small>{{ job.error|default:"El sistema conserva el próximo reintento y la entidad relacionada." }}</small></div></div>{% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="panel" aria-labelledby="responses-title">
+            <div class="panel__header"><div><h2 id="responses-title">Conversaciones recientes</h2><p class="muted">{{ summary.responses }} mensajes recibidos y vinculados a correos propios o contactos existentes.</p></div><a href="{% url 'contacts' %}">Abrir Contactos</a></div>
+            {% if recent_responses %}<div class="table-scroll table-scroll--flush"><table><thead><tr><th>Contacto</th><th>Campaña de origen</th><th>Resultado</th><th>Fecha</th></tr></thead><tbody>{% for response in recent_responses %}{% with root=response.related_outbound %}<tr><td>{% if response.contact_id %}<a class="table-primary" href="{% url 'contact-detail' response.contact_id %}">{% if response.contact %}{{ response.contact }}{% elif response.organization %}{{ response.organization.name|default:"Organización sin nombre" }}{% else %}Contacto{% endif %}</a>{% else %}<a class="table-primary" href="{% url 'response-thread' response.pk %}">{% if root and root.organization %}{{ root.organization }}{% elif root and root.prospect %}{{ root.prospect.name }}{% else %}Mensaje recibido{% endif %}</a>{% endif %}<span class="table-meta">{{ response.sender }}</span></td><td>{% if root and root.campaign %}{{ root.campaign.name }}{% else %}Sin campaña{% endif %}</td><td><span class="badge badge--{{ response.classification|lower }}">{{ response.get_classification_display }}</span></td><td>{{ response.external_at|date:"d M · H:i" }}</td></tr>{% endwith %}{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>Sin conversaciones todavía</h3><p>Cuando Gmail sincronice una respuesta vinculada, aparecerá dentro de Contactos.</p>{% if can_administer %}<a class="button button--secondary" href="{% url 'gmail-settings' %}">Revisar Gmail</a>{% endif %}</div>{% endif %}
+        </section>
+    </div>
+
+    {% if can_administer %}<aside class="section-stack" aria-label="Preparación y sistema">
+        <section class="panel">
+            <div class="panel__header"><div><h2>Prepará tu primera campaña</h2><p class="muted">Lista de control basada en la configuración guardada.</p></div></div>
+            <div class="panel__body"><ol class="checklist">{% for label, done, route, description in checklist %}<li class="checklist__item{% if done %} checklist__item--done{% endif %}"><span class="checklist__marker" aria-hidden="true">{% if done %}✓{% else %}{{ forloop.counter }}{% endif %}</span><div class="checklist__content"><strong>{% if done %}{{ label }}{% else %}<a href="{% url route %}">{{ label }}</a>{% endif %}</strong><small>{{ description }}</small></div></li>{% endfor %}</ol></div>
+        </section>
+        <section class="panel">
+            <div class="panel__header"><div><h2>Respuesta automática</h2><p class="muted">{% if automation_configuration.mode == 'LIVE' %}El sistema puede responder solo dentro de las reglas permitidas.{% elif automation_configuration.mode == 'OFF' %}El sistema no genera ni sugiere respuestas.{% else %}El sistema sólo registra qué habría hecho; nunca envía nada todavía.{% endif %}</p></div><a href="{% url 'automation-settings' %}">Preferencias de IA</a></div>
+            <div class="panel__body"><span class="badge badge--{{ automation_configuration.mode|default:'shadow'|lower }}">{{ automation_configuration.get_mode_display|default:"Modo observación" }}</span></div>
+        </section>
+        <section class="panel">
+            <div class="panel__header"><div><h2>Proveedores</h2><p class="muted">Adaptadores resueltos desde la configuración segura del propietario.</p></div></div>
+            <div class="panel__body"><ul class="checklist">{% for label, provider in providers.items %}<li class="checklist__item checklist__item--done"><span class="checklist__marker" aria-hidden="true">✓</span><div class="checklist__content"><strong>{{ label }}</strong><small>{{ provider|etiqueta_es }}</small></div></li>{% endfor %}<li class="checklist__item{% if gmail_ready %} checklist__item--done{% endif %}"><span class="checklist__marker" aria-hidden="true">{% if gmail_ready %}✓{% else %}!{% endif %}</span><div class="checklist__content"><strong>Cuenta Gmail</strong><small>{% if gmail_ready %}Conectada y probada{% else %}Pendiente de conexión o prueba{% endif %}</small></div></li></ul></div>
+        </section>
+        <section class="panel">
+            <div class="panel__header"><div><h2>Actividad de procesos en segundo plano</h2><p class="muted">Tareas guardadas por estado; no es un contador temporal.</p></div><a href="{% url 'jobs' %}">Ver tareas</a></div>
+            <div class="panel__body">{% if jobs %}<div class="actions">{% for state, total in jobs.items %}<span class="badge badge--{{ state|lower }}">{{ state|etiqueta_es }} · {{ total }}</span>{% endfor %}</div>{% else %}<p class="muted flush">Sin tareas registradas todavía.</p>{% endif %}</div>
+        </section>
+        <section class="panel">
+            <div class="panel__header"><div><h2>Actividad reciente</h2><p class="muted">Eventos auditados y redactados.</p></div></div>
+            <div class="panel__body">{% for event in recent_activity %}<div class="checklist__item"><span class="checklist__marker" aria-hidden="true">•</span><div class="checklist__content"><strong>{{ event.action|etiqueta_es }}</strong><small>{{ event.entity_type|etiqueta_es }} · {{ event.created_at|date:"d M · H:i" }}</small></div></div>{% empty %}<p class="muted flush">Todavía no hay actividad auditada.</p>{% endfor %}</div>
+            <div class="panel__footer"><a href="{% url 'audit-log' %}">Ver auditoría completa</a></div>
+        </section>
+    </aside>{% endif %}
+</div>
+{% endblock %}

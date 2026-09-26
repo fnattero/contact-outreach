@@ -1,6 +1,9 @@
-.PHONY: build up down logs lint typecheck test test-e2e check migrate owner demo smoke-worker backup restore
+.PHONY: build up down logs backend-lint backend-typecheck backend-test backend-check frontend-install frontend-check test-e2e security-check check migrate owner demo smoke-worker backup restore
 
-COMPOSE := docker compose
+COMPOSE := docker compose --project-directory . --file infra/docker-compose.yml
+BACKEND_DIR := backend
+FRONTEND_DIR := frontend
+PNPM ?= pnpm
 
 build:
 	$(COMPOSE) build
@@ -12,39 +15,54 @@ down:
 	$(COMPOSE) down
 
 logs:
-	$(COMPOSE) logs --follow web worker beat
+	$(COMPOSE) logs --follow frontend backend postgres redis minio
 
-lint:
-	ruff check .
-	ruff format --check .
+backend-lint:
+	cd $(BACKEND_DIR) && ruff check .
+	cd $(BACKEND_DIR) && ruff format --check .
 
-typecheck:
-	mypy src
+backend-typecheck:
+	cd $(BACKEND_DIR) && mypy src
 
-test:
-	pytest
+backend-test:
+	cd $(BACKEND_DIR) && pytest
+
+backend-check: backend-lint backend-typecheck backend-test
+	cd $(BACKEND_DIR) && python src/manage.py makemigrations --check --dry-run
+	cd $(BACKEND_DIR) && python src/manage.py check
+
+frontend-install:
+	cd $(FRONTEND_DIR) && $(PNPM) install --frozen-lockfile
+
+frontend-check:
+	cd $(FRONTEND_DIR) && $(PNPM) lint
+	cd $(FRONTEND_DIR) && $(PNPM) typecheck
+	cd $(FRONTEND_DIR) && $(PNPM) test
+	cd $(FRONTEND_DIR) && $(PNPM) build
 
 test-e2e:
-	pytest -m e2e --no-cov
+	cd $(BACKEND_DIR) && pytest -m e2e --no-cov
 
-check: lint typecheck test
-	python src/manage.py makemigrations --check --dry-run
-	python src/manage.py check
+security-check:
+	cd $(BACKEND_DIR) && pip-audit
+	cd $(FRONTEND_DIR) && $(PNPM) audit --prod
+
+check: backend-check frontend-check
 
 migrate:
-	$(COMPOSE) exec web python src/manage.py migrate_safe
+	$(COMPOSE) exec backend python src/manage.py migrate_safe
 
 owner:
-	$(COMPOSE) exec web python src/manage.py bootstrap_owner
+	$(COMPOSE) exec backend python src/manage.py bootstrap_owner
 
 demo:
-	$(COMPOSE) exec -e ALLOW_DEMO_DATA=true web python src/manage.py load_demo_data
+	$(COMPOSE) exec -e ALLOW_DEMO_DATA=true backend python src/manage.py load_demo_data
 
 smoke-worker:
-	$(COMPOSE) exec web python src/manage.py check_worker
+	$(COMPOSE) exec backend python src/manage.py check_worker
 
 backup:
-	./scripts/backup.sh $(BACKUP_ROOT)
+	./backend/scripts/backup.sh $(BACKUP_ROOT)
 
 restore:
-	./scripts/restore.sh --confirm $(BACKUP)
+	./backend/scripts/restore.sh --confirm $(BACKUP)

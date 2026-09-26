@@ -1,0 +1,86 @@
+{% with data=prospect.provider_data campaign_snapshot=prospect.campaign.overture_snapshot %}
+{% with dataset=data.snapshot zone=data.zone rule=data.matched_rule provenance=data.provenance website_snapshot=prospect.web_snapshots.first %}
+{% if campaign_snapshot or dataset or data.overture_id %}
+<div class="provenance">
+    <p>
+        <strong>Datos fijados:</strong>
+        {% if campaign_snapshot %}
+            Overture {{ campaign_snapshot.release_id }} · copia local <code>{{ campaign_snapshot.pk }}</code>
+        {% elif dataset %}
+            Overture {{ dataset.release_id|default:"versión no informada" }} · copia local <code>{{ dataset.id|default:"—" }}</code>
+        {% else %}—{% endif %}
+    </p>
+    {% if dataset and campaign_snapshot and dataset.id != campaign_snapshot.pk|stringformat:"s" %}
+        <p class="error-text"><strong>Advertencia:</strong> la procedencia del registro indica una copia local distinta de la fijada por la campaña.</p>
+    {% endif %}
+    {% if dataset %}
+        <p class="muted"><span class="help-term" data-tooltip="Versión de la estructura que define qué campos contiene cada registro.">Estructura</span> {{ dataset.schema_version|default:"—" }} · taxonomía {{ dataset.taxonomy_version|default:"—" }} · importador {{ dataset.importer_version|default:"—" }}</p>
+    {% endif %}
+    <p><strong><span class="help-term" data-tooltip="Identificador global y estable que Overture asigna a cada lugar para reconocerlo entre actualizaciones.">Identificador GERS:</span></strong> <code>{{ data.overture_id|default:"No conservado en este registro anterior" }}</code></p>
+    {% if data.confidence %}<p><strong><span class="help-term" data-tooltip="Valor entre 0 y 1 con el que Overture estima la probabilidad de que el lugar exista; no mide si sus datos de contacto están completos.">Confianza de existencia:</span></strong> {{ data.confidence }}</p>{% endif %}
+
+    <h3>Regla coincidente</h3>
+    {% if rule %}
+        <p>
+            {% if rule.taxonomy_code %}<span class="help-term" data-tooltip="Código estandarizado que clasifica el tipo de actividad del negocio.">Taxonomía</span> <code>{{ rule.taxonomy_code }}</code>{% endif %}
+            {% if rule.taxonomy_code and rule.name_terms %} · {% endif %}
+            {% if rule.name_terms %}Términos: {% for term in rule.name_terms %}<code>{{ term }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
+            {% if data.matched_rule_index != None %} · regla {{ data.matched_rule_index }}{% endif %}
+            {% if data.match_quality != None %} · calidad {{ data.match_quality }}{% endif %}
+        </p>
+    {% else %}<p class="muted">Este registro no conserva una regla estructurada.</p>{% endif %}
+
+    <h3>Origen de contacto</h3>
+    {% if prospect.website %}<p><strong>Sitio web publicado:</strong> <code>{{ prospect.website }}</code></p>{% endif %}
+    {% if website_snapshot %}
+        <p><strong>Lectura web:</strong> {{ website_snapshot.get_status_display }}{% if website_snapshot.final_url %} · <code>{{ website_snapshot.final_url }}</code>{% endif %}</p>
+        <p class="muted"><span class="help-term" data-tooltip="Huella digital que permite comprobar si el contenido utilizado cambió.">Huella del contenido:</span> <code>{{ website_snapshot.content_hash }}</code></p>
+    {% endif %}
+    {% if email %}
+        <p><strong>Correo seleccionado:</strong> {{ email.normalized_email }} ·
+            {% if email.source == "overture" %}Overture Places
+            {% elif email.source == "website_mailto" %}sitio web, enlace directo de correo
+            {% elif email.source == "website_visible_text" %}sitio web, texto visible
+            {% else %}{{ email.source|etiqueta_es }}{% endif %}
+        </p>
+        {% if email.source_url %}<p><strong>Página de origen:</strong> <code>{{ email.source_url }}</code></p>{% endif %}
+        {% if email.source_content_hash %}<p class="muted"><span class="help-term" data-tooltip="Huella digital del contenido exacto donde se encontró la dirección.">Huella del origen:</span> <code>{{ email.source_content_hash }}</code></p>{% endif %}
+    {% else %}
+        {% for candidate_email in prospect.emails.all %}
+            {% if candidate_email.is_primary %}
+                <p><strong>Correo seleccionado:</strong> {{ candidate_email.normalized_email }} ·
+                    {% if candidate_email.source == "overture" %}Overture Places
+                    {% elif candidate_email.source == "website_mailto" %}sitio web, enlace directo de correo
+                    {% elif candidate_email.source == "website_visible_text" %}sitio web, texto visible
+                    {% else %}{{ candidate_email.source|etiqueta_es }}{% endif %}
+                </p>
+                {% if candidate_email.source_url %}<p><strong>Página de origen:</strong> <code>{{ candidate_email.source_url }}</code></p>{% endif %}
+                {% if candidate_email.source_content_hash %}<p class="muted"><span class="help-term" data-tooltip="Huella digital del contenido exacto donde se encontró la dirección.">Huella del origen:</span> <code>{{ candidate_email.source_content_hash }}</code></p>{% endif %}
+            {% endif %}
+        {% empty %}<p class="muted">No se seleccionó un correo.</p>{% endfor %}
+    {% endif %}
+
+    {% if provenance.field_provenance %}
+        <h3>Procedencia por campo</h3>
+        <div class="table-scroll"><table>
+            <thead><tr><th>Campo Overture</th><th>Fuente</th></tr></thead>
+            <tbody>{% for field, sources in provenance.field_provenance.items %}<tr><td>{{ field|etiqueta_es }}</td><td>{{ sources|truncatechars:700 }}</td></tr>{% endfor %}</tbody>
+        </table></div>
+    {% endif %}
+
+    {% if dataset.attribution or zone.attribution or provenance.source_licenses or dataset.source_licenses %}
+        <h3>Atribución y licencias</h3>
+        {% if dataset.attribution %}<p>{{ dataset.attribution }}</p>{% endif %}
+        {% if zone.attribution and zone.attribution != dataset.attribution %}<p>{{ zone.attribution }}</p>{% endif %}
+        {% if provenance.source_licenses %}
+            <ul>{% for license in provenance.source_licenses %}<li>{{ license }}</li>{% endfor %}</ul>
+        {% elif dataset.source_licenses %}
+            <ul>{% for license in dataset.source_licenses %}<li>{{ license }}</li>{% endfor %}</ul>
+        {% endif %}
+    {% endif %}
+</div>
+{% else %}
+<p class="muted">Registro {{ prospect.campaign.extractor_provider|default:"legado" }}; no contiene procedencia Overture.</p>
+{% endif %}
+{% endwith %}
+{% endwith %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Integraciones · Contact Outreach{% endblock %}
+{% block breadcrumb %}Configuración / Integraciones{% endblock %}
+{% block page_title %}Integraciones{% endblock %}
+{% block content %}
+<header class="page-header"><div class="page-header__copy"><h1>Integraciones</h1><p>Configurá Overture Maps Places, lectura web, inteligencia artificial y Gmail. Los secretos se reciben únicamente al guardar y son de <span class="help-term" data-tooltip="Se pueden reemplazar, pero el sistema nunca vuelve a mostrar su valor guardado.">sólo escritura</span>.</p></div><div class="page-header__actions"><a class="button button--secondary" href="{% url 'overture-datasets' %}">Datos de búsqueda</a><a class="button button--secondary" href="{% url 'gmail-settings' %}">Estado Gmail</a></div></header>
+<div class="alert alert--warning"><div><strong>Configuración de seguridad externa</strong><br>La clave de cifrado, el secreto de Django, la base de datos, Redis, los dominios y certificados seguros, el modo de envío y el bloqueo general nunca se editan desde este panel.</div></div>
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+
+<form method="post" class="section-stack integration-form" autocomplete="off" novalidate>
+    {% csrf_token %}
+    <section class="panel">
+        <div class="panel__header"><div><h2>Overture Maps Places</h2><p class="muted">Extracción local sin clave de API, dirección remota, ubicación de almacenamiento ni credenciales configurables.</p></div>{% if overture_snapshot %}<span class="badge badge--succeeded">Copia local lista</span>{% else %}<span class="badge badge--pending">Sin copia local</span>{% endif %}</div>
+        <div class="panel__body">
+            <div class="form-grid">{% include "includes/field.html" with field=form.extractor_provider %}{% include "includes/field.html" with field=form.overture_min_confidence %}</div>
+            {% if overture_snapshot %}<div class="form-summary"><div class="summary-item"><span class="summary-item__label">Copia local activa:</span><span class="summary-item__value">{{ overture_snapshot.release_id }}</span></div><div class="summary-item"><span class="summary-item__label">Lugares</span><span class="summary-item__value">{{ overture_snapshot.place_count }}</span></div><div class="summary-item"><span class="summary-item__label">Zonas</span><span class="summary-item__value">{{ overture_snapshot.zone_count }}</span></div></div>{% else %}<div class="alert alert--warning"><div><strong>No hay una copia local lista.</strong><br>Sincronizá una antes de iniciar una campaña Overture.</div></div>{% endif %}
+            {% if overture_latest_release %}<p class="muted flush-top">Última sincronización registrada: <code>{{ overture_latest_release }}</code></p>{% endif %}
+        </div>
+        <div class="panel__footer"><a class="button button--secondary" href="{% url 'overture-datasets' %}">Administrar datos y sincronizar</a></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Sitios web</h2><p class="muted">El lector HTTP real valida el sistema de nombres y cada redirección para impedir <span class="help-term" data-tooltip="Ataque que intenta usar el servidor para acceder a direcciones internas, privadas o reservadas.">accesos indebidos a redes internas</span>, y nunca ejecuta JavaScript.</p></div></div>
+        <div class="panel__body">{% include "includes/field.html" with field=form.website_fetcher %}</div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Proveedor de inteligencia artificial</h2><p class="muted">Esta parte redacta o decide qué hacer con una respuesta. La clave de API cifrada no vuelve a mostrarse.</p></div></div>
+        <div class="panel__body form-grid">{% include "includes/field.html" with field=form.llm_provider %}{% include "includes/field.html" with field=form.llm_model %}{% include "includes/field.html" with field=form.ollama_base_url %}{% include "includes/field.html" with field=form.openai_compatible_base_url %}{% include "includes/field.html" with field=form.llm_api_key full=True %}<div class="field field--full{% if form.remove_llm_api_key.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.remove_llm_api_key }}<span>{{ form.remove_llm_api_key.label }}</span></label>{% if form.remove_llm_api_key.errors %}<div class="field__error" role="alert">{{ form.remove_llm_api_key.errors }}</div>{% endif %}</div></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Buscador de datos para respuestas</h2><p class="muted">Antes de llamar a la IA, este buscador elige hasta tres datos aprobados parecidos a la consulta del cliente. Si no encuentra algo claro, la respuesta queda para una persona.</p></div></div>
+        <div class="panel__body form-grid">{% include "includes/field.html" with field=form.embedding_provider %}{% include "includes/field.html" with field=form.embedding_model %}{% include "includes/field.html" with field=form.embedding_dimensions %}<div class="field field--full"><span class="field__label">Conexión usada</span><p class="field__help">Si elegís OpenAI embeddings, usa la misma URL base compatible con OpenAI y la misma clave de API de la sección anterior. No envía correos; sólo calcula similitud entre textos.</p></div></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Google Gmail</h2><p class="muted"><span class="help-term" data-tooltip="Estándar que permite autorizar a la aplicación sin entregarle tu contraseña de Google.">OAuth</span> sólo es necesario para campañas en vivo. Solo revisión y simulación no requieren conexión.</p></div></div>
+        <div class="panel__body form-grid">{% include "includes/field.html" with field=form.gmail_provider %}{% include "includes/field.html" with field=form.gmail_oauth_client_id %}{% include "includes/field.html" with field=form.gmail_oauth_client_secret full=True %}<div class="field field--full{% if form.remove_gmail_oauth_client_secret.errors %} field--error{% endif %}"><label class="checkbox-line">{{ form.remove_gmail_oauth_client_secret }}<span>{{ form.remove_gmail_oauth_client_secret.label }}</span></label>{% if form.remove_gmail_oauth_client_secret.errors %}<div class="field__error" role="alert">{{ form.remove_gmail_oauth_client_secret.errors }}</div>{% endif %}</div><div class="field field--full"><span class="field__label"><span class="help-term" data-tooltip="Dirección a la que Google devuelve el navegador después de autorizar la cuenta.">Dirección de retorno para Google Cloud</span></span><code>{{ gmail_redirect_uri }}</code><p class="field__help">Registrá exactamente esta dirección en una credencial OAuth de aplicación web. Después de guardar, conectá la cuenta desde Gmail.</p></div></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel__header"><div><h2>Confirmar cambio</h2><p class="muted">Todo guardado de integraciones exige la contraseña actual y queda auditado sin secretos.</p></div></div>
+        <div class="panel__body">{% include "includes/field.html" with field=form.current_password %}</div>
+        <div class="panel__footer"><button class="button" type="submit">Guardar integraciones</button></div>
+    </section>
+</form>
+{% endblock %}

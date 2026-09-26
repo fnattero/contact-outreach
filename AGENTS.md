@@ -8,16 +8,19 @@ Do not silently change architectural decisions or product invariants. When a cha
 
 ## Project Structure & Module Organization
 
-The repository currently contains planning documents under `docs/`; application code has not been implemented. Follow `docs/IMPLEMENTATION_PLAN.md` in order. The planned Django layout places project configuration in `src/contact_outreach/`, modular apps in `src/apps/`, templates in `templates/`, and tests in `tests/` with paths mirroring source modules. Keep domain logic in services, HTTP handling in views/forms, and external SDKs behind the provider interfaces documented in `docs/INTEGRATIONS.md`.
+The Django backend is implemented under `backend/src/contact_outreach/` and `backend/src/apps/`; its tests live in `backend/tests/`. The Next.js frontend lives in `frontend/`, and local infrastructure is defined in `infra/`. Follow `docs/IMPLEMENTATION_PLAN.md` in order. Keep domain logic in backend services, HTTP handling in DRF views/serializers, and external SDKs behind the provider interfaces documented in `docs/INTEGRATIONS.md`.
 
 ## Build, Test, and Development Commands
 
-Until Phase 0 lands, only documentation and Git checks are available:
-
+- `make backend-check` runs Ruff, formatting, mypy, network-blocked pytest, migrations, and Django checks.
+- `make frontend-check` runs ESLint, strict TypeScript, Vitest, and a production Next.js build.
+- `make test-e2e` runs fake-provider end-to-end tests.
+- `make security-check` audits production Python and Node dependencies.
+- `make check` runs both backend and frontend gates.
 - `git diff --check` detects whitespace errors.
 - `rg "FR-[0-9]+|DM-[0-9]+|SEC|OPS|QA" docs/` audits requirement references.
 
-Phase 0 must add `make lint`, `make typecheck`, `make test`, `make test-e2e`, and `make check`. Use Docker Compose for Django, PostgreSQL, Redis, Celery Worker, and Beat; do not install a Node build unless a documented need appears.
+Use Docker Compose for the frontend, unified backend, PostgreSQL, Redis, and MinIO. The backend container supervises Uvicorn, both Celery worker classes, and Beat.
 
 ## Coding Style & Naming Conventions
 
@@ -28,15 +31,19 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 ## Product Invariants
 
 - Never implement direct Google Maps scraping.
-- Never send to a prospect without one selected, validated email.
-- Never send another initial message to a normalized email unless an explicit, audited `ContactOverride` permits it.
+- Never send a campaign message without one selected, validated `EmailAddress` and an eligible `CampaignEnrollment`.
+- Never contact an Organization that is already a Contact, and never send two campaign initial/reminder messages to the same normalized email on the same Buenos Aires local date.
 - Never contact a suppressed or invalidated address; unsubscribe cannot be overridden.
-- Never generate or send automatic replies to inbound messages.
+- Never authorize an automatic reply whose intent is outside `SAFE_REPLY_INTENTS` (`APPROVED_PRODUCT_INFORMATION`, `APPROVED_COMPANY_FACT`, `GROUNDED_SIMPLE_CLARIFICATION`) or, for a redirection, `EXPLICIT_PROPOSAL_REDIRECTION` with exactly one authorized candidate address.
+- Never authorize an automatic reply that is not grounded in approved, versioned `KnowledgeFactRevision` rows recorded in the decision's `context_manifest`, or whose `context_hash` no longer matches the context it was built from.
+- Never authorize an automatic reply outside qualified `LIVE` mode, the bounded context, the conversation and workspace daily limits, and the independent `AUTO_REPLY_KILL_SWITCH`. Re-validate the full policy immediately before the Gmail effect; a failed recheck is `POLICY_RECHECK_FAILED` and becomes a human task.
+- Never send an automatic reply for a contact that has an open `HumanTask`. Anything needing commercial judgment or carrying risk — meetings and dates, pricing or quotes, negotiation, complaints, legal or privacy questions, unsupported technical advice, multiple or ambiguous intents, insufficient context — always opens a `HumanTask` instead of a reply.
+- Never let the AI draft or edit outreach body copy. A campaign's initial message and reminder are fixed, human-approved text, identical for the whole audience, with no per-recipient variables. The AI may analyse persisted inbound replies and draft scheduled communications to existing Contacts; it may not write a first contact or choose who receives one.
 - Never invent prospect facts, products, people, or claims in generated copy.
-- Never call Gmail send unless effective `SEND_MODE=live`, the kill switch is disabled, and the campaign permits live delivery.
+- Never call Gmail send/reply unless effective `SEND_MODE=live`, the relevant independent kill switch is disabled, and the durable campaign/reply/contact policy permits live delivery.
 - Never log credentials, OAuth tokens, API keys, or unredacted sensitive payloads.
 - Never bypass Gmail quotas, limits, or anti-abuse controls.
-- Never make live HTTP, DNS, Gmail, Outscraper, or LLM calls from automated tests.
+- Never make live HTTP, DNS, Gmail, Overture dataset, or LLM calls from automated tests.
 
 ## Architecture Rules
 
@@ -49,21 +56,21 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 
 ## Testing Guidelines
 
-Use pytest and pytest-django. Tests must not make real HTTP, DNS, Gmail, Outscraper, or LLM calls; use fakes and block network access. Add focused regression tests for state transitions, idempotency, suppression, SSRF, MIME, quotas, and CSRF. Run `make check` before review once available.
+Use pytest and pytest-django. Tests must not make real HTTP, DNS, Gmail, Overture dataset, or LLM calls; use fakes and block network access. Add focused regression tests for state transitions, idempotency, suppression, SSRF, MIME, quotas, and CSRF. Run `make check` before review.
 
 ## Quality Gates
 
-Before completing a task, run formatting checks, Ruff, type checking, unit tests, fake-provider integration tests, and relevant security tests. Until Phase 0 provides those commands, run the available documentation and Git checks and state what could not be run.
+Before completing a task, run formatting checks, Ruff, type checking, unit tests, fake-provider integration tests, and relevant security tests — `make check` and, when the change touches delivery or automation, `make test-e2e`. State anything you could not run.
 
 Review the final diff for duplicate sends, invalid state transitions, leaked secrets, missing retries, unsafe URLs, missing suppression checks, missing migrations, and missing tests.
 
 ## Commit & Pull Request Guidelines
 
-History currently has only `Initial commit`; use short imperative subjects such as `Document campaign state transitions`. Keep migrations with their model changes. Pull requests must state purpose, affected requirement IDs, migrations, verification commands, security/cost/deliverability impact, and screenshots for UI changes.
+Use short imperative subjects such as `Document campaign state transitions`. Keep migrations with their model changes. Pull requests must state purpose, affected requirement IDs, migrations, verification commands, security/cost/deliverability impact, and screenshots for UI changes.
 
 ## Security & Live Sending
 
-Defaults remain dry-run with the kill switch enabled. Never commit credentials, tokens, contact exports, catalogs, or personal data. Preserve permanent suppressions, private catalog storage, token redaction, and the provider boundaries in `docs/SECURITY.md`. No change may introduce direct Google Maps scraping, SMTP passwords, tracking, automated replies, account rotation, or anti-abuse evasion.
+Defaults remain dry-run with send, automatic-reply and relationship kill switches enabled; reply decisions default to `SHADOW`. Never commit credentials, tokens, contact exports, catalogs, or personal data. Preserve permanent suppressions, private catalog storage, token redaction, and the provider boundaries in `docs/SECURITY.md`. No change may introduce direct Google Maps scraping, SMTP passwords, tracking, account rotation, anti-abuse evasion, or an automatic effect that bypasses the documented deterministic policy engine.
 
 ## Definition of Done
 

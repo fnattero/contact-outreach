@@ -1,0 +1,9 @@
+<div class="field{% if field.errors %} field--error{% endif %}{% if full %} field--full{% endif %}">
+    <div class="field__label-row">
+        <label class="field__label" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark" aria-hidden="true">*</span><span class="visually-hidden"> (obligatorio)</span>{% endif %}</label>
+        {% if field.help_text %}<button class="help-trigger" type="button" data-tooltip="{{ field.help_text }}" aria-label="Ayuda sobre {{ field.label }}">?</button>{% endif %}
+    </div>
+    {{ field }}
+    {% if field.help_text %}<p class="field__help" id="{{ field.id_for_label }}_helptext">{{ field.help_text }}</p>{% endif %}
+    {% if field.errors %}<div class="field__error" id="{{ field.id_for_label }}_error" role="alert">{{ field.errors }}</div>{% endif %}
+</div>

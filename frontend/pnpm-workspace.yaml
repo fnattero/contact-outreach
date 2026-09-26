@@ -1,0 +1,7 @@
+minimumReleaseAgeExclude:
+  - '@types/node@24.13.3'
+allowBuilds:
+  # Vitest/Vite needs the reviewed esbuild native binary.
+  esbuild: true
+  # eslint-config-next resolves imports through this reviewed native package.
+  unrs-resolver: true

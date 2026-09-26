@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Perfil comercial · Contact Outreach{% endblock %}
+{% block breadcrumb %}Configuración / Perfil{% endblock %}
+{% block page_title %}Perfil comercial{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div class="page-header__copy">
+        <h1>Perfil comercial</h1>
+        <p>Configurá los datos de la empresa, la firma y los mensajes fijos que se usan en campañas nuevas. Versión actual: <strong>{{ profile.profile_version|default:"sin guardar" }}</strong>.</p>
+    </div>
+</header>
+
+{% if form.non_field_errors %}<div class="alert alert--error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+
+<form method="post" class="section-stack" novalidate>
+    {% csrf_token %}
+    <input type="hidden" name="action" value="business_profile">
+    <details class="panel profile-section" open>
+        <summary class="panel__header profile-section__summary">
+            <span class="profile-section__copy">
+                <span class="profile-section__title">Identidad comercial</span>
+                <span class="muted">Datos visibles y de contacto usados en la firma y en el perfil.</span>
+            </span>
+            <span class="profile-section__chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="panel__body form-grid">
+            {% include "includes/field.html" with field=form.company_name %}
+            {% include "includes/field.html" with field=form.salesperson_name %}
+            {% include "includes/field.html" with field=form.phone %}
+            {% include "includes/field.html" with field=form.whatsapp %}
+            {% include "includes/field.html" with field=form.address %}
+            {% include "includes/field.html" with field=form.website %}
+        </div>
+    </details>
+
+    <details class="panel profile-section">
+        <summary class="panel__header profile-section__summary">
+            <span class="profile-section__copy">
+                <span class="profile-section__title">Propuesta comercial</span>
+                <span class="muted">Información base sobre la empresa y los productos. La IA sólo puede usar hechos aprobados.</span>
+            </span>
+            <span class="profile-section__chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="panel__body form-grid">
+            {% include "includes/field.html" with field=form.description full=True %}
+            {% include "includes/field.html" with field=form.products full=True %}
+            {% include "includes/field.html" with field=form.differentiators full=True %}
+        </div>
+    </details>
+
+    <details class="panel profile-section">
+        <summary class="panel__header profile-section__summary">
+            <span class="profile-section__copy">
+                <span class="profile-section__title">Firma y preferencias</span>
+                <span class="muted">Firma fija, instrucciones internas y umbral predeterminado para campañas nuevas.</span>
+            </span>
+            <span class="profile-section__chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="panel__body form-grid">
+            {% include "includes/field.html" with field=form.signature full=True %}
+            {% include "includes/field.html" with field=form.additional_instructions full=True %}
+        </div>
+        <div class="panel__footer actions">
+            <button class="button" type="submit">Guardar perfil</button>
+            <span class="muted">No cambia mensajes ya aprobados en campañas existentes.</span>
+        </div>
+    </details>
+</form>
+
+<section class="section-stack" aria-labelledby="fixed-messages-title">
+    <div class="section-heading">
+        <h2 id="fixed-messages-title">Mensajes fijos de campaña</h2>
+        <p class="muted">Estos textos se congelan cuando aprobás una campaña. Editarlos acá sólo afecta campañas nuevas.</p>
+    </div>
+
+    <details class="panel profile-section" open>
+        <summary class="panel__header profile-section__summary">
+            <span class="profile-section__copy">
+                <span class="profile-section__title">Mensaje inicial</span>
+                <span class="muted">Primer correo que recibe cada destinatario de una campaña.</span>
+            </span>
+            <span class="profile-section__meta">Revisión {{ initial_template.revision }}</span>
+            <span class="profile-section__chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <form method="post" class="panel__body form-grid" novalidate>
+            {% csrf_token %}
+            <input type="hidden" name="action" value="message_template">
+            <input type="hidden" name="template_prefix" value="initial">
+            {{ initial_template_form.kind }}
+            {% if initial_template_form.non_field_errors %}<div class="alert alert--error field--full" role="alert">{{ initial_template_form.non_field_errors }}</div>{% endif %}
+            {% include "includes/field.html" with field=initial_template_form.subject %}
+            {% include "includes/field.html" with field=initial_template_form.body full=True %}
+            <div class="panel__footer field--full actions">
+                <button class="button" type="submit">Guardar mensaje inicial</button>
+                <span class="muted">Aprobado el {{ initial_template.approved_at|date:"d/m/Y H:i" }}.</span>
+            </div>
+        </form>
+    </details>
+
+    <details class="panel profile-section">
+        <summary class="panel__header profile-section__summary">
+            <span class="profile-section__copy">
+                <span class="profile-section__title">Recordatorio si no responden</span>
+                <span class="muted">Se envía como máximo una vez en el mismo hilo, si la campaña lo tiene activado.</span>
+            </span>
+            <span class="profile-section__meta">Revisión {{ reminder_template.revision }}</span>
+            <span class="profile-section__chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <form method="post" class="panel__body form-grid" novalidate>
+            {% csrf_token %}
+            <input type="hidden" name="action" value="message_template">
+            <input type="hidden" name="template_prefix" value="reminder">
+            {{ reminder_template_form.kind }}
+            {{ reminder_template_form.subject }}
+            {% if reminder_template_form.non_field_errors %}<div class="alert alert--error field--full" role="alert">{{ reminder_template_form.non_field_errors }}</div>{% endif %}
+            <p class="field__help field--full">No tiene asunto propio porque continúa el hilo del mensaje inicial.</p>
+            {% include "includes/field.html" with field=reminder_template_form.body full=True %}
+            <div class="panel__footer field--full actions">
+                <button class="button" type="submit">Guardar recordatorio</button>
+                <span class="muted">Aprobado el {{ reminder_template.approved_at|date:"d/m/Y H:i" }}.</span>
+            </div>
+        </form>
+    </details>
+
+    <details class="panel profile-section">
+        <summary class="panel__header profile-section__summary">
+            <span class="profile-section__copy">
+                <span class="profile-section__title">Propuesta a otro email indicado</span>
+                <span class="muted">Correo fijo para cuando una respuesta pide enviar la propuesta a otra dirección.</span>
+            </span>
+            <span class="profile-section__meta">Revisión {{ referred_template.revision }}</span>
+            <span class="profile-section__chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <form method="post" class="panel__body form-grid" novalidate>
+            {% csrf_token %}
+            <input type="hidden" name="action" value="message_template">
+            <input type="hidden" name="template_prefix" value="referred_proposal">
+            {{ referred_template_form.kind }}
+            {% if referred_template_form.non_field_errors %}<div class="alert alert--error field--full" role="alert">{{ referred_template_form.non_field_errors }}</div>{% endif %}
+            {% include "includes/field.html" with field=referred_template_form.subject %}
+            {% include "includes/field.html" with field=referred_template_form.body full=True %}
+            <div class="panel__footer field--full actions">
+                <button class="button" type="submit">Guardar mensaje de redirección</button>
+                <span class="muted">Aprobado el {{ referred_template.approved_at|date:"d/m/Y H:i" }}.</span>
+            </div>
+        </form>
+    </details>
+</section>
+{% endblock %}

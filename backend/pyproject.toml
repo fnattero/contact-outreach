@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contact-outreach"
+version = "0.1.0"
+description = "Single-company multiuser B2B contact outreach application"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "argon2-cffi==25.1.0",
+  "celery[redis]==5.6.3",
+  "cryptography==46.0.5",
+  "Django==5.2.17",
+  "django-storages[s3]==1.14.6",
+  "djangorestframework==3.18.0",
+  "drf-spectacular==0.30.0",
+  "dnspython==2.8.0",
+  "email-validator==2.3.0",
+  "overturemaps==1.0.1",
+  "pydantic==2.13.2",
+  "psycopg[binary]==3.3.4",
+  "shapely==2.1.2",
+  "supervisor==4.3.0",
+  "tldextract==5.3.1",
+  "uvicorn[standard]==0.52.4",
+  "whitenoise==6.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "django-stubs[compatible-mypy]==6.0.9",
+  "djangorestframework-stubs==3.18.0",
+  "mypy==1.19.1",
+  "pip-audit==2.9.0",
+  "pytest==8.4.2",
+  "pytest-cov==7.1.0",
+  "pytest-django==4.12.0",
+  "pytest-socket==0.8.0",
+  "ruff==0.15.21",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"apps.configuration" = ["data/*.geojson"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/contact_outreach/settings*.py" = ["F403", "F405"]
+"**/migrations/*.py" = ["E501", "I001", "RUF012"]
+"src/apps/**/forms.py" = ["RUF012"]
+"src/apps/**/models.py" = ["RUF012"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main"]
+strict = true
+mypy_path = "src"
+exclude = ["src/.*/migrations/"]
+
+[tool.django-stubs]
+django_settings_module = "contact_outreach.settings_test"
+
+[[tool.mypy.overrides]]
+module = [
+  "celery",
+  "celery.*",
+  "dns",
+  "dns.*",
+  "email_validator",
+  "pydantic",
+  "overturemaps",
+  "pyarrow",
+  "shapely",
+  "storages",
+  "storages.*",
+  "tldextract",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "contact_outreach.settings_test"
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+  "--disable-socket",
+  "--cov=src",
+  "--cov-report=term-missing:skip-covered",
+  "--cov-fail-under=83",
+]
+markers = [
+  "e2e: end-to-end tests using only in-process fake providers",
+]
+
+[tool.coverage.run]
+branch = true
+omit = [
+  "src/contact_outreach/asgi.py",
+  "src/contact_outreach/wsgi.py",
+  "src/manage.py",
+  "src/**/migrations/*.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]

@@ -1,26 +1,38 @@
 # Auditoría específica de hardening
 
-Fecha: 2026-07-16. Alcance: implementación local, proveedores fake y adaptadores aislados.
-Resultado: no se identificó un camino conocido que eluda las barreras live, supresión o
-reconciliación. Gmail no ofrece exactly-once absoluto y la estabilidad del refresh token depende de
-Google; ambos siguen siendo riesgos operativos explícitos.
+Fecha de baseline anterior: 2026-07-26. Esa evidencia corresponde al servicio Django/HTMX previo.
+La arquitectura frontend/API/unified-backend queda **pendiente de revalidación** hasta completar
+DRF, proxy Next, remoción de MFA, Supervisor, S3 y los E2E desktop/mobile. Los controles de dominio
+listados abajo siguen siendo regresiones obligatorias, pero ninguna fila constituye aprobación de
+go-live v2 hasta que su evidencia nueva se documente.
 
 | Área | Control implementado y evidencia | Resultado |
 | --- | --- | --- |
-| Envíos duplicados | `ContactLedger` por email, uniques de secuencia/idempotency/Message-ID/Gmail ID, misma fila por retry y reconciliación antes de repetir. Regresiones de delivery/manual y aceptación fake. | Cubierto; riesgo residual externo documentado. |
+| Envíos duplicados | Reserva única `CampaignDeliveryReservation(email, fecha local)` para inicial/recordatorio; idempotencia, Message-ID determinista y reconciliación para campañas, respuestas y seguimientos. | Cubierto; Gmail no ofrece exactly-once absoluto y ese riesgo residual sigue documentado. |
+| Revisión y aprobación | Aprobación de campaña congela audiencia, contenido, firma, PDFs, horario y actor; el modo opcional por mensaje conserva edición y autorización explícitas. Ambos revalidan antes de Gmail. | Cubierto por regresiones de permisos, hash, elegibilidad y conexión Gmail. |
+| Acceso público y roles | Sólo Next público; proxy token server-side, headers spoofed eliminados, backend/data privados, cookies/CSRF/CSP/no-store y matriz anónimo/ADMIN/VENDEDOR. | Pendiente de staging y E2E nuevo. |
+| Inicio de sesión | Quinto fallo bloquea 30 minutos, HMAC/IP spray, sesión `__Host-` 12 h, CSRF-in-session, reauth sensible y sesiones invalidadas al cambiar acceso. MFA está diferido explícitamente. | Pendiente de matriz API/proxy; riesgo MFA aceptado temporalmente. |
 | Transiciones inválidas | Servicios de campaña, discovery, pipeline y delivery validan el grafo bajo transacción; views/tasks coordinan. | Cubierto. |
 | Pérdida de refresh token | Ciphertext Fernet con clave externa; disconnect elimina local; backup excluye la clave y `verify_restore` prueba descifrado. README advierte expiración en OAuth Testing. | Cubierto localmente; depende de backup separado y Google. |
-| Exposición de secretos | Entorno, redacción de audit/logs, sin query/body/recipient en log y errores sin excepción. `.env`, backups y private ignorados. | Cubierto; escaneo obligatorio antes de live. |
+| Exposición de secretos | Root key externa; API keys/client secret como Fernet write-only ligado a propósito; reautenticación+CSRF; sin secretos/ciphertext en HTML, redirect, task, snapshot, audit, log o error; restore prueba descifrado. | Cubierto frente a DB/backup/UI/log aislados; compromiso conjunto de host+root key sigue siendo riesgo residual inevitable. |
+| Cambio malicioso de proveedor | Reingreso de contraseña con throttling, campaña sin overrides POST, Overture sin URL/credencial configurable y limitado en código a STAC/S3 oficiales, LLM sin redirects con Authorization. Gmail exige disconnect antes de rotar OAuth. | Cubierto para sesión robada sin contraseña; revisar TLS si deja loopback. |
 | SSRF | HTTP/S 80/443, DNS validado, IP fijada, redirects revalidados y límites de bytes/tiempo/páginas. | Cubierto por matriz SSRF. |
-| Prompt injection | Web `UNTRUSTED_DATA`, sin tools, evidencia limitada a fact IDs y output/copy validado localmente. | Cubierto. |
-| Archivos maliciosos | Nombre generado, extensión/MIME/magic/EOF/tamaño/hash, storage privado, sin render, integridad antes de send y ENOSPC atómico. | Cubierto para v1; antivirus fuera de alcance documentado. |
+| Prompt injection | Mensajes entrantes son datos no confiables; el LLM no recibe tools ni credenciales, sólo puede devolver acciones/IDs allowlisted y los servicios vuelven a validar facts, candidatos, contexto y efectos. La búsqueda usa taxonomía/términos literales. | Cubierto. |
+| GeoJSON hostil | Máximo 1 MiB/100 partes/200 anillos/20.000 coordenadas; WGS84 poligonal, rangos finitos, CRS custom y geometrías inválidas/autointersectadas rechazados; canonicalización y hash server-side. | Cubierto por matriz de geometría y CSRF/upload. |
+| Integridad Overture | Hosts oficiales fijos, streaming acotado por bounding box provincial, GERS ID único, schema/taxonomía fail-closed, filtro poligonal exacto y particiones READY independientes dentro de un release. | Cubierto; releases nuevos requieren validación antes de activación. |
+| Reproducción de campañas | Release, coberturas ordenadas, reglas, geometría y hashes quedan congelados; todas las provincias de una campaña pertenecen al mismo release y la retención protege referencias. | Cubierto por replay, particiones, paginación y upgrade. |
+| Procedencia/licencias | Release, manifests, hashes, fuentes por campo, licencias, NOTICE, atribución y conteos quedan persistidos y visibles; Places se trata como multilicencia. | Cubierto; revisar fuentes/licencias/notices al sincronizar cada release. |
+| Exposición de cuerpos | Listas públicas inexistentes, logs/auditoría sin cuerpos, detalle autenticado por rol y Workspace, escape de template y `private, no-store` en mensajes y Contactos. Alertas por email contienen sólo un enlace seguro. | Cubierto en la aplicación; una sesión autorizada puede leer conversaciones como requiere el producto. |
+| Archivos maliciosos | Nombre generado, extensión/MIME/magic/EOF, 15 MiB por PDF, 17 MiB de fuentes y 24 MiB MIME, hashes y storage privado. El set ordenado se verifica completo: nunca hay envío parcial. | Cubierto para v1; antivirus fuera de alcance documentado. |
 | CSRF | Middleware Django, mutantes POST, tokens, logout POST y pantalla 403 neutra. | Cubierto. |
 | Concurrencia | Transacciones, row/advisory locks, `skip_locked`, generaciones, reservas y uniques. | Cubierto por servicios; validar carga PostgreSQL Compose antes de live. |
 | Reintentos | Backoff, `Retry-After`, deadlines, máximo técnico, sin fallback IA ni retry ciego Gmail; retry manual revalida elegibilidad. | Cubierto. |
-| Supresiones | Consulta en preparación/cola/efecto, lock compartido, BAJA irreversible, bounce invalida y override no aplica. | Cubierto. |
-| Límites diarios | Cálculo desde live confirmado/reservado bajo lock, intervalo, ventana, días y safety thresholds. | Cubierto. |
+| Restricciones y Contactos | Consulta en preparación/aprobación/cola/efecto; Contact excluye toda la Organization, BAJA es irreversible, bounce invalida sólo el email y “No contactar” queda auditado dentro de Contactos. | Cubierto. |
+| Automatización de respuestas | `SHADOW` por defecto y LIVE sujeto a reautenticación, confianza, contexto íntegro, facts activos, candidato literal, kill switch, suspensión por tarea y límites 3/conversación y 20/Workspace. | Cubierto; habilitar LIVE requiere decisión explícita admin. |
+| Redirección de propuestas | Candidato literal `NEW_CONTENT`, pertenencia bajo lock, propuesta fija con PDFs en hilo nuevo y acuse únicamente después de confirmación/reconciliación. Una acción semántica por Gmail ID. | Cubierto por flujo feliz, fallos y reintentos. |
+| Límites diarios | Campañas calculan cupos y fechas bajo lock; acciones automáticas reservan capacidad por conversación/Workspace; horarios y safety thresholds se revalidan justo antes del efecto. | Cubierto. |
 | Zona horaria | UTC persistido; límites/calendario con `ZoneInfo` del snapshot; default Buenos Aires. | Cubierto. |
-| Reinicios | Checkpoints PostgreSQL y recovery de extracción/pipeline/delivery/reconciliación; fake outbox durable. | Cubierto. |
+| Reinicios | Checkpoints PostgreSQL y recovery de extracción, pipeline, campañas, decisiones LIVE, notificaciones, seguimientos y reconciliación; fake outbox durable. | Cubierto. |
 | Errores parciales | Discovery separado; fallo proveedor drena cola autorizada; web fallback; errores por prospecto/mensaje visibles. | Cubierto. |
 
 ## Comandos antes de live

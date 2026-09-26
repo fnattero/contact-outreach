@@ -1,118 +1,465 @@
 # Especificación de producto
 
-## 1. Propósito
+## 1. Propósito y alcance
 
-Contact Outreach es una aplicación web local, de un solo usuario, para prospectar compradores B2B de carbones para motores. El operador define e inicia una campaña desde un dashboard; el sistema descubre negocios, valida un email principal, enriquece datos públicos, evalúa relevancia con IA, prepara un email de texto plano con un catálogo PDF y lo envía desde una única cuenta de Gmail. Las respuestas se sincronizan y clasifican, pero cualquier contestación posterior requiere una acción humana explícita.
+Contact Outreach es una aplicación web de una sola empresa para encontrar compradores B2B de
+componentes industriales, enviar campañas desde Gmail y concentrar las relaciones comerciales en
+`Contactos`. La aplicación se entrega como un workspace único con frontend Next.js/React y un
+backend modular Django REST desplegables de forma independiente. PostgreSQL, Redis y almacenamiento
+S3-compatible son servicios privados separados. No es un SaaS multiempresa y no ofrece registro
+público.
 
-La primera operación objetivo es CABA, Argentina, con 300 prospectos únicos, relevantes y con email. Ubicación, rubros, zonas, objetivo y límites operativos son configurables.
+Una campaña busca organizaciones por rubros y zonas de una o más provincias, prepara para toda la
+audiencia un mensaje fijo previamente aprobado, adjunta uno o más catálogos PDF y puede enviar un
+único recordatorio si no hubo respuesta. Una respuesta humana convierte a la organización en
+Contacto y la excluye de campañas futuras. Desde allí se muestra toda la conversación, incluso si
+usa varias direcciones o hilos.
 
-## 2. Usuario y principios
+La IA no redacta ni decide la audiencia del contacto inicial. Sólo analiza respuestas ya
+persistidas o genera comunicaciones programadas con Contactos. Puede contestar en modo live
+únicamente intenciones expresamente permitidas y fundamentadas; no tiene herramientas ni acceso a
+Gmail. Los servicios de dominio validan su decisión y ejecutan efectos idempotentes. Todo lo que
+requiere criterio comercial o contiene riesgo crea una tarea humana.
 
-- **Usuario:** propietario u operador comercial único, autenticado localmente.
-- **Automatización acotada:** iniciar una campaña autoriza el pipeline y el primer email, no respuestas futuras.
-- **Dry-run primero:** ninguna instalación nueva envía correo real hasta habilitar `SEND_MODE=live`, desactivar el kill switch y conectar Gmail.
-- **No evasión:** no se realiza scraping directo de Google Maps, CAPTCHA, proxies, rotación de cuentas ni elusión de cuotas.
-- **Trazabilidad:** decisiones, cambios de estado, consumo de proveedores y mensajes quedan auditados.
+## 2. Usuarios y principios
+
+- Existe un único `Workspace` (empresa) con varios `User` de Django vinculados mediante
+  `Membership`.
+- `ADMIN` administra usuarios, configuración, campañas, aprobaciones, respuestas, Contactos,
+  conocimiento y automatización.
+- `VENDEDOR` sólo lee Resumen, campañas, emails enviados, Contactos y conversaciones. No ve
+  borradores, prospectos, exportaciones, PDFs, configuración, integraciones, jobs, auditoría ni
+  detalles técnicos; no puede mutar nada salvo cerrar su propia sesión.
+- No hay registro ni recuperación pública. Un admin crea la cuenta y entrega una única vez un link
+  de activación/reset válido por 24 horas.
+- Instalaciones nuevas usan dry-run, kill switches activos y decisiones de respuesta en `SHADOW`.
+- El lenguaje visible es español simple. La pantalla explica consecuencias, errores y próximos
+  pasos; color nunca es la única señal.
+- PostgreSQL es la fuente de verdad. Redis y Celery sólo transportan trabajo recuperable.
+- No se raspa Google Maps ni se evaden cuotas, controles antiabuso o restricciones de Gmail.
 
 ## 3. Requisitos funcionales
 
-### FR-01 Descubrimiento y extracción
+### FR-01 Workspace, roles y autenticación
 
-El operador selecciona ubicación, rubros y zonas al crear la campaña. Al iniciarla se generan consultas determinísticas y se invoca `ExtractorProvider`, inicialmente Outscraper. La extracción no se ejecuta en segundo plano fuera de una campaña activa. Se conserva por ejecución la solicitud, respuesta JSON cruda, proveedor, identificadores, fechas, cantidades, costo estimado/real y error sanitizado. `MockExtractorProvider` permite desarrollo sin red.
+La instalación nueva crea un `Workspace` vacío y el primer `ADMIN` mediante un comando de
+bootstrap de una sola ejecución. No se copian usuarios ni datos desde la instalación anterior. Perfil,
+integraciones, prompts, conexión Gmail, campañas y catálogos pertenecen al Workspace; los campos
+de creador, editor, aprobador o uploader sólo atribuyen acciones y nunca delimitan autorización.
+Un segundo admin puede operar campañas creadas por otro.
 
-El pipeline ignora registros sin email. Normaliza y valida sintaxis, consulta MX mediante DNS y elige como máximo un email principal. Excluye direcciones `noreply`, `no-reply`, `abuse`, `privacy` y patrones no comerciales documentados. Deduplica por email, dominio empresarial, identificador del proveedor y hash de nombre más dirección. Dominios gratuitos o compartidos no se usan solos para fusionar negocios.
+Las capacidades se validan en vistas y servicios centrales. No se elimina un usuario con historia
+ni se puede desactivar o degradar al último admin activo. Cambiar rol o desactivar invalida sus
+sesiones activas.
 
-### FR-02 Objetivo y límites de campaña
+El login aplica un lockout fijo. Los intentos 1–4 devuelven error neutro; el quinto fija un bloqueo
+de 30 minutos. La clave es HMAC de username normalizado más IP de cliente confiable. Además, una IP
+queda bloqueada tras 20 fallos sobre cualquier username dentro de 30 minutos. Un intento mientras
+está bloqueado devuelve HTTP 429 y `Retry-After` sin extender la espera; un login correcto limpia
+el par. Un admin puede desbloquear desde UI y existe un comando de emergencia.
 
-El objetivo cuenta prospectos únicos con email válido y `relevance_score` igual o superior al umbral, no resultados crudos. Se recorren consultas hasta alcanzarlo o agotar consultas, máximo crudo, límite de costo o error permanente del extractor. No se despachan nuevas consultas cuando reservas e items ya calificados pueden completar el objetivo.
+MFA queda diferido en esta versión. La autenticación usa sesiones opacas server-side, cookie
+`__Host-` Secure/HttpOnly/SameSite=Lax, CSRF guardado en sesión, Argon2, contraseña mínima de 14
+caracteres, sesión absoluta de 12 horas, reautenticación por contraseña para acciones sensibles y
+el lockout durable anterior. El alta, reset, cambio de rol, desactivación y desbloqueo quedan
+auditados sin secretos. La ausencia temporal de MFA se declara como riesgo y no como protección
+equivalente.
 
-Alcanzar un límite termina la etapa de descubrimiento, no descarta los mensajes ya calificados: la campaña permanece operativa hasta drenar o cancelar su cola autorizada y conserva el motivo exacto de cierre de extracción.
+### FR-02 Organizaciones, direcciones y Contactos
 
-El dashboard muestra por separado: crudos, con email, duplicados, irrelevantes, calificados, en cola, enviados, fallidos, respondidos, interesados y, en dry-run, simulados. Los contadores son consultas derivadas de datos persistidos, no incrementos en Redis.
+`Organization` representa una empresa deduplicada dentro del Workspace. Conserva identidades
+globales mediante `OrganizationIdentity` (GERS ID, dominio y hashes de nombre/dirección).
+`EmailAddress` permite varias direcciones validadas por organización, con etiqueta, preferencia,
+proveniencia, estado de validez y evidencia.
 
-### FR-03 Rubros y zonas
+`CampaignEnrollment` vincula organización, campaña y dirección elegida. Un `Contact` uno-a-uno se
+crea al recibir una respuesta humana genuina, al cargarlo manualmente o al aplicar una restricción
+manual. La carga manual sólo exige email; nombre y organización pueden completarse después. Un
+Contacto excluye a toda la organización de nuevas campañas, sin importar qué dirección respondió.
+Los emails agregados manualmente quedan excluidos de campañas desde el primer momento y se validan
+por MX en segundo plano. La UI muestra “Validación pendiente” y permite reintentar sin bloquear la
+pantalla; sólo un resultado válido habilita comunicaciones programadas.
 
-`SearchCategory` y `SearchZone` se pueden crear, editar, activar, desactivar y eliminar cuando no exista una referencia protegida; en caso contrario se archivan. Los seeds incluyen los 23 rubros solicitados y los 48 barrios oficiales de CABA, enumerados en `ASSUMPTIONS.md`. Una campaña conserva un snapshot de nombres y criterios aunque luego cambie la configuración.
+`CommunicationRestriction` reúne baja, rebote y “No contactar”. El bloqueo completo del contacto se
+gestiona desde la lista de Contactos con un checkbox auditable; “No usar este email” bloquea sólo ese
+canal. `UNSUBSCRIBE` es irreversible. Un bounce invalida sólo la dirección. Una restricción manual
+sólo puede revertirla un admin con motivo auditado. La antigua página Supresiones desaparece, pero
+las barreras y su historial permanecen visibles dentro de Contactos.
 
-### FR-04 Enriquecimiento web
+`Conversation` representa un Contacto más un hilo Gmail. Un Contacto puede tener varios hilos y
+direcciones; una propuesta redirigida abre un hilo nuevo y ambos aparecen en una misma cronología.
 
-Si existe sitio, `WebsiteFetcher` obtiene la home y hasta tres páginas internas relevantes sin ejecutar JavaScript. Sólo admite HTTP/HTTPS, valida DNS y cada redirección contra SSRF, limita puertos, tiempo, tamaño, redirecciones y páginas. Extrae contenido textual tras eliminar scripts, estilos, navegación repetitiva y ruido.
+### FR-03 Provincias, partidos/departamentos y zonas
 
-El contenido se trata como dato hostil: nunca puede modificar instrucciones del sistema ni activar herramientas. Se guarda URL solicitada/final, fecha, estado, hash y extracto exacto usado por IA. Un fallo deja continuar con datos del extractor.
+`SearchZone` forma una jerarquía con código oficial, nivel, padre, provincia, fuente, atribución y
+flag seleccionable. Los nombres sólo son únicos bajo el mismo padre/código, porque pueden repetirse
+entre provincias. Se cargan geometrías oficiales versionadas para todas las provincias y sus
+partidos, departamentos o comunas. En CABA el nivel elegible sigue siendo Barrio. La UI de campañas
+usa sólo zonas oficiales; las zonas custom quedan como datos legacy no seleccionables para nuevas
+campañas.
 
-### FR-05 Análisis y generación con IA
+Al crear campaña el admin puede elegir una o más provincias y seleccionar distritos desde un mapa
+clickeable con respaldo de búsqueda/lista, selección total o limpieza por provincia. La UI usa las
+etiquetas “Partidos”, “Departamentos”, “Comunas” o “Barrios” y oculta jerga geométrica. Una campaña
+congela nombres, códigos, geometrías, hashes, reglas y orden.
 
-Una llamada lógica por prospecto, con reintentos limitados, produce JSON validado por Pydantic: `relevance_score` 0–100, `confidence` 0–1, `relevance_reason`, `evidence[]`, `subject` y `body_text`. Las evidencias deben corresponder a hechos suministrados. Existen `MockLLMProvider`, `OllamaProvider` y `OpenAICompatibleProvider` con base URL, modelo y API key externa al repositorio.
+### FR-04 Cobertura Overture particionada
 
-El mensaje final compuesto usa español argentino, tono profesional y directo, 70–130 palabras incluyendo firma y BAJA, texto plano, sin emojis, tracking, afirmaciones inventadas, descuentos falsos ni marketing vacío. Sólo menciona contexto explícito; no dice haber visto una web sin evidencia. Explica una relación posible con carbones para motores sin asumir compra y pregunta únicamente qué día conviene que pase el vendedor. Agrega identidad, firma e instrucción clara para responder `BAJA`; el prefijo inicial de asunto es `PUBLICIDAD -`.
+`OvertureRelease` conserva la identidad y metadatos inmutables de un release. Cada
+`OvertureCoveragePartition` contiene la cobertura de una provincia y evoluciona de forma
+independiente hasta `READY`. Una campaña sólo combina particiones del mismo release y cada
+`SearchQuery` usa la partición que contiene su distrito.
 
-Por debajo del umbral se marca irrelevante y no se envía. Tras agotar reintentos se marca `ERROR`; no existe fallback genérico. El caché se identifica por hash canónico de input, versión de prompt/esquema, proveedor y modelo. Se persisten input hash, output validado, versión, proveedor, modelo y fecha.
+El importador oficial ejecuta una lectura acotada al bbox de una provincia y luego filtra
+exactamente por polígonos de distrito. Nunca realiza una lectura gigante para provincias lejanas.
+El snapshot activo actual se migra como cobertura CABA; cualquier cobertura legacy inesperada se
+preserva como histórica. Si falta cobertura READY, la campaña falla antes de descubrir con una
+explicación accionable, por ejemplo: “Faltan los datos de Mendoza. Actualizalos desde Datos de
+búsqueda.”
 
-### FR-06 Perfil comercial y configuración
+### FR-05 Descubrimiento y elegibilidad de audiencia
 
-El dashboard edita empresa, vendedor, teléfono, WhatsApp, descripción, productos, diferenciadores, dirección, web, firma, instrucciones adicionales y umbral. También configura ubicación, límites, proveedor/modelo y parámetros no secretos. API keys permanecen en variables de entorno y sólo se muestra su estado redactado.
+Los rubros mantienen reglas deterministas versionadas. La búsqueda consulta sólo los catálogos
+Overture locales fijados, página con orden/cursor estable y persistencia idempotente. Los sitios
+oficiales se consultan con `WebsiteFetcher` SSRF-safe sólo para encontrar emails publicados cuando
+Overture no ofrece uno útil. No se infieren direcciones.
 
-### FR-07 Ciclo de campaña
+Las identidades descubiertas se resuelven hacia `Organization` y `EmailAddress`; los datos
+históricos de `Prospect` y `AIAnalysis` permanecen legibles. Ninguna campaña invoca al LLM: el
+camino de análisis y redacción fue eliminado y el descubrimiento no llama a ningún proveedor de
+lenguaje. La elegibilidad es el único filtro de prospectos; ver A-059 en `docs/ASSUMPTIONS.md`
+por el scoring de relevancia pendiente. Su objetivo cuenta enrollments únicos con una dirección
+elegible y un mensaje inicial preparado. Se revalida elegibilidad al preparar, aprobar,
+encolar y justo antes de Gmail: dirección válida, sin Contacto de la organización, sin
+restricciones, campaña/mode correctos, barreras Gmail y adjuntos íntegros.
 
-Una campaña nace borrador y sólo procesa al pulsar Iniciar. Puede pausarse, reanudarse o cancelarse. El trabajo sobrevive reinicios porque PostgreSQL conserva checkpoints y Celery sólo transporta señales. Pausar o cancelar impide tomar nuevas tareas; las tareas en curso verifican el estado antes de producir efectos externos. No hay aprobación individual ni seguimientos automáticos.
+### FR-06 Contenido fijo, ciclo y aprobación de campaña
 
-La campaña guarda snapshots de objetivo, consultas, perfil, prompt, límites, modo y versión del catálogo. Una anulación manual, justificada y auditada, puede permitir recontactar un email previamente enviado, pero nunca uno dado de baja o marcado inválido.
+El Workspace conserva revisiones versionadas del contenido por defecto, sin placeholders de
+cliente. La revisión inicial seed es:
 
-### FR-08 Política de envío
+- Asunto inicial: `Propuesta comercial`
+- Cuerpo inicial:
 
-Sólo se envía un primer mensaje por autorización, con un destinatario y sin CC/BCC. Se respetan límite diario, intervalo, zona horaria y ventana laboral. Los 403/429 y errores transitorios aplican backoff exponencial acotado; autenticación inválida, catálogo inconsistente y tasas anormales pausan la campaña con motivo visible. Un kill switch global prevalece sobre toda configuración.
+  ```text
+  Buen día:
 
-### FR-09 Catálogos PDF
+  Nos ponemos en contacto para acercarle nuestra propuesta de componentes industriales y compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para equipos y herramientas eléctricas. Si le resulta de interés, puede responder este correo y con gusto ampliaremos la información.
 
-El usuario carga y selecciona versiones inmutables de catálogo. Se validan extensión, MIME detectado, encabezado `%PDF-`, tamaño y SHA-256; el archivo vive en almacenamiento privado. Se muestran nombre, tamaño, fecha, versión y hash. El máximo inicial es 15 MiB. Cada campaña referencia una versión exacta y se pausa si falta o su hash ya no coincide.
+  Saludos.
+  ```
 
-### FR-10 Gmail y primer envío
+- Cuerpo de recordatorio:
 
-Una página permite conectar, inspeccionar, probar y desconectar una sola cuenta personal Gmail mediante OAuth 2.0. No se solicita ni almacena contraseña. Se generan MIME RFC válidos con cuerpo texto plano y PDF, `Message-ID` determinístico y cabeceras internas opacas. Se guardan recipient, subject, fechas, `gmail_message_id` y `gmail_thread_id`.
+  ```text
+  Buen día:
 
-Antes de reintentar un envío ambiguo se reconcilia por `Message-ID` y datos persistidos. No se rotan cuentas ni se evaden límites de Gmail.
+  Retomamos nuestro correo anterior para saber si pudo revisar la propuesta y los catálogos. Si necesita información sobre alguna medida o aplicación, puede responder este mensaje.
 
-### FR-11 Sincronización de respuestas
+  Saludos.
+  ```
 
-Mientras la aplicación funciona, Celery Beat sincroniza incrementalmente mediante `historyId`. Si expiró, ejecuta un fallback limitado por fecha y cantidad. Sólo persiste mensajes cuyos thread IDs o cabeceras RFC correspondan a mensajes propios. Guarda texto, HTML sanitizado, headers permitidos y metadatos necesarios; no importa toda la bandeja ni adjuntos ajenos. El dashboard muestra el hilo completo relacionado.
+- Asunto de propuesta referida: `Propuesta comercial`
+- Cuerpo de propuesta referida:
 
-### FR-12 Clasificación y supresión
+  ```text
+  Buen día:
 
-Las clases son `INTERESTED`, `NOT_INTERESTED`, `UNSUBSCRIBE`, `AUTO_REPLY`, `BOUNCE` y `OTHER`. Reglas determinísticas detectan BAJA y rebotes antes de IA; la IA puede clasificar lo restante, nunca responder. Un fallo de clasificación queda `OTHER` para revisión.
+  Nos indicaron que esta es la dirección adecuada para enviar nuestra propuesta comercial. Adjuntamos la información y los catálogos correspondientes. Quedamos a disposición ante cualquier consulta.
 
-`UNSUBSCRIBE` crea una supresión permanente global. `BOUNCE` invalida el email. Una respuesta humana (`INTERESTED`, `NOT_INTERESTED`, `UNSUBSCRIBE` u `OTHER`) marca respondido; `AUTO_REPLY` y `BOUNCE` no. Toda elegibilidad de envío consulta primero supresiones e invalidez.
+  Saludos.
+  ```
 
-### FR-13 Respuesta manual
+La firma aprobada de `BusinessProfile` se agrega en código de forma determinista e idéntica para
+todos. Crear/iniciar una campaña congela cuerpos, firma y revisiones.
 
-Desde el hilo se muestra destinatario, asunto, historial y editor de texto. Sólo se autoriza al pulsar `Enviar respuesta`; el POST persiste texto, usuario e idempotency key y un worker ejecuta exclusivamente ese efecto durable dentro del `gmail_thread_id`, conservando asunto e incluyendo `References` e `In-Reply-To`. Los resultados ambiguos se reconcilian por `Message-ID` antes de permitir otro intento. Ninguna tarea genera texto, crea autorizaciones ni responde sin esa acción humana explícita.
+El ciclo nuevo es `DRAFT -> DISCOVERING -> AWAITING_APPROVAL -> RUNNING -> COMPLETED`, con
+`PAUSED`, `CANCELLED` y `STOPPED_ERROR`. El descubrimiento concluye antes de aprobar para que el
+admin vea la audiencia final.
 
-### FR-14 Dashboard y exportaciones
+`CAMPAIGN` es el modo de aprobación por defecto: una confirmación congela hash de audiencia,
+contenido/firma exactos, adjuntos, agenda, actor y fecha, y encola cada mensaje que siga elegible.
+`PER_MESSAGE` permite revisar/editar mensajes individuales y luego exige iniciar la entrega; los
+no aprobados se excluyen. Campañas históricas y sus análisis IA nunca se regeneran ni reenvían.
 
-El dashboard Django/HTMX incluye resumen, campañas, creación/progreso, prospectos, preparados, enviados, respuestas, interesados, no interesados, bajas, errores, rubros, zonas, extracción, IA, Gmail, perfil, catálogos, supresiones y auditoría. Filtra por campaña, estado, rubro, barrio, fecha, relevancia, respuesta e interés. Exporta CSV seguro de prospectos, enviados y respuestas, neutralizando fórmulas de planilla.
+### FR-07 Múltiples catálogos PDF
 
-### FR-15 Estados, idempotencia y auditoría
+Una campaña selecciona una colección ordenada de `CampaignAttachment`; cada mensaje conserva una
+colección inmutable `OutboundAttachment`. El inicial y la propuesta referida requieren los PDFs de
+la campaña. Recordatorios y respuestas conversacionales no adjuntan por defecto.
 
-Servicios de dominio validan transiciones; las vistas y tareas no asignan estados directamente. Se usan restricciones únicas, claves idempotentes, transacciones y `SELECT ... FOR UPDATE`/advisory locks para impedir concurrencia sobre prospecto, mensaje o sincronización. `AuditEvent` es append-only y registra actor, acción, entidad, antes/después redactado, fecha y correlación.
+Cada PDF mantiene el límite de 15 MiB. La suma de fuentes no puede superar 17 MiB y el MIME final
+serializado no puede superar 24 MiB. Falta, tamaño/hash cambiado o cualquier archivo inconsistente
+pausa el envío; jamás se envía un subconjunto parcial.
 
-### FR-16 Seguridad local
+### FR-08 Envío y protección contra duplicados diarios
 
-No hay registro público. Un usuario propietario se inicializa desde variables de entorno y la contraseña sólo se guarda hasheada. Django provee sesiones, CSRF y hashing Argon2. La web escucha por defecto en `127.0.0.1`; exposición externa exige configuración explícita, TLS en proxy y cookies seguras. Se validan uploads y contenido externo, se cifran tokens, se redactan secretos y se aplican límites a todas las integraciones.
+`OutboundMessage.kind` admite `INITIAL`, `CAMPAIGN_REMINDER`, `MANUAL_REPLY`, `AUTOMATIC_REPLY`,
+`REFERRED_PROPOSAL`, `REDIRECT_ACK` y `SCHEDULED_CONTACT`. Los servicios Gmail mantienen
+Message-ID determinista, reconciliación antes de reintento y los métodos ordinarios `send`/`reply`.
 
-### FR-17 Abstracciones y modo fake
+`CampaignDeliveryReservation(email, local_date)` es única por dirección y fecha en
+`America/Argentina/Buenos_Aires`. Los iniciales y recordatorios de campañas reservan
+transaccionalmente. Ante conflicto el mensaje pasa al siguiente día/ventana permitidos y la UI
+muestra: “Se pasó al próximo día permitido para evitar correos duplicados.” No existe cooldown
+adicional entre campañas y una dirección sin respuesta puede participar en una campaña posterior.
+Las respuestas y comunicaciones de Contactos no usan esta reserva de campaña.
 
-Extractor, IA, Gmail y fetch web viven detrás de interfaces, con implementaciones fake determinísticas. Ningún test requiere credenciales ni red real. Un flujo E2E fake recorre descubrimiento, análisis, dry-run, respuesta simulada, clasificación y respuesta manual simulada.
+Ningún efecto live ocurre salvo `SEND_MODE=live`, kill switch de envío desactivado, campaña
+autorizada, cuotas/horario válidos y Gmail conectado. Una ambigüedad se reconcilia por Message-ID;
+nunca se reenvía a ciegas.
 
-## 4. Requisitos operativos y de calidad
+### FR-09 Un recordatorio sin respuesta
 
-- **OPS-01:** Python 3.12+, Django 5.2 LTS, PostgreSQL, Celery, Redis, Docker Compose, pytest, Ruff, mypy con `django-stubs` y migraciones versionadas; sin Node salvo necesidad demostrada.
-- **OPS-02:** entregar en fases posteriores Dockerfile, Compose, `.env.example`, Makefile, README, backups, restore, health checks, seeds, demo y comandos `make lint`, `make test`, `make typecheck`.
-- **DM-01:** persistir y relacionar como mínimo `User`, `BusinessProfile`, `SearchCategory`, `SearchZone`, `SearchQuery`, `SearchRun`, `Prospect`, `ProspectEmail`, `WebsiteSnapshot`, `AIAnalysis`, `Campaign`, `Catalog`, `OutboundMessage`, `InboundMessage`, `SuppressionEntry`, `ProviderUsage`, `AuditEvent` y `BackgroundJob`, con las extensiones de integridad documentadas en `DATA_MODEL.md`.
-- **QA-01:** cubrir normalización, deduplicación, email/MX, IA, prompt injection, SSRF, MIME, cuotas, reinicios, estados, idempotencia, bajas, hilos, respuesta manual, permisos, CSRF y E2E fake.
+Cada campaña puede habilitar un único recordatorio, con demora default de tres días calendario
+desde `sent_at` confirmado. El vencimiento se mueve a la siguiente ventana laboral de la campaña.
+Se responde en el hilo original, preservando Subject, References e In-Reply-To.
 
-## 5. Fuera de alcance
+Respuesta humana genuina, Contacto manual, baja o bounce cancelan el recordatorio; auto-reply no.
+La campaña sólo completa cuando cada recordatorio posible fue enviado, cancelado o quedó
+inelegible. Preparación, reserva, ejecución y cancelación son idempotentes.
 
-SPA, multiusuario, CRM completo, seguimiento automático, aprobación individual, respuestas automáticas, HTML saliente, tracking, verificación de email paga, scraping directo, browser headless, SMTP con contraseña y exposición pública lista para Internet.
+### FR-10 Gmail, respuestas y promoción a Contacto
 
-## 6. Criterios de aceptación del producto
+Beat sincroniza por `historyId` cada minuto por defecto y usa el fallback acotado ya documentado
+si expiró. Primero persiste y asocia el mensaje; aplica bounce, baja y auto-reply determinísticos;
+luego, con `transaction.on_commit`, encola el análisis IA. Nunca sostiene el lock de sincronización
+durante una llamada al LLM.
 
-Una instalación limpia arranca en dry-run, permite configurar y ejecutar una campaña fake hasta el objetivo, sobrevive un reinicio sin repetir efectos, muestra trazabilidad completa y procesa una respuesta simulada sin enviarla automáticamente. El modo live no arranca una entrega si faltan Gmail, identidad legal, catálogo íntegro o controles de seguridad.
+Una respuesta humana genuina crea/promueve el Contacto y cancela recordatorios pendientes. Una
+baja humana crea el Contacto con estado “Baja solicitada”. Bounce y auto-reply se guardan como
+eventos pero no crean Contacto por sí solos. El hilo conserva mensaje original, padres, Gmail/RFC
+IDs y relación con campaña sin modificar historia.
+
+Gmail también importa mensajes nuevos que no responden a un envío de la app cuando el remitente
+coincide exactamente con un `EmailAddress` válido de un Contacto existente en el Workspace. En ese
+caso el inbound queda ligado a ese Contacto/Organization y a una Conversation nueva o existente,
+pero sin campaña ni outbound padre. Remitentes desconocidos o emails inválidos se descartan y no
+crean Contactos automáticamente.
+
+Si un inbound quedó como tarea de revisión y un administrador lo responde manualmente, la tarea se
+resuelve automáticamente sólo cuando Gmail confirma la respuesta manual. La sincronización también
+reconoce una respuesta escrita directamente en Gmail: la guarda en el hilo de Contactos como
+`MANUAL_REPLY`, resuelve la tarea asociada y bloquea cualquier respuesta automática pendiente. Si el
+envío manual de la aplicación falla o queda en reconciliación, la tarea permanece abierta.
+
+### FR-11 Conocimiento, candidatos y contexto acotado
+
+El admin gestiona dos tipos de información desde “Información para responder consultas”:
+
+- contexto general de la empresa, editable en el mismo lugar por administradores; el último texto
+  guardado queda activo y conserva el usuario que lo guardó;
+- datos puntuales/FAQ activos, que se guardan con título e información y se usan para responder
+  consultas concretas sin aprobación manual adicional.
+
+Sólo una tarjeta puntual guardada por un administrador puede fundamentar una respuesta concreta; no
+se extraen hechos de PDFs automáticamente.
+
+En “Respuesta automática” el admin también puede editar instrucciones de redacción para el agente.
+Estas instrucciones explican tono, estructura y estilo deseado; no pueden relajar policy, permitir
+hechos no aprobados ni evitar revisión humana.
+
+Antes del LLM se extraen como máximo diez emails literales de texto plano y `mailto:`. Se
+normalizan/validan y marcan `NEW_CONTENT`, `SIGNATURE` o `QUOTED`; no se reconstruyen direcciones
+ofuscadas. El modelo sólo puede seleccionar IDs entregados en esa solicitud.
+
+Cada solicitud tiene máximo 24.000 caracteres de entrada. Siempre incluye completo: nuevo texto
+escrito por el remitente y contexto general vigente. Si el mail responde a un envío de la app,
+también incluye mensaje inicial/referido original y padre directo. Si es un mail directo de un
+Contacto preexistente, incluye en su lugar un bloque obligatorio de perfil del Contacto y marca que
+no hubo correo previo enviado por la app. Después agrega hasta seis mensajes recientes relevantes
+del Contacto entre hilos, memoria estructurada con fuentes para historia antigua y hasta tres
+tarjetas puntuales activas elegidas por búsqueda semántica con embeddings. Si la similitud es baja
+o varias tarjetas compiten de forma ambigua, esas tarjetas pueden entrar como contexto sugerido con
+marca `may_be_irrelevant=true`; el LLM debe ignorarlas si no coinciden claramente y escalar a humano
+cuando ninguna alcanza para responder. Nunca incluye PDFs completos, HTML crudo ni un historial
+ilimitado. Si lo obligatorio no entra, se crea tarea humana. Sólo se persiste el
+manifiesto con IDs/versiones/hash, estado de recuperación y hashes de consulta, no una copia gigante
+del prompt.
+
+### FR-12 Decisiones IA, SHADOW y habilitación live
+
+`LLMProvider.decide_reply(request)` devuelve salida estructurada: clasificación, intención/acción
+allowlisted, confianza, candidate ID opcional, IDs de revisiones de hechos, cuerpo propuesto y
+motivo humano. La aplicación rechaza campos o IDs desconocidos. El LLM jamás invoca Gmail ni decide
+qué información cargar en la base: sólo puede usar el contexto global y las tarjetas puntuales que
+la aplicación ya seleccionó para esa solicitud. El system prompt fijo contiene las reglas
+inmutables; el request agrega `ADMIN_WRITING_INSTRUCTIONS` como guía editable de escritura. Para una
+acción `REPLY` autorizada, `proposed_body` es el cuerpo final que se envía: los facts seleccionados
+son evidencia autorizada y no se pegan como párrafos en lugar de la redacción del LLM.
+
+Modos:
+
+- `OFF`: sólo efectos determinísticos.
+- `SHADOW` (default): registra qué habría hecho el sistema, el borrador y los hechos usados;
+  no autoriza Gmail ni ofrece una aprobación posterior desde la configuración.
+- `LIVE`: permite pasar a las políticas de envío automático.
+
+`LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin. El
+mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
+
+### FR-13 Acciones automáticas, redirección y atención humana
+
+Sólo son auto-elegibles: información aprobada de producto, hechos aprobados de empresa,
+aclaración simple fundamentada y redirección explícita de propuesta. `POLITE_ACKNOWLEDGEMENT` y
+`NOT_INTERESTED` no reciben respuesta automática. Baja, bounce y auto-reply siguen reglas
+deterministas.
+
+Siempre requieren persona: reuniones/fechas, precios/cotizaciones, negociación, quejas,
+legal/privacidad, consejo técnico no soportado, intenciones múltiples, candidatos ambiguos,
+conflicto de organización, contexto insuficiente o fallo de proveedor/schema. Una `HumanTask`
+suspende automatización de la Conversation hasta que un admin resuelva o descarte; vendedores sólo
+leen.
+
+La instrucción al LLM refuerza esta clasificación y el policy agrega una protección acotada para
+pedidos explícitos de coordinar/agendar una llamada o reunión junto con día, horario o
+disponibilidad. No se bloquean por sí solas consultas informativas como horario de atención,
+teléfono, zonas de envío o retiros.
+
+Una respuesta segura usa el hilo original y recibe inbound actual más contexto obligatorio. En
+mails directos de Contactos preexistentes puede autorizar una respuesta normal si supera policy,
+kill switches y límites. La redirección de propuesta exige campaña/outbound padre porque reutiliza
+el contenido y PDFs aprobados de esa campaña. Para redirección:
+
+1. El LLM elige un único candidate ID `NEW_CONTENT` de un pedido explícito.
+2. El dominio valida sintaxis, MX y restricciones y bloquea Contacto/candidato.
+3. Si pertenece a otra organización, es ambiguo o inválido, crea `HumanTask`.
+4. Si es válido, lo agrega al mismo Contacto como “Dirección indicada para propuestas”, con
+   proveniencia del inbound.
+5. Envía la propuesta fija y todos los PDFs aprobados de la campaña origen en un hilo nuevo.
+6. Sólo luego de éxito confirmado/reconciliado responde en el hilo original:
+   `Perfecto, muchas gracias. La propuesta fue enviada a la dirección indicada.`
+7. Si falla el nuevo envío, no confirma y abre una tarea humana.
+
+Propuesta y confirmación usan claves idempotentes distintas y sólo hay una acción semántica por
+Gmail ID entrante. Justo antes de ejecutar se revalidan headers automáticos, restricciones,
+contexto, modo y `AUTO_REPLY_KILL_SWITCH`. El recheck conserva estabilidad frente a respuestas
+automáticas posteriores de otros hilos del mismo Contacto; esos efectos no son contexto humano
+nuevo y no deben invalidar una decisión previa. Sí cancelan el efecto los mensajes humanos,
+respuestas manuales, cambios de contexto obligatorio/facts/política o cambios dentro del mismo
+hilo. Límites: tres respuestas automáticas por Conversation en 24 horas móviles y veinte por
+Workspace/día.
+
+### FR-14 Alertas humanas
+
+Toda tarea queda como badge persistente en “Necesita atención”. Además se envía una notificación
+genérica a cada email de admin activo mediante Gmail conectado, asunto `Hay una conversación que
+necesita revisión`, y sólo un link seguro al dashboard: nunca copia el inbound. Requiere
+`PUBLIC_BASE_URL`. `NotificationDelivery` hace envío/reconciliación idempotente; un fallo de email
+no elimina ni cierra la tarea visible.
+
+### FR-15 Comunicación programada con Contactos
+
+Un admin configura `FollowUpTopic` globales con nombre, objetivo, instrucciones, cadencia global,
+modo y próxima fecha global. En cada Contacto sólo se aprueban o pausan los temas aplicables mediante
+`ContactCommunicationPlan`; requiere email preferido validado. Cadencia default 30 días, mínimo
+siete. El modo default es `REVIEW_BEFORE_SEND`; `AUTOMATIC` sigue bloqueado por las mismas barreras.
+
+El scheduler deriva el próximo vencimiento por aprobación desde el tema global, historial y snooze. El
+LLM propone contenido con el mismo contexto acotado y hechos aprobados para el tema aprobado. El
+vencimiento crea borrador para revisión, mensaje autorizado en hilo nuevo o tarea humana. Nunca envía
+con Contacto/email restringido, tarea abierta, automatización suspendida, contexto insuficiente o kill
+switch de relaciones activo. Una interacción humana mueve el próximo
+contacto al menos una cadencia; un envío confirmado calcula desde `sent_at`. No es recordatorio de
+campaña ni vuelve elegible a un Contacto.
+
+### FR-16 UI Contactos y conversaciones
+
+La navegación principal reemplaza Prospectos/Supresiones/Respuestas por `Contactos` y `Necesita
+atención`; la audiencia prospectiva queda dentro de cada campaña. La lista muestra empresa/nombre,
+email preferido, checkbox “No contactar”, temas aprobados, última interacción y badge de atención.
+
+El detalle presenta cronología agrupada por hilo, canales y proveniencia, campañas, restricciones,
+notas, automatización, tareas y temas de seguimiento aprobables. Vendedor ve la misma cronología legible sin
+controles ni detalles técnicos. IDs, hashes, proveedor, modelo, confidence y manifiestos sólo
+aparecen para admin bajo “Detalles técnicos”. Todo cuerpo de contacto/mensaje responde
+`Cache-Control: private, no-store`.
+
+### FR-17 Métricas de Resumen
+
+Las métricas se derivan de filas persistidas: destinatarios iniciales únicos; iniciales,
+recordatorios, respuestas automáticas y comunicaciones programadas enviadas; respondedores
+humanos únicos; tasa de respuesta; tasa positiva; Contactos creados; tasas de rebote y baja; decisiones
+resueltas automáticamente; tareas humanas totales/abiertas; medianas de primera respuesta y de
+intervención humana; respuestas posteriores al inicial versus al recordatorio.
+
+La tasa de respuesta es enrollments con al menos una respuesta humana divididos por enrollments
+con inicial confirmado. Varias respuestas no duplican personas. Denominador cero muestra `—` y una
+explicación breve. Hay vista global del Workspace y filtro por campaña; cohortes por rango arbitrario
+se difieren.
+
+### FR-18 Preparación para Internet
+
+Settings de producción exigen hosts/orígenes exactos, cookies seguras, awareness de HTTPS detrás
+de proxy, redirect SSL, HSTS escalonado, CSP, referrer/content-type/frame protections y health
+detallado protegido. Scripts inline se mueven a static. Se prueban `check --deploy`, matriz de
+permisos y proxy confiable.
+
+Sólo el servicio frontend recibe dominio público y TLS. El frontend enruta `/api/v1/*` por la red
+privada al backend usando un token interno server-side; elimina headers forwarded suministrados por
+el navegador. Backend, PostgreSQL, Redis y storage no reciben dominio ni proxy TCP público. El
+go-live exige verificar en staging certificados, proxy, cookies, CSRF, CSP, health y monitoreo.
+
+### FR-19 Estados, idempotencia, auditoría e interfaces
+
+Las vistas/tasks no asignan estados directamente; llaman servicios de transición. Jobs reciben IDs,
+son idempotentes y usan constraints, transacciones y locks. `AuditEvent` append-only registra actor,
+acción, entidad, before/after redactado y correlación. No guarda secretos ni cuerpos completos.
+
+Servicios externos sólo se acceden mediante `ExtractorProvider`, `WebsiteFetcher`,
+`EmbeddingProvider`, `LLMProvider` y `GmailProvider`. Tests usan fakes y bloquean HTTP, DNS, Gmail,
+Overture, embeddings y LLM reales. Los efectos de Gmail siempre permanecen fuera del modelo.
+
+### FR-20 Usabilidad y accesibilidad
+
+La interfaz asume personas sin conocimiento técnico. Las etiquetas describen resultados, por
+ejemplo “Respondido automáticamente”, “Necesita que lo revises”, “Modo de prueba: no se envió” y
+“Próximo contacto”. Cada toggle explica en una frase su consecuencia; cada error indica qué pasó y
+qué hacer. Se usa progressive disclosure, fieldsets semánticos, foco visible, teclado y diseño
+responsive. El color nunca comunica un estado por sí solo.
+
+## 4. Requisitos operativos y de datos
+
+- **OPS-01:** monorepo con Python 3.12+, Django 5.2 LTS/DRF/Uvicorn y procesos Celery supervisados
+  dentro de un backend; Next.js/React/TypeScript/Ant Design en un frontend independiente;
+  PostgreSQL, Redis y S3-compatible privados; Docker Compose local con MinIO.
+- **OPS-02:** `make backend-check`, `make frontend-check`, `make test-e2e`, `make security-check` y
+  `make check`, lockfiles exactos, OpenAPI/cliente generado, backups, restore, health, seeds y
+  runbooks reproducibles.
+- **DM-01:** persistir como mínimo las entidades detalladas en `DATA_MODEL.md`, incluidas Workspace,
+  Membership, Organization, OrganizationIdentity, EmailAddress, Contact, restriction, enrollment,
+  Conversation, mensajes/adjuntos, decisiones/tareas/memoria/conocimiento, temas y aprobaciones de
+  seguimiento, notificaciones y particiones Overture.
+- **QA-01:** cubrir fresh/upgrade migrations, permisos, sesión/CSRF/lockout/reauth, proxy, estados,
+  concurrencia, idempotencia, supresión, SSRF, contexto/IA, MIME, Gmail, recordatorios,
+  redirección, OpenAPI, UI responsive/accesible y E2E fake con red bloqueada.
+
+## 5. Fuera de alcance y trabajo diferido
+
+- Multiempresa/multitenancy, registro público y recuperación pública.
+- LangGraph u otro framework de agentes; el flujo es una máquina de estados con salida LLM
+  estructurada.
+- Personalización/placeholders por cliente en campañas iniciales.
+- Más de un recordatorio de campaña.
+- Extracción automática de hechos desde PDF, precios/cotizaciones, calendario de reuniones y
+  herramientas externas para el modelo.
+- Mutaciones por vendedores.
+- HTML saliente, tracking, scraping directo, SMTP con contraseña, rotación de cuentas o evasión.
+- MFA/TOTP/WebAuthn inicial; debe reintroducirse antes de ampliar significativamente el acceso.
+- JWT/API keys para terceros, backend horizontal, workers desplegados por separado, Kubernetes,
+  Sentry, antivirus y acceso directo browser-to-S3.
+- Migración de datos, dual-write, traffic splitting gradual o rollback productivo al servicio viejo.
+- Cohortes métricas por rangos arbitrarios y borrado administrativo de historia.
+
+## 6. Criterios de aceptación
+
+La migración arquitectónica crea una base nueva y no transporta UUIDs, Gmail/RFC IDs, mensajes,
+adjuntos, restricciones, ciphertext ni auditoría. La instalación vieja queda preservada y privada.
+Las migraciones Overture existentes no se reescriben. La instalación nueva arranca con envío y
+auto-respuesta bloqueados, login protegido, contenido seed y decisiones SHADOW.
+
+Un E2E fake puede seleccionar distritos de dos provincias, descubrir y aprobar audiencia, adjuntar
+varios PDFs, enviar iniciales sin LLM, posponer un conflicto de mismo día, enviar/cancelar un único
+recordatorio, importar una respuesta, promover Contacto, producir decisión SHADOW, ejecutar una
+respuesta segura o redirección live bajo política y crear alerta humana en los casos prohibidos.
+Vendedor puede leer las conversaciones y no ejecutar mutaciones. Ningún test accede a red.

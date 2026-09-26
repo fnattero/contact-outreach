@@ -1,283 +1,259 @@
 # Contact Outreach
 
-Aplicación local Django para outreach B2B de un único propietario. El incremento actual incluye
-autenticación, configuración comercial, catálogos privados, campañas, supresiones, auditoría,
-extracción durable, enriquecimiento web seguro, generación personalizada, OAuth Gmail y entrega
-controlada de primeros mensajes. También incluye métricas derivadas, filtros, búsqueda, paginación,
-CSV seguro, progreso/reintento de jobs, logs JSON correlacionados, errores amigables y
-backup/restore verificado. Los proveedores mock
-son el default sin red; Outscraper, el fetch HTTP y los proveedores IA quedan aislados por
-contratos internos y son opt-in.
+An email automation system for a single B2B company, built around a hard limit on what the AI is
+allowed to do on its own.
 
-## Requisitos
+The system maintains relationships with existing customers as it reads inbound replies, answers the
+intents it is explicitly permitted to answer, and hands anything else to a person. Asking for a
+meeting is one of the things it hands over. It also finds new prospects, from an open dataset, and
+sends them a fixed, human-approved message. The AI never writes the first message and never chooses
+who receives it.
 
-- Una distribución Linux de 64 bits con Git, `make`, OpenSSL y al menos 4 GiB libres.
-- Docker Engine con el plugin Docker Compose. En una máquina limpia, instalar ambos desde la
-  [guía oficial de Docker](https://docs.docker.com/engine/install/) para la distribución.
-- Opcional para validar fuera de Docker: Python 3.12+ y `make`.
+Every automatic reply is grounded in versioned facts, recorded with the policy and model that
+produced it, and gradeable afterwards, including a "should have been a human" outcome. Automation
+ships in shadow mode: it decides, records, and sends nothing until someone turns it on.
 
-Comprobar la instalación antes de continuar:
+The application's interface is in Spanish, because its users are spanish speakers. This README, and the reference
+docs it links to, are the only part in English.
 
-```bash
-git --version
-docker version
-docker compose version
-make --version
+## What the AI may and may not do
+
+The AI has no tools and no Gmail access. It reads inbound messages that are already persisted and
+returns a structured decision. Domain services validate that decision against durable policy and
+then execute the effect idempotently. Nothing the model returns reaches a mailbox unchecked.
+
+**It may not:**
+
+- write or edit the initial outreach message — a campaign sends one fixed body, approved by a
+  person before the campaign starts, identical for the whole audience, with no per-recipient
+  variables (the content validator rejects template placeholders outright);
+- choose the audience — that comes from deterministic, versioned category and zone rules;
+- invent facts, products, people or claims.
+
+**It may:**
+
+- classify an inbound reply and propose an answer for one of three permitted intents —
+  `APPROVED_PRODUCT_INFORMATION`, `APPROVED_COMPANY_FACT`, `GROUNDED_SIMPLE_CLARIFICATION`;
+- propose forwarding the proposal to a different address, when a reply explicitly redirects it
+  (`EXPLICIT_PROPOSAL_REDIRECTION`), and only when exactly one candidate address is authorized;
+- draft a scheduled communication to an existing contact.
+
+Everything else opens a `HumanTask`.
+
+## Human in the loop
+
+### Three modes for inbound reply automation
+
+`ReplyAutomationConfiguration.mode` is workspace-wide:
+
+| Mode | Behaviour |
+| --- | --- |
+| `OFF` | No analysis. |
+| `SHADOW` | **Default.** The system decides and records the full decision. It sends nothing. |
+| `LIVE` | Permitted intents may be sent automatically. Turning this on records who enabled it and when — a database check constraint refuses a `LIVE` row without both. |
+
+Scheduled communications to existing contacts carry their own, separate mode on `FollowUpTopic` and
+`ContactCommunicationPlan`: `REVIEW_BEFORE_SEND` (the default) or `AUTOMATIC`. Reply automation and
+scheduled contact are enabled independently.
+
+### What opens a HumanTask
+
+A `HumanTask` blocks any automatic reply for that contact while it is open. Anything needing
+commercial judgment or carrying risk lands here:
+
+`MEETING_OR_DATE` · `PRICING_OR_QUOTE` · `NEGOTIATION` · `COMPLAINT` · `LEGAL_OR_PRIVACY` ·
+`UNSUPPORTED_TECHNICAL_ADVICE` · `MULTIPLE_INTENTS` · `AMBIGUOUS_CANDIDATE` ·
+`OWNERSHIP_CONFLICT` · `INSUFFICIENT_CONTEXT` · `MANDATORY_CONTEXT_OVERFLOW` ·
+`PROVIDER_OR_SCHEMA_FAILURE` · `AUTOMATIC_MODE_NOT_AVAILABLE` · `HUMAN_TASK_OPEN` ·
+`POLICY_RECHECK_FAILED` · `SCHEDULED_CONTEXT_OR_PROVIDER_FAILURE` · `SCHEDULED_DELIVERY_FAILED`
+
+The last one matters: policy is re-validated immediately before the Gmail call, not only when the
+decision was made. If the context changed, a cited fact was unapproved, the confidence dropped, a
+kill switch flipped, or the stored `context_hash` no longer matches, the send is refused and
+becomes a task.
+
+### What gets recorded, and how it is graded
+
+Every `ReplyDecision` stores the `policy_version`, `schema_version`, provider and model,
+`confidence`, the `context_manifest` and its `context_hash`, and the exact versioned
+`KnowledgeFactRevision` rows that grounded it. A reply that cites a fact which has since been
+superseded, deactivated or edited fails the recheck.
+
+A reviewer then grades the decision — `reviewed_outcome` is `CORRECT`, `INCORRECT` or
+`NEEDED_HUMAN`, with `reviewed_by` and `reviewed_at`. A check constraint forbids an outcome without
+a reviewer, so the feedback trail cannot be anonymous. `NEEDED_HUMAN` is the point of the whole
+scheme: it names the cases where the system answered but should not have, which is the measurement
+you need before moving anything from `SHADOW` to `LIVE`.
+
+## Anti-spam guarantees
+
+These are enforced in domain services and database constraints, not in configuration:
+
+- **Suppression is permanent.** An `UNSUBSCRIBE` is irreversible and no override can bypass it. A
+  bounce invalidates only the address that bounced. A manual restriction can be lifted only by an
+  admin, with an audited reason.
+- **No second first-contact.** `ContactLedger` is unique on the normalized email and prevents a
+  second initial message to the same address, ever. Lifting it requires an explicit, audited,
+  single-use `ContactOverride`.
+- **No duplicate sends in a day.** `CampaignDeliveryReservation(email, local_date)` is unique per
+  address per Buenos Aires local date. On conflict the message moves to the next permitted day
+  rather than going out twice.
+- **A reply ends the outreach.** A genuine human reply promotes the organisation to a `Contact`,
+  cancels any pending reminder, and excludes the whole organisation from future campaigns —
+  regardless of which of its addresses replied.
+- **One reminder, at most.** A single reminder per campaign, default three calendar days after a
+  confirmed send, cancelled by a reply, a manual contact, an unsubscribe or a bounce.
+- **No tracking, no HTML.** Outbound mail is `text/plain` only. There are no open pixels, no
+  click-through redirects, and no per-recipient variables.
+- **One recipient per message.** Each MIME message carries a single `To`. There is no `Cc` and no
+  `Bcc`, and the builder rejects header injection in the sender or recipient.
+- **Rate limits.** Campaigns default to 30 messages a day, 5 minutes apart, on weekdays between
+  09:00 and 17:00 `America/Argentina/Buenos_Aires`. Automatic replies default to 3 per conversation
+  and 20 per workspace per day.
+- **Three independent kill switches.** `SEND_KILL_SWITCH`, `AUTO_REPLY_KILL_SWITCH` and
+  `RELATIONSHIP_KILL_SWITCH` are all on by default, and each blocks its own class of effect on its
+  own. `SEND_MODE` defaults to `dry-run`.
+- **Fake providers by default.** Gmail, the LLM, embeddings and the website fetcher all ship as
+  fakes. Tests block the network and may never make a real HTTP, DNS, Gmail, Overture or LLM call.
+- **No scraping.** Prospects come from the open [Overture Maps](https://overturemaps.org) dataset,
+  read through a bounded `record_batch_reader` over a STAC-pinned release, storing provenance,
+  licence and attribution for every record. There is no Google Maps scraping and no scraping of any
+  other site. Official websites are fetched only through an SSRF-safe `WebsiteFetcher`, only to find
+  an email address the organisation already published, and addresses are never inferred or guessed.
+
+## Roles
+
+There are two, and a single workspace. `ADMIN` administers everything. `VENDEDOR` is read-only over
+the summary, campaigns, sent messages, contacts and conversations — and cannot see drafts,
+prospects, exports, PDFs, configuration, integrations, jobs, audit or technical details. The rule is
+enforced in views and services, not by hiding navigation.
+
+## Architecture
+
+```text
+Browser -> HTTPS -> Next.js frontend (the only public service)
+                     | / -> React UI
+                     | /api/v1/* -> authenticated private proxy
+                                      -> backend container
+                                         |-> Uvicorn/Django REST
+                                         |-> Celery general worker
+                                         |-> Celery maintenance worker (concurrency=1)
+                                         |-> Celery Beat
+                                         |-> migration runner before startup
+                                         |-> private PostgreSQL
+                                         |-> private Redis
+                                         |-> private S3-compatible storage
+                                         |-> DNS/web/LLM/Gmail/Overture
 ```
 
-## Iniciar el entorno
+Only the frontend gets a public domain. The backend, PostgreSQL, Redis and the bucket stay on
+private networking; the backend requires a server-side proxy token and exact host/origin values, and
+never trusts forwarded headers sent by a browser. The backend container supervises Uvicorn, both
+Celery worker classes and Beat as one release with one set of credentials; workers talk to
+PostgreSQL through the same domain services as the API and never call internal HTTP endpoints.
 
-1. Crear la configuración local:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Generar valores independientes y reemplazarlos en `.env`:
-
-   ```bash
-   openssl rand -hex 32  # DJANGO_SECRET_KEY
-   openssl rand -hex 32  # POSTGRES_PASSWORD
-   openssl rand -hex 32  # FIELD_ENCRYPTION_KEY
-   ```
-
-   Definir además una contraseña fuerte en `OWNER_PASSWORD`. Gmail e IA siguen fake; las
-   integraciones de red sólo se habilitan explícitamente. No guardar `.env`, la clave de cifrado ni
-   backups dentro del repositorio.
-
-3. Construir e iniciar todos los servicios:
-
-   ```bash
-   make build
-   make up
-   ```
-
-La web queda disponible en <http://127.0.0.1:8000/>. El arranque aplica las migraciones built-in
-de Django bajo un advisory lock de PostgreSQL y crea o rota el propietario configurado sin imprimir
-la contraseña. La imagen recolecta los archivos estáticos y Gunicorn los sirve mediante WhiteNoise;
-no se necesita un servidor Node ni un CDN. PostgreSQL y Redis no publican puertos al host.
-
-Para seguir los logs:
-
-```bash
-make logs
+```text
+backend/   Django, DRF, workers, migrations and Python tests
+frontend/  Next.js, React, TypeScript and Ant Design
+infra/     Docker Compose and local services
+docs/      specification, architecture, security, operations and plan
 ```
 
-Cada línea de aplicación es JSON e incluye evento, nivel, correlation ID, duración, ruta y código
-de estado cuando corresponde. No incluye query strings, cuerpos, destinatarios ni secretos.
+External services are reachable only through four provider interfaces — `ExtractorProvider`,
+`LLMProvider`, `GmailProvider` and `WebsiteFetcher`. Domain logic never sees a provider's response
+schema or SDK.
 
-## Comprobar el entorno
+## Running it locally
 
-- Liveness: <http://127.0.0.1:8000/health/live/>
-- Readiness de PostgreSQL y Redis: <http://127.0.0.1:8000/health/ready/>
-- Estado degradado de storage/proveedores: <http://127.0.0.1:8000/health/degraded/>
-- Procesamiento real de una tarea por el worker:
-
-  ```bash
-  make smoke-worker
-  ```
-
-El dashboard requiere iniciar sesión con `OWNER_USERNAME` y `OWNER_PASSWORD` de `.env`. No existe
-registro público. El logout es una acción POST protegida por CSRF.
-
-## Datos de demostración
-
-Los datos demo están separados del arranque normal y se rechazan fuera de `APP_ENV=development`.
-Para crear el propietario demo, definir `DEMO_OWNER_PASSWORD` en `.env` y ejecutar:
+Requirements: Docker Engine with Compose, Git and `make`. Python 3.12+ and Node.js 24 LTS are
+optional, and only needed to run the checks outside Docker.
 
 ```bash
-make demo
-```
-
-El comando requiere además la habilitación explícita que agrega el target `demo`; producción nunca
-lo ejecuta automáticamente. Los seeds de las migraciones crean 23 rubros y los 48 barrios oficiales
-de CABA; el comando demo continúa creando únicamente el propietario.
-
-## Configurar una campaña
-
-Después de iniciar sesión:
-
-1. Completar el perfil comercial.
-2. Revisar o editar rubros y zonas.
-3. Cargar un PDF válido de hasta 15 MiB en Catálogos.
-4. Crear una campaña, seleccionando al menos un rubro, una zona y una versión de catálogo.
-5. Ajustar objetivo, máximo crudo, costo, límite diario, intervalo, horario, zona horaria y umbral.
-6. Iniciar el borrador para congelar perfil, configuración, selecciones, catálogo y consultas.
-
-El objetivo inicial es 300. `SEND_MODE` y `SEND_KILL_SWITCH` se muestran en el dashboard pero sólo
-se configuran por entorno. Con los defaults, cualquier campaña es dry-run, el kill switch está
-activo y web/IA usan fakes sin sockets. La extracción mock usa también un resolver MX
-determinístico; la extracción Outscraper usa DNS MX real desde el worker.
-
-Cada prospecto con email obtiene un snapshot de la home y hasta tres páginas internas. Luego una
-única llamada lógica evalúa relevancia y redacta JSON estructurado. Sólo un resultado enteramente
-válido y sobre el umbral crea un mensaje `PREPARED`; no existe fallback de copy. Beat reconstruye
-la cola desde PostgreSQL: en dry-run genera y hashea el MIME sin llamar Gmail; en live sólo entrega
-si pasan modo, kill switch, conexión probada, cuota, intervalo, horario, catálogo, supresión y
-ledger global. Desde el detalle se puede regenerar únicamente un candidato que todavía no entró
-en entrega.
-
-Campañas, Prospectos, Envíos, Respuestas, Jobs y Auditoría ofrecen búsqueda, filtros y paginación.
-Prospectos, Envíos y Respuestas exportan el conjunto filtrado a CSV con neutralización de fórmulas.
-Jobs muestra heartbeat, intentos, próximo retry y error redactado. Un fallo final sólo puede
-reintentarse con motivo explícito, sobre la misma fila, Message-ID e idempotency key; un estado
-ambiguo se reconcilia y no ofrece ese botón.
-
-## Conectar Gmail
-
-El proveedor fake permite probar todo el flujo sin red desde la pantalla Gmail. Para OAuth real:
-
-1. Crear credenciales OAuth de aplicación web en Google Cloud.
-2. Registrar exactamente `GMAIL_OAUTH_REDIRECT_URI` (por defecto,
-   `http://127.0.0.1:8000/gmail/oauth/callback/`).
-3. Configurar fuera del repositorio:
-
-   ```bash
-   GMAIL_PROVIDER=api
-   GMAIL_OAUTH_CLIENT_ID=replace-with-client-id
-   GMAIL_OAUTH_CLIENT_SECRET=replace-with-client-secret
-   GMAIL_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/gmail/oauth/callback/
-   FIELD_ENCRYPTION_KEY=replace-with-an-independent-random-secret
-   ```
-
-La autorización solicita sólo `gmail.send` y `gmail.readonly`, valida state y PKCE, y cifra el
-refresh token. Después de conectar es obligatorio usar “Enviar prueba a mi Gmail”; el servidor
-fija el destinatario a la misma cuenta conectada y no acepta uno enviado por el formulario. Como
-esa prueba es un envío real, también exige `SEND_MODE=live` y `SEND_KILL_SWITCH=false`.
-
-Para habilitar una campaña live deben configurarse además `SEND_MODE=live` y
-`SEND_KILL_SWITCH=false`. El scheduler envía un destinatario por MIME, sin CC/BCC, HTML ni tracking,
-y adjunta la versión PDF congelada. Un timeout ambiguo pasa a reconciliación por `Message-ID`; un
-reinicio de web/worker reconstruye pendientes y reconciliaciones desde la base.
-
-## Habilitar enriquecimiento web e IA
-
-El fetch HTTP real se activa globalmente con `WEBSITE_FETCHER=http`. Sólo acepta HTTP/HTTPS por
-80/443, valida todas las respuestas DNS y cada redirect, conecta a la IP pública validada y aplica
-límites de páginas, bytes, redirects y tiempo. El contenido resultante siempre se trata como dato
-no confiable.
-
-Al crear una campaña se puede elegir `Ollama` u `OpenAI compatible`, indicando URL base y modelo.
-Los valores externos se configuran sólo por entorno:
-
-```bash
-# Ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-
-# API compatible con /v1/chat/completions
-OPENAI_COMPATIBLE_BASE_URL=https://proveedor.example
-LLM_API_KEY=replace-with-your-key
-```
-
-La URL/modelo se congelan en la campaña. `LLM_API_KEY` nunca se persiste. Ambos adaptadores exigen
-salida JSON schema y vuelven a validarla localmente; los tests sustituyen sus transportes y
-mantienen todos los sockets bloqueados.
-
-## Habilitar Outscraper
-
-Revisar primero el precio vigente y ajustar la reserva conservadora. Luego definir sólo por entorno:
-
-```bash
-EXTRACTOR_PROVIDER=outscraper
-OUTSCRAPER_API_KEY=replace-with-your-key
-OUTSCRAPER_MAX_COST_PER_RESULT=0.010000
-OUTSCRAPER_BATCH_SIZE=20
-OUTSCRAPER_POLL_SECONDS=30
-```
-
-Al crear la campaña, seleccionar `Outscraper`. Iniciar crea un `SearchRun` durable; el worker envía
-la consulta asíncrona con enrichment de contactos, guarda el ID y el JSON crudo, y Beat reanuda el
-polling después de reinicios. Los errores y el uso/costo estimado aparecen en el detalle de campaña.
-La API key no se guarda en base, no se incluye en la URL y no aparece en auditoría. No existe
-fallback de scraping directo.
-
-## Detener y limpiar
-
-Detener los contenedores preservando base, Redis y almacenamiento privado:
-
-```bash
-make down
-```
-
-Para probar migraciones desde una base completamente vacía, eliminar también los volúmenes locales.
-Esto borra todos los datos del entorno:
-
-```bash
-docker compose down --volumes
+cp .env.example .env
+make build
 make up
 ```
 
-## Backup y restore
-
-El backup incluye un dump consistente de PostgreSQL y el volumen privado de catálogos, con hashes
-SHA-256 y permisos restrictivos. No incluye `FIELD_ENCRYPTION_KEY`: respaldarla separadamente es
-obligatorio para recuperar Gmail OAuth.
+Generate independent local secrets before the first start, and fill them into `.env`:
 
 ```bash
-make backup
-# o: ./scripts/backup.sh /ruta/cifrada/backups
+openssl rand -hex 32  # DJANGO_SECRET_KEY
+openssl rand -hex 32  # FIELD_ENCRYPTION_KEY
+openssl rand -hex 32  # INTERNAL_PROXY_TOKEN
+openssl rand -hex 32  # POSTGRES_PASSWORD
 ```
 
-Para restaurar, recuperar la misma `FIELD_ENCRYPTION_KEY`, dejar `SEND_KILL_SWITCH=true` y confirmar
-el reemplazo de la instalación actual:
+Use only <http://127.0.0.1:3000> in the browser. The diagnostic backend binds `127.0.0.1:8001`,
+MinIO `127.0.0.1:9000` and its console <http://127.0.0.1:9001>. PostgreSQL and Redis do not need to
+be published to the host at all.
+
+The first admin is bootstrapped from `OWNER_USERNAME`/`OWNER_PASSWORD` on startup
+(`RUN_OWNER_BOOTSTRAP_ON_STARTUP`). There is no public sign-up and no public password recovery.
+
+Other targets:
 
 ```bash
-make restore BACKUP=backups/20260716T120000Z
+make logs          # follow frontend, backend, postgres, redis and minio
+make migrate       # run migrate_safe inside the backend container
+make owner         # bootstrap the first admin manually
+make demo          # load demo data (development only; needs ALLOW_DEMO_DATA=true)
+make smoke-worker  # check the workers are alive
+make backup        # BACKUP_ROOT=<dir> make backup
+make restore       # BACKUP=<path> make restore
+make down
 ```
 
-Restore verifica checksums, restaura base/catálogos con propiedad del usuario no privilegiado
-`app`, aplica migraciones, recalcula hashes y prueba que los refresh tokens se puedan descifrar
-antes de reiniciar workers. Ver incidentes de disco, proveedores y reinicios en
-[docs/OPERATIONS.md](docs/OPERATIONS.md).
+Never commit `.env`, credentials, catalogs, exports, backups or personal data.
 
 ## Quality gates
 
-Crear un entorno Python local y ejecutar todos los checks:
-
 ```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[dev]'
-make check
-make test-e2e
+make check           # backend-check + frontend-check
+make backend-check   # ruff check, ruff format --check, mypy, pytest, makemigrations --check, django check
+make frontend-check  # eslint --max-warnings=0, tsc --noEmit, vitest run, next build
+make test-e2e        # fake-provider end-to-end tests
+make security-check  # pip-audit and pnpm audit --prod
 ```
 
-También están disponibles por separado `make lint`, `make typecheck` y `make test`.
-`make check` valida Ruff, formato, mypy, pytest, migraciones pendientes y checks de Django. Pytest
-bloquea sockets y usa exclusivamente los proveedores fake.
+`make check` is the gate before review. Tests run with the network blocked and against fake
+providers; a test that reaches the real internet is a bug.
 
-La aceptación automatizada
-`tests/e2e/test_base_application.py::test_full_fake_acceptance_flow_from_ui` recorre desde la UI
-perfil, PDF, OAuth/prueba fake, campaña, pipeline, entrega, respuesta entrante, clasificación,
-respuesta manual y exportaciones.
+## Before enabling real effects
 
-## Checklist obligatorio antes de SEND_MODE=live
+No architectural or deployment step removes any of these:
 
-No cambiar `SEND_MODE=live` ni desactivar el kill switch hasta completar y registrar externamente:
+1. `make check`, `make test-e2e` and `make security-check` all green.
+2. Dependency, image and secret audits reviewed.
+3. The security matrix in [docs/SECURITY.md](docs/SECURITY.md) walked through.
+4. A backup and a verified restore drill, not just a backup.
+5. A full campaign completed in `dry-run`.
+6. Legal and deliverability review — external to this repository — before any cold outreach goes
+   live.
+7. Gmail connection, live sending, automatic replies and relationship automation each enabled in
+   their own separate review. They are four decisions, not one.
 
-- [ ] `make check` y `make test-e2e` pasan sobre el commit a desplegar.
-- [ ] `.env`, backups, catálogos/exportaciones y claves no están versionados; el escaneo de secretos
-  no encuentra valores reales.
-- [ ] Bind/proxy/orígenes/cookies fueron revisados; fuera de loopback hay TLS, cookies secure y HSTS.
-- [ ] `FIELD_ENCRYPTION_KEY` tiene backup separado y un backup+restore reciente pasó
-  `verify_restore` con el kill switch activo.
-- [ ] Gmail OAuth usa exactamente `gmail.send` y `gmail.readonly`, la prueba propia pasó y se revisó
-  la política de expiración del refresh token.
-- [ ] Identidad legal, vendedor, domicilio, firma, asunto `PUBLICIDAD -` y BAJA están completos; la
-  campaña tuvo revisión legal y de entregabilidad.
-- [ ] Catálogo conserva tamaño/hash y el disco supera `MIN_FREE_DISK_BYTES`.
-- [ ] Supresiones fueron revisadas y se probaron baja, bounce e invalidez tardía.
-- [ ] Límite diario, intervalo, días, horario y `America/Argentina/Buenos_Aires` son conservadores.
-- [ ] Se probaron pausa, cancelación, kill switch, proveedor caído, retry/reconciliación y reinicio.
-- [ ] `/health/ready/` está `ok` y `/health/degraded/` no tiene componentes críticos degradados.
-- [ ] Primero se cambia `SEND_MODE=live` manteniendo `SEND_KILL_SWITCH=true`; recién después del
-  preflight se desactiva el kill switch para una campaña LIVE confirmada.
+Moving reply automation from `SHADOW` to `LIVE` should follow the recorded `NEEDED_HUMAN` and
+`INCORRECT` rate, not a hunch.
 
-## Controles seguros por defecto
+## Documentation
 
-- `HOST_BIND=127.0.0.1`
-- `SEND_MODE=dry-run`
-- `SEND_KILL_SWITCH=true`
-- extractor, web, IA y Gmail en `fake`
-- catálogos fuera de static/media público, bajo `PRIVATE_STORAGE_ROOT`
-- sin API keys, OAuth real, SMTP, scraping ni llamadas de red de proveedores
+| Document | Contents |
+| --- | --- |
+| [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md) | Numbered functional requirements |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Boundaries, flows and explicit risks |
+| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Entities, constraints and invariants |
+| [docs/STATE_MACHINES.md](docs/STATE_MACHINES.md) | Permitted transitions |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model and controls |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Provider boundaries |
+| [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | Coverage expectations |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Incidents, backup and restore |
+| [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) | Deployment guide — no public instance is running |
+| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phase order and go-live blockers |
+| [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) | Recorded defaults |
+| [AGENTS.md](AGENTS.md) | Contribution rules and product invariants |
+
+The reference documents are in Spanish.
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 Francisco Nattero.

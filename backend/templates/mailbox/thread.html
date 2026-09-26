@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{% if root %}{{ root.subject }}{% else %}{{ inbound.subject }}{% endif %} · Contact Outreach{% endblock %}
+{% block breadcrumb %}Respuestas / Hilo{% endblock %}
+{% block page_title %}Hilo de respuesta{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div class="page-header__copy">
+    <p><a href="{% url 'responses' %}">← Volver a respuestas</a></p>
+    <h1>{% if root %}{{ root.subject }}{% else %}{{ inbound.subject }}{% endif %}</h1>
+    <p>
+      <strong>
+        {% if root and root.prospect %}
+          {{ root.prospect.name }}
+        {% elif root and root.contact %}
+          {{ root.contact }}
+        {% elif inbound.contact %}
+          {{ inbound.contact }}
+        {% elif root and root.organization %}
+          {{ root.organization.name|default:"Organización sin nombre" }}
+        {% elif inbound.organization %}
+          {{ inbound.organization.name|default:"Organización sin nombre" }}
+        {% else %}
+          Contacto directo
+        {% endif %}
+      </strong>
+      · {% if root %}{{ root.recipient }}{% else %}{{ inbound.sender }}{% endif %}
+      {% if root and root.campaign %}
+        · <a href="{% url 'campaign-detail' root.campaign_id %}">{{ root.campaign.name }}</a>
+      {% else %}
+        · Sin campaña
+      {% endif %}
+    </p>
+  </div>
+  <div class="page-header__actions">
+    <span class="badge badge--{{ inbound.classification|lower }}">{{ inbound.get_classification_display }}</span>
+  </div>
+</header>
+<div class="config-layout">
+  <section class="thread" aria-label="Conversación cronológica">
+    {% for item in chronology %}
+      <article class="panel thread-message thread-message--{{ item.direction }}">
+        <div class="thread-message__meta">
+          <strong>{% if item.direction == "outbound" %}Enviado{% else %}Recibido{% endif %}</strong>
+          <span>{{ item.date|date:"d M Y · H:i" }}</span>
+        </div>
+        <p class="muted">{{ item.sender }} · {{ item.classification }}</p>
+        <div class="thread-message__body">{{ item.body }}</div>
+      </article>
+    {% endfor %}
+  </section>
+  {% if show_thread_sidebar %}
+    <aside class="section-stack" aria-label="Acciones y estado de respuesta">
+    {% if automation_review %}
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2>Respuesta automática</h2>
+            <p class="muted">Motivo registrado para este hilo.</p>
+          </div>
+          <span class="badge badge--warning">{{ automation_review.status_label }}</span>
+        </div>
+        <div class="panel__body">
+          <div class="alert alert--warning">
+            <div><strong>{{ automation_review.title }}</strong><br>{{ automation_review.summary }}</div>
+          </div>
+          {% if automation_review.next_step %}<p class="muted flush">{{ automation_review.next_step }}</p>{% endif %}
+        </div>
+      </section>
+    {% endif %}
+    {% if inbound.is_human and can_reply %}
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2>Responder manualmente</h2>
+            <p class="muted">Se mantienen el destinatario, el asunto y la conversación.</p>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div class="alert alert--warning">
+            <div><strong>Acción explícita</strong><br>Ninguna tarea redacta ni envía esta respuesta sin tu clic.</div>
+          </div>
+          <form method="post" action="{% url 'manual-reply' inbound.pk %}">
+            {% csrf_token %}
+            {{ form.idempotency_key }}
+            {% include "includes/field.html" with field=form.body_text %}
+            <button class="button" type="submit">Enviar respuesta</button>
+          </form>
+        </div>
+      </section>
+    {% endif %}
+    </aside>
+  {% endif %}
+</div>
+{% endblock %}

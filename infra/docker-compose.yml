@@ -1,0 +1,226 @@
+name: contact-outreach-v2
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      INTERNAL_PROXY_TOKEN: ${INTERNAL_PROXY_TOKEN:-development-proxy-token-change-me}
+      PUBLIC_APP_ORIGIN: ${PUBLIC_APP_ORIGIN:-http://localhost:3000}
+      NODE_ENV: production
+    ports:
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - edge
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-development-only-change-me}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      DJANGO_SECURE_COOKIES: ${DJANGO_SECURE_COOKIES:-false}
+      DJANGO_SSL_REDIRECT: ${DJANGO_SSL_REDIRECT:-false}
+      DJANGO_HSTS_SECONDS: ${DJANGO_HSTS_SECONDS:-0}
+      DJANGO_HSTS_INCLUDE_SUBDOMAINS: ${DJANGO_HSTS_INCLUDE_SUBDOMAINS:-false}
+      DJANGO_HSTS_PRELOAD: ${DJANGO_HSTS_PRELOAD:-false}
+      DJANGO_PROXY_HTTPS: ${DJANGO_PROXY_HTTPS:-false}
+      DJANGO_RAILWAY_PROXY: ${DJANGO_RAILWAY_PROXY:-false}
+      DJANGO_TRUSTED_PROXY_IPS: ${DJANGO_TRUSTED_PROXY_IPS:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+      POSTGRES_DB: ${POSTGRES_DB:-contact_outreach}
+      POSTGRES_USER: ${POSTGRES_USER:-contact_outreach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only-change-me}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CACHE_REDIS_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      API_PUBLIC_THROTTLE_RATE: ${API_PUBLIC_THROTTLE_RATE:-30/hour}
+      API_READ_THROTTLE_RATE: ${API_READ_THROTTLE_RATE:-300/5minute}
+      API_MUTATION_THROTTLE_RATE: ${API_MUTATION_THROTTLE_RATE:-60/5minute}
+      API_SENSITIVE_THROTTLE_RATE: ${API_SENSITIVE_THROTTLE_RATE:-10/hour}
+      API_EXPORT_THROTTLE_RATE: ${API_EXPORT_THROTTLE_RATE:-5/hour}
+      PRIVATE_STORAGE_BACKEND: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-contact-outreach-local}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-development-minio-password-change-me}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-contact-outreach-private}
+      S3_REGION_NAME: ${S3_REGION_NAME:-us-east-1}
+      S3_ADDRESSING_STYLE: path
+      INTERNAL_PROXY_TOKEN: ${INTERNAL_PROXY_TOKEN:-development-proxy-token-change-me}
+      RUN_MIGRATIONS_ON_STARTUP: ${RUN_MIGRATIONS_ON_STARTUP:-true}
+      RUN_OWNER_BOOTSTRAP_ON_STARTUP: ${RUN_OWNER_BOOTSTRAP_ON_STARTUP:-true}
+      OWNER_USERNAME: ${OWNER_USERNAME:-owner}
+      OWNER_EMAIL: ${OWNER_EMAIL:-}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      SEND_MODE: ${SEND_MODE:-dry-run}
+      SEND_KILL_SWITCH: ${SEND_KILL_SWITCH:-true}
+      AUTO_REPLY_KILL_SWITCH: ${AUTO_REPLY_KILL_SWITCH:-true}
+      RELATIONSHIP_KILL_SWITCH: ${RELATIONSHIP_KILL_SWITCH:-true}
+      AUTOMATIC_REPLY_CONVERSATION_DAILY_LIMIT: ${AUTOMATIC_REPLY_CONVERSATION_DAILY_LIMIT:-3}
+      AUTOMATIC_REPLY_WORKSPACE_DAILY_LIMIT: ${AUTOMATIC_REPLY_WORKSPACE_DAILY_LIMIT:-20}
+      WEBSITE_FETCHER: ${WEBSITE_FETCHER:-fake}
+      CONTACT_EMAIL_MX_RESOLVER: ${CONTACT_EMAIL_MX_RESOLVER:-dns}
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      LLM_MODEL: ${LLM_MODEL:-fake-deterministic}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fake}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      GMAIL_PROVIDER: ${GMAIL_PROVIDER:-fake}
+      GMAIL_OAUTH_CLIENT_ID: ${GMAIL_OAUTH_CLIENT_ID:-}
+      GMAIL_OAUTH_CLIENT_SECRET: ${GMAIL_OAUTH_CLIENT_SECRET:-}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-http://localhost:3000/api/v1/integrations/gmail/oauth/callback/}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
+      GMAIL_FAKE_ACCOUNT_EMAIL: ${GMAIL_FAKE_ACCOUNT_EMAIL:-owner@example.invalid}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
+      CELERY_LOG_LEVEL: ${CELERY_LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=${BACKEND_TMP_SIZE:-2g},mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - edge
+      - data
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/container-healthcheck.py"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    stop_grace_period: 100s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-contact_outreach}
+      POSTGRES_USER: ${POSTGRES_USER:-contact_outreach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-contact-outreach-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-development-minio-password-change-me}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "${MINIO_BIND:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_BIND:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-contact-outreach-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-development-minio-password-change-me}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-contact-outreach-private}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$S3_BUCKET_NAME" &&
+        mc anonymous set none "local/$$S3_BUCKET_NAME"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  edge:
+  data:
+    internal: true
