@@ -130,7 +130,7 @@ def test_admin_can_save_active_global_context(client: Client, owner) -> None:
     created = client.post(
         reverse("global-context-create"),
         {
-            "context_text": "Vendemos carbones para motores y respondemos con prudencia.",
+            "context_text": "Vendemos componentes industriales y respondemos con prudencia.",
         },
     )
 

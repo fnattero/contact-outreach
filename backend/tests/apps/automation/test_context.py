@@ -163,7 +163,7 @@ def _reply_context_fixture(
         external_at=timezone.now(),
         received_at=timezone.now(),
         body_text=(
-            "TEXTO NUEVO COMPLETO sobre carbones.\n\n"
+            "TEXTO NUEVO COMPLETO sobre componentes.\n\n"
             "On Friday alguien wrote:\n> HISTORIAL CITADO QUE NO DEBE REPETIRSE"
         ),
         is_human=True,
@@ -199,9 +199,9 @@ def test_reply_context_keeps_mandatory_messages_and_bounds_optional_history(owne
         revision = create_knowledge_revision(
             workspace=contact.workspace,
             actor=owner,
-            title=f"Carbones {index:02d}",
+            title=f"Componentes {index:02d}",
             category="Producto",
-            text=f"Información aprobada sobre carbones número {index}.",
+            text=f"Información aprobada sobre componentes número {index}.",
         )
         approve_knowledge_revision(revision, actor=owner)
     KnowledgeFactEmbedding.objects.all().delete()
@@ -210,7 +210,7 @@ def test_reply_context_keeps_mandatory_messages_and_bounds_optional_history(owne
 
     mandatory = [block for block in context.blocks if block.mandatory]
     assert [(block.provenance, block.text) for block in mandatory] == [
-        ("NEW_INBOUND", "TEXTO NUEVO COMPLETO sobre carbones."),
+        ("NEW_INBOUND", "TEXTO NUEVO COMPLETO sobre componentes."),
         ("ORIGINAL_OUTBOUND", original.body_text),
         ("DIRECT_PARENT", parent.body_text),
     ]
@@ -315,7 +315,7 @@ def test_reply_context_includes_approved_global_context(owner: User) -> None:
         workspace=inbound.contact.workspace,
         actor=owner,
         context_text=(
-            "Somos una empresa de carbones para motores. Si falta información técnica, "
+            "Somos una empresa de componentes industriales. Si falta información técnica, "
             "pedimos modelo, medida o aplicación."
         ),
         source_notes="Revisado por dirección.",
@@ -332,7 +332,7 @@ def test_reply_context_includes_approved_global_context(owner: User) -> None:
     ]
     assert len(global_blocks) == 1
     assert global_blocks[0].mandatory is True
-    assert "empresa de carbones" not in str(context.manifest)
+    assert "empresa de componentes" not in str(context.manifest)
 
 
 @pytest.mark.django_db
@@ -428,7 +428,7 @@ def test_reply_context_trims_optional_blocks_using_serialized_budget(owner: User
 def test_reply_context_opens_human_path_when_mandatory_content_cannot_fit(owner: User) -> None:
     inbound, original, parent = _reply_context_fixture(owner)
     mandatory_length = (
-        len("TEXTO NUEVO COMPLETO sobre carbones.")
+        len("TEXTO NUEVO COMPLETO sobre componentes.")
         + len(original.body_text)
         + len(parent.body_text)
     )

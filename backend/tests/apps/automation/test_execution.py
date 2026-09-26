@@ -995,7 +995,9 @@ def test_direct_contact_reply_profile_and_global_context_survive_policy_recheck(
     revision = create_global_knowledge_context_revision(
         workspace=scenario.contact.workspace,
         actor=owner,
-        context_text="Somos fabricantes de carbones para motores y atendemos consultas técnicas.",
+        context_text=(
+            "Somos fabricantes de componentes industriales y atendemos consultas técnicas."
+        ),
         source_notes="",
     )
     approve_global_knowledge_context_revision(revision, actor=owner)

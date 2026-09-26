@@ -27,7 +27,6 @@ class BusinessProfileSerializer(serializers.Serializer[dict[str, object]]):
     website = serializers.URLField(required=False, allow_blank=True)
     signature = serializers.CharField(required=False)
     additional_instructions = serializers.CharField(required=False, allow_blank=True)
-    relevance_threshold = serializers.IntegerField(min_value=0, max_value=100, required=False)
     profile_version = serializers.IntegerField(read_only=True)
 
 

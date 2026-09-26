@@ -15,7 +15,7 @@
 
 <form method="post" class="campaign-form" novalidate>
     {% csrf_token %}
-    {{ form.relevance_threshold }}{{ form.catalog }}
+    {{ form.catalog }}
     <div class="section-stack">
         <section class="panel form-section" id="basic">
             <div class="panel__header"><div><h2><span class="form-section__number">1</span>Información básica</h2><p class="muted">Un nombre reconocible y la ubicación general del descubrimiento.</p></div></div>
@@ -122,7 +122,7 @@
             <div class="panel__body">
                 <div class="readonly-settings" aria-label="Mensaje inicial predeterminado">
                     <div class="readonly-setting readonly-setting--wide"><span>Asunto</span><strong>Propuesta comercial</strong></div>
-                    <div class="readonly-setting readonly-setting--wide"><span>Contenido</span><span>Presenta la propuesta de carbones para motores, adjunta los catálogos elegidos e invita a responder para ampliar información.</span></div>
+                    <div class="readonly-setting readonly-setting--wide"><span>Contenido</span><span>Presenta la propuesta de componentes industriales, adjunta los catálogos elegidos e invita a responder para ampliar información.</span></div>
                     <div class="readonly-setting readonly-setting--wide"><span>Firma</span><span>Se agrega la firma aprobada del perfil comercial y queda congelada al iniciar la búsqueda.</span></div>
                 </div>
                 <p class="field__help">Podés revisar el texto exacto, la audiencia final y todos los PDFs antes de aprobar el envío.</p>

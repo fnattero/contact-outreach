@@ -4,22 +4,19 @@ import uuid
 from datetime import datetime, timedelta
 
 from celery import shared_task
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 
 from apps.audit.models import BackgroundJob
 from apps.audit.services import finish_job, start_job
 from apps.campaigns.models import Campaign
-from apps.prospects.analysis import analyze_prospect
 from apps.prospects.email_validation import TransientMXError
 from apps.prospects.enrichment import enrich_prospect
 from apps.prospects.exceptions import ProspectPipelineInactive, StaleProspectAnalysis
-from apps.prospects.models import AIAnalysis, Prospect
+from apps.prospects.models import Prospect
 from apps.prospects.pipeline import (
     claim_prospect_pipeline,
     clear_prospect_pipeline_reservation,
-    defer_prospect_pipeline,
     reserve_prospect_pipeline,
 )
 from apps.prospects.services import (
@@ -107,52 +104,13 @@ def process_prospect_pipeline(
         if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
             enrich_prospect(prospect.pk)
         prospect.refresh_from_db()
+        prospect = mark_fixed_campaign_prospect_ready(prospect.pk)
         if prospect.campaign.state == Campaign.State.DISCOVERING:
-            prospect = mark_fixed_campaign_prospect_ready(prospect.pk)
             from apps.campaigns.approval import maybe_move_campaign_to_approval
 
             maybe_move_campaign_to_approval(prospect.campaign_id)
-            finish_job(job)
-            return prospect.pipeline_state
-        analysis = analyze_prospect(
-            prospect.pk,
-            regeneration_nonce=regeneration_nonce,
-            actor=actor,
-            analysis_generation=analysis_generation,
-        )
-        if analysis.status == AIAnalysis.Status.RETRY_WAIT:
-            if analysis.next_retry_at is None:
-                raise RuntimeError("El reintento IA no tiene fecha programada.")
-            next_token = defer_prospect_pipeline(
-                prospect.pk,
-                current_token=token,
-                generation=analysis.generation,
-            )
-            if not settings.CELERY_TASK_ALWAYS_EAGER:
-                countdown = max(
-                    1,
-                    int((analysis.next_retry_at - timezone.now()).total_seconds()),
-                )
-                process_prospect_pipeline.apply_async(
-                    args=(prospect_id,),
-                    kwargs={
-                        "regeneration_nonce": analysis.regeneration_nonce,
-                        "actor_id": analysis.requested_by_id,
-                        "reservation_token": next_token,
-                        "analysis_generation": analysis.generation,
-                    },
-                    countdown=countdown,
-                )
-            finish_job(
-                job,
-                state=BackgroundJob.State.RETRY_WAIT,
-                error=analysis.error,
-                next_retry_at=analysis.next_retry_at,
-            )
-        elif analysis.status == AIAnalysis.Status.ERROR:
-            finish_job(job, state=BackgroundJob.State.FAILED, error=analysis.error)
-        else:
-            finish_job(job)
+        finish_job(job)
+        return prospect.pipeline_state
     except (ProspectPipelineInactive, StaleProspectAnalysis):
         finish_job(job, state=BackgroundJob.State.CANCELLED)
         return prospect.pipeline_state
@@ -161,7 +119,6 @@ def process_prospect_pipeline(
         raise
     finally:
         clear_prospect_pipeline_reservation(prospect.pk, token=token)
-    return analysis.status
 
 
 @shared_task(name="prospects.recover_pipeline")  # type: ignore[untyped-decorator]
@@ -174,7 +131,7 @@ def recover_prospect_pipeline() -> int:
                 Prospect.PipelineState.DISCOVERED,
                 Prospect.PipelineState.EMAIL_FOUND,
             ),
-            campaign__state__in=(Campaign.State.DISCOVERING, Campaign.State.RUNNING),
+            campaign__state=Campaign.State.DISCOVERING,
         ).values_list("pk", "analysis_generation")
     )
     contact_job_keys = {
@@ -195,31 +152,6 @@ def recover_prospect_pipeline() -> int:
         process_prospect_pipeline.delay(
             str(prospect_id),
             reservation_token=reservation.token,
-        )
-        scheduled += 1
-    retry_analyses = AIAnalysis.objects.filter(
-        status=AIAnalysis.Status.RETRY_WAIT,
-        next_retry_at__lte=now,
-    ).select_related("prospect", "requested_by")
-    for analysis in retry_analyses:
-        reservation = reserve_prospect_pipeline(
-            analysis.prospect_id,
-            allowed_states=(
-                Prospect.PipelineState.ENRICHED,
-                Prospect.PipelineState.ERROR,
-                Prospect.PipelineState.SKIPPED_IRRELEVANT,
-                Prospect.PipelineState.QUEUED,
-            ),
-            manual=analysis.requested_by_id is not None,
-        )
-        if reservation is None:
-            continue
-        process_prospect_pipeline.delay(
-            str(analysis.prospect_id),
-            regeneration_nonce=analysis.regeneration_nonce,
-            actor_id=analysis.requested_by_id,
-            reservation_token=reservation.token,
-            analysis_generation=analysis.generation,
         )
         scheduled += 1
     return scheduled

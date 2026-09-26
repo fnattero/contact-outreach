@@ -47,7 +47,6 @@ type CampaignFormValues = {
   window_start: string;
   window_end: string;
   timezone_name: string;
-  relevance_threshold: number;
   reminder_enabled: boolean;
   reminder_delay_days: number;
 };
@@ -77,7 +76,6 @@ const initialValues: CampaignFormValues = {
   window_start: "09:00",
   window_end: "17:00",
   timezone_name: "America/Argentina/Buenos_Aires",
-  relevance_threshold: 70,
   reminder_enabled: false,
   reminder_delay_days: 3,
 };
@@ -414,7 +412,6 @@ export default function NewCampaignPage() {
         </details>
 
         <Form.Item name="timezone_name" hidden><Input /></Form.Item>
-        <Form.Item name="relevance_threshold" hidden><InputNumber /></Form.Item>
 
         <div className="campaign-create-actions" role="region" aria-label="Acciones del borrador">
           <p>

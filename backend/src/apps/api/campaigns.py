@@ -33,7 +33,6 @@ from apps.campaigns.models import Campaign, OutboundMessage
 from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.configuration.integrations import runtime_integration_configuration
-from apps.configuration.models import BusinessProfile
 from apps.contacts.models import CampaignEnrollment
 from apps.dashboard.csv_export import csv_download
 from apps.prospects.models import Prospect
@@ -56,9 +55,6 @@ def _initial_values(owner_id: int, workspace_id: uuid.UUID | str) -> dict[str, o
         "llm_model": runtime.llm_model,
         "llm_base_url": runtime.llm_base_url(),
     }
-    profile = BusinessProfile.objects.filter(workspace_id=workspace_id).first()
-    if profile is not None:
-        initial["relevance_threshold"] = profile.relevance_threshold
     return initial
 
 
@@ -106,7 +102,6 @@ def _campaign_data(campaign: Campaign, *, include_admin: bool) -> dict[str, obje
             "window_start": campaign.window_start.strftime("%H:%M"),
             "window_end": campaign.window_end.strftime("%H:%M"),
             "timezone_name": campaign.timezone_name,
-            "relevance_threshold": campaign.relevance_threshold,
             "reminder_enabled": campaign.reminder_enabled,
             "reminder_delay_days": campaign.reminder_delay_days,
             "status_reason": campaign.status_reason,
@@ -244,7 +239,6 @@ class CampaignListView(SchemaAPIView):
                 "window_start",
                 "window_end",
                 "timezone_name",
-                "relevance_threshold",
                 "extractor_provider",
                 "website_fetcher",
                 "llm_provider",

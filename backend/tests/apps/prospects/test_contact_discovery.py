@@ -97,7 +97,7 @@ def _run(owner: User) -> SearchRun:
     catalog = create_catalog(name="Descubrimiento", upload=upload, actor=owner)
     campaign = Campaign.objects.create(
         name="Descubrimiento de contactos",
-        state=Campaign.State.RUNNING,
+        state=Campaign.State.DISCOVERING,
         discovery_state=Campaign.DiscoveryState.RUNNING,
         delivery_mode=Campaign.DeliveryMode.REVIEW_ONLY,
         extractor_provider="fake",
@@ -106,12 +106,12 @@ def _run(owner: User) -> SearchRun:
         llm_model="fake-deterministic",
         catalog=catalog,
         profile_snapshot={
-            "company_name": "Carbones SA",
+            "company_name": "Componentes Delta SA",
             "salesperson_name": "Fran",
             "address": "CABA",
-            "signature": "Fran · Carbones SA",
-            "description": "Proveedor de carbones para motores",
-            "products": "Carbones para motores eléctricos",
+            "signature": "Fran · Componentes Delta SA",
+            "description": "Proveedor de componentes industriales",
+            "products": "Componentes industriales para equipos eléctricos",
             "differentiators": "Atención técnica",
             "additional_instructions": "Tono sobrio",
         },
@@ -171,16 +171,14 @@ def test_no_provider_email_runs_full_pipeline_from_one_website_snapshot(
 
     result.prospect.refresh_from_db()
     email = result.prospect.emails.get(is_primary=True)
-    assert status == "VALID"
+    assert status == Prospect.PipelineState.QUEUED
     assert result.prospect.pipeline_state == Prospect.PipelineState.QUEUED
     assert WebsiteSnapshot.objects.filter(prospect=result.prospect).count() == 1
     assert email.normalized_email == "contacto@taller-web.example"
     assert email.source == "website_visible_text"
     assert email.source_url == "https://taller-web.example"
     assert len(email.source_content_hash) == 64
-    assert OutboundMessage.objects.get(prospect=result.prospect).state == (
-        OutboundMessage.State.REVIEW_READY
-    )
+    assert not OutboundMessage.objects.filter(prospect=result.prospect).exists()
 
 
 @pytest.mark.django_db

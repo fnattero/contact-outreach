@@ -63,6 +63,58 @@ seguridad no se relajan desde el dashboard.
 | A-052 | Gmail usa gmail.send + gmail.readonly y reconciliación Message-ID; exactly-once absoluto no existe. | Integridad |
 | A-053 | No Google Maps scraping, SMTP password, tracking, HTML outbound, account rotation ni evasión de cuotas. | Legal / seguridad |
 | A-054 | Campañas/AIAnalysis históricos siguen legibles y nunca se regeneran o reenvían retroactivamente. | Migración |
+| A-059 | La IA nunca redacta el cuerpo del contacto inicial. Se eliminó el camino `analyze_prospect`, que puntuaba relevancia y redactaba copy en una sola llamada. El scoring se perdió con él y se acepta esa pérdida; el modelo `AIAnalysis` se conserva a propósito como punto de partida para reconstruirlo sin redacción. | Producto / seguridad |
+
+## Calidad de audiencia y scoring pendiente
+
+Esta sección registra una capacidad que existía, se perdió como efecto secundario y todavía no se
+reconstruyó. No describe el comportamiento deseado a futuro sino el estado real de hoy.
+
+**Qué existía.** `apps/prospects/analysis.py::analyze_prospect` llamaba al `LLMProvider` una sola vez
+por prospecto y obtenía, en un único objeto JSON, dos cosas distintas:
+
+- *scoring de relevancia*: `relevance_score` (escala 0 a 100), `confidence`, `relevance_reason` y
+  `evidence` como lista de `fact_id` literales; se persistía en `AIAnalysis` y un prospecto por
+  debajo de `campaign.relevance_threshold` quedaba `SKIPPED_IRRELEVANT`;
+- *redacción del contacto inicial*: `subject` y `body_text`, que se componían con la firma aprobada
+  y se guardaban como `OutboundMessage`.
+
+**Por qué se perdió.** Ambas salidas compartían una llamada, un JSON schema y una validación. Al
+mover las campañas al mensaje fijo aprobado por una persona y eliminar la redacción automática, el
+scoring se fue con ella. No fue una decisión sobre el scoring: fue un efecto colateral, y se
+registra como tal.
+
+**Qué filtra un prospecto hoy.** Únicamente `enrollment_eligibility` en `apps/contacts/services.py`,
+que verifica cinco condiciones: hay una dirección elegida, esa dirección es válida, la Organization
+no es ya un Contact, no existe otra inscripción activa y la dirección no está suprimida. Las cinco
+son higiene y cumplimiento. **Ninguna evalúa si el prospecto es un destinatario sensato.**
+
+**Dónde queda la calidad de audiencia.** Enteramente en la selección de rubros y zonas que arma la
+consulta Overture. Si esa selección es amplia, la campaña es amplia: no hay ningún filtro posterior
+que la corrija.
+
+**Consecuencias registradas.**
+
+- `Campaign.relevance_threshold` y `BusinessProfile.relevance_threshold` **ya no los lee nadie**.
+  Las columnas, las constraints `0..100` y los valores guardados se conservan a propósito, y los
+  snapshots de campaña y de perfil los siguen escribiendo, para que el scoring nuevo pueda
+  retomarlos sin migración destructiva ni pérdida de configuración histórica. El control se
+  ocultó de la UI (perfil comercial y alta de campaña) y de la API (`BusinessProfileSerializer`,
+  payload y campos escribibles de campañas) hasta que el scoring vuelva: un control visible que
+  no hace nada es peor que ninguno, porque alguien lo sube creyendo que filtra más.
+- `AIAnalysis` conserva sus filas y migraciones y sigue siendo legible (A-054), pero ya no se
+  escriben filas nuevas.
+- `build_analysis_facts` se conserva: arma hechos literales y atribuibles desde `Prospect` y
+  `WebsiteSnapshot` sin llamar a ningún proveedor.
+- `recover_prospect_pipeline` sólo reencola prospectos de campañas en `DISCOVERING`. Antes incluía
+  `RUNNING`, donde el pipeline avanzaba gracias al análisis; sin él, incluir `RUNNING` reencolaría
+  para siempre los mismos prospectos. Un prospecto de una campaña pausada durante el descubrimiento
+  y reanudada a `RUNNING` queda sin avanzar.
+
+**Ítem abierto.** Reconstruir el scoring de relevancia como capacidad independiente, sin redacción:
+entrada de hechos versionados, salida numérica con evidencia, y una decisión explícita sobre si
+filtra automáticamente o sólo ordena para revisión humana. Hasta entonces la calidad de la audiencia
+es responsabilidad de quien elige rubros y zonas.
 
 ## Rubros seed
 

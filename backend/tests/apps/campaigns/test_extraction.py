@@ -35,16 +35,16 @@ from apps.prospects.models import Prospect, ProspectEmail, ProspectIdentity
 
 def _profile_values() -> dict[str, object]:
     return {
-        "company_name": "Carbones SA",
+        "company_name": "Componentes Delta SA",
         "salesperson_name": "Fran",
         "phone": "",
         "whatsapp": "",
         "description": "",
-        "products": "Carbones",
+        "products": "Componentes industriales",
         "differentiators": "",
         "address": "CABA",
         "website": "",
-        "signature": "Fran · Carbones SA",
+        "signature": "Fran · Componentes Delta SA",
         "additional_instructions": "",
         "relevance_threshold": 70,
     }

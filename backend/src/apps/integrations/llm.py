@@ -586,13 +586,15 @@ class MockLLMProvider:
                 "relevance_score": 80,
                 "confidence": 0.91,
                 "relevance_reason": (
-                    "La actividad declarada puede usar motores eléctricos que requieren carbones."
+                    "La actividad declarada puede usar equipos que requieren "
+                    "componentes industriales."
                 ),
                 "evidence": evidence,
-                "subject": "Consulta por carbones para motores",
+                "subject": "Consulta por componentes industriales",
                 "body_text": (
-                    "Te contacto porque trabajamos con carbones para motores eléctricos y "
-                    "queremos conversar sobre una posible aplicación en la actividad del negocio. "
+                    "Te contacto porque trabajamos con componentes industriales para equipos "
+                    "eléctricos y queremos conversar sobre una posible aplicación en la actividad "
+                    "del negocio. "
                     "Contamos con distintas medidas y alternativas para tareas de reparación y "
                     "mantenimiento, sin asumir qué modelos utilizan actualmente. La idea es que "
                     "nuestro vendedor pueda acercarse, conocer la necesidad concreta y mostrar el "

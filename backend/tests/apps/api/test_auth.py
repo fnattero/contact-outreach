@@ -280,7 +280,6 @@ def test_business_profile_is_admin_only_and_uses_explicit_fields(owner: User) ->
         "address": "Calle 1",
         "signature": "Ana · Acme",
         "products": "Products",
-        "relevance_threshold": 80,
     }
 
     initial = client.patch(
@@ -305,7 +304,7 @@ def test_business_profile_is_admin_only_and_uses_explicit_fields(owner: User) ->
     assert response.status_code == 200
     profile = response.json()["data"]
     assert profile["company_name"] == "Acme"
-    assert profile["relevance_threshold"] == 80
+    assert "relevance_threshold" not in profile
     assert set(profile) == {
         "company_name",
         "salesperson_name",
@@ -318,6 +317,5 @@ def test_business_profile_is_admin_only_and_uses_explicit_fields(owner: User) ->
         "website",
         "signature",
         "additional_instructions",
-        "relevance_threshold",
         "profile_version",
     }

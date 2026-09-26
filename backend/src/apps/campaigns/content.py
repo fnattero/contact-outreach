@@ -6,9 +6,9 @@ from hashlib import sha256
 INITIAL_SUBJECT = "Propuesta comercial"
 INITIAL_BODY = (
     "Buen día:\n\n"
-    "Nos ponemos en contacto para acercarle nuestra propuesta de carbones para motores y "
+    "Nos ponemos en contacto para acercarle nuestra propuesta de componentes industriales y "
     "compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para "
-    "motores y herramientas eléctricas. Si le resulta de interés, puede responder este "
+    "equipos y herramientas eléctricas. Si le resulta de interés, puede responder este "
     "correo y con gusto ampliaremos la información.\n\n"
     "Saludos."
 )

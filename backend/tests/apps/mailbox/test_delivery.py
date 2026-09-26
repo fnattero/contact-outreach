@@ -841,7 +841,7 @@ def test_confirmed_initial_creates_one_threaded_attachment_free_reminder(
         reminder_enabled=True,
         reminder_delay_days=3,
         weekdays=[0, 1, 2, 3, 4],
-        signature_snapshot="Carbones SA",
+        signature_snapshot="Componentes Delta SA",
     )
     campaign.refresh_from_db()
     initial = _as_initial(_message(campaign, suffix="reminder"))

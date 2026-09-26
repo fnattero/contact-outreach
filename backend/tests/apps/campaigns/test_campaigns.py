@@ -52,16 +52,16 @@ from apps.overture.models import (
 
 def profile_values() -> dict[str, object]:
     return {
-        "company_name": "Carbones SA",
+        "company_name": "Componentes Delta SA",
         "salesperson_name": "Fran",
         "phone": "",
         "whatsapp": "",
         "description": "",
-        "products": "Carbones",
+        "products": "Componentes industriales",
         "differentiators": "",
         "address": "CABA",
         "website": "",
-        "signature": "Fran · Carbones SA",
+        "signature": "Fran · Componentes Delta SA",
         "additional_instructions": "",
         "relevance_threshold": 70,
     }
@@ -454,7 +454,7 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     assert started.discovery_state == Campaign.DiscoveryState.RUNNING
     assert started.settings_snapshot["objective"] == 300
     assert started.settings_snapshot["website_fetcher"] == "fake"
-    assert started.profile_snapshot["company_name"] == "Carbones SA"
+    assert started.profile_snapshot["company_name"] == "Componentes Delta SA"
     assert started.prompt_snapshot == {
         "version": "fixed-campaign-message-v1",
         "schema_version": "fixed-message-no-placeholders-v1",

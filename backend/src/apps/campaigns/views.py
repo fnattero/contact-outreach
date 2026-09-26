@@ -27,7 +27,7 @@ from apps.campaigns.models import Campaign, OutboundMessage
 from apps.campaigns.services import create_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.configuration.integrations import runtime_integration_configuration
-from apps.configuration.models import BusinessProfile, SearchZone
+from apps.configuration.models import SearchZone
 from apps.contacts.models import CampaignEnrollment
 from apps.mailbox.tasks import deliver_message_task
 from apps.prospects.models import Prospect
@@ -53,7 +53,6 @@ CAMPAIGN_VALUE_FIELDS = (
     "window_start",
     "window_end",
     "timezone_name",
-    "relevance_threshold",
     "extractor_provider",
     "website_fetcher",
     "llm_provider",
@@ -211,9 +210,6 @@ def campaign_create(request: HttpRequest) -> HttpResponse:
             "llm_base_url": integration_runtime.llm_base_url(),
         }
     )
-    profile = BusinessProfile.objects.filter(workspace=workspace).first()
-    if profile is not None:
-        initial["relevance_threshold"] = profile.relevance_threshold
     form = CampaignForm(
         request.POST if request.method == "POST" else None,
         initial=initial,

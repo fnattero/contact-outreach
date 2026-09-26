@@ -17,9 +17,9 @@ def test_default_campaign_messages_are_exact_and_have_no_placeholders() -> None:
     assert INITIAL_SUBJECT == "Propuesta comercial"
     assert INITIAL_BODY == (
         "Buen día:\n\n"
-        "Nos ponemos en contacto para acercarle nuestra propuesta de carbones para motores y "
+        "Nos ponemos en contacto para acercarle nuestra propuesta de componentes industriales y "
         "compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para "
-        "motores y herramientas eléctricas. Si le resulta de interés, puede responder este "
+        "equipos y herramientas eléctricas. Si le resulta de interés, puede responder este "
         "correo y con gusto ampliaremos la información.\n\nSaludos."
     )
     assert REMINDER_BODY == (

@@ -56,7 +56,6 @@
     <div class="panel__body"><div class="form-summary">
         <div class="summary-item"><span class="summary-item__label">Objetivo / máximo crudo</span><span class="summary-item__value">{{ campaign.objective }} / {{ campaign.max_raw_records }}</span></div>
         <div class="summary-item"><span class="summary-item__label">Modo</span><span class="summary-item__value">{{ campaign.get_delivery_mode_display }}</span></div>
-        <div class="summary-item"><span class="summary-item__label">Umbral de relevancia</span><span class="summary-item__value">{{ campaign.relevance_threshold }} / 100</span></div>
         <div class="summary-item"><span class="summary-item__label"><span class="help-term" data-tooltip="Versión inmutable del catálogo local de lugares que usa esta campaña.">Datos de Overture</span></span><span class="summary-item__value">{% if campaign.overture_snapshot %}{{ campaign.overture_snapshot.release_id }} · <code>{{ campaign.overture_snapshot.pk }}</code>{% else %}No fijados todavía{% endif %}</span></div>
         <div class="summary-item"><span class="summary-item__label">Confianza Overture</span><span class="summary-item__value">{{ campaign.overture_min_confidence }}</span></div>
         <div class="summary-item"><span class="summary-item__label">Lectura de sitios web</span><span class="summary-item__value">{{ campaign.website_fetcher|etiqueta_es }}</span></div>

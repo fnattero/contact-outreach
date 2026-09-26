@@ -34,7 +34,7 @@ LEGACY_PROFILE = {
     "address": "Buenos Aires",
 }
 LEGACY_OPERATOR_BODY = (
-    "Hola, somos proveedores de carbones para motores y herramientas electricas. "
+    "Hola, somos proveedores de componentes industriales y herramientas electricas. "
     "Queremos acercar una propuesta clara para reposicion y mantenimiento, con catalogos "
     "actualizados, medidas variadas y atencion directa para talleres, ferreterias y servicios "
     "electromecanicos. Si la informacion resulta util, podemos coordinar una visita comercial "

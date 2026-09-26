@@ -35,9 +35,9 @@ class GlobalKnowledgeContextForm(forms.Form):
             attrs={
                 "rows": 7,
                 "placeholder": (
-                    "Ej.: Somos una empresa que vende carbones para motores y herramientas "
-                    "eléctricas. Atendemos consultas de medidas y aplicaciones, y cuando falta "
-                    "información pedimos modelo, medida o uso del motor."
+                    "Ej.: Somos una empresa que vende componentes industriales para equipos y "
+                    "herramientas eléctricas. Atendemos consultas de medidas y aplicaciones, y "
+                    "cuando falta información pedimos modelo, medida o uso del equipo."
                 ),
             }
         ),
@@ -62,9 +62,9 @@ class KnowledgeRevisionForm(forms.Form):
             attrs={
                 "rows": 7,
                 "placeholder": (
-                    "Ej.: Trabajamos con carbones para motores y herramientas eléctricas. "
-                    "Contamos con distintas medidas y podemos orientar al cliente si nos "
-                    "indica modelo, medida o aplicación."
+                    "Ej.: Trabajamos con componentes industriales para equipos y herramientas "
+                    "eléctricas. Contamos con distintas medidas y podemos orientar al cliente "
+                    "si nos indica modelo, medida o aplicación."
                 ),
             }
         ),
@@ -82,8 +82,8 @@ class KnowledgeSearchPreviewForm(forms.Form):
             attrs={
                 "rows": 3,
                 "placeholder": (
-                    "Ej.: ¿Hace cuánto trabajan con carbones? ¿Qué datos necesitan "
-                    "para recomendar una medida?"
+                    "Ej.: ¿Hace cuánto trabajan con componentes industriales? ¿Qué datos "
+                    "necesitan para recomendar una medida?"
                 ),
             }
         ),

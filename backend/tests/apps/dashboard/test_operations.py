@@ -147,13 +147,14 @@ def _operational_data(owner: User) -> tuple[Campaign, Prospect, OutboundMessage,
 
 def _reviewable_body() -> str:
     return (
-        "Te contacto porque trabajamos con carbones para motores eléctricos y queremos "
+        "Te contacto porque trabajamos con componentes industriales para equipos "
+        "eléctricos y queremos "
         "conversar sobre una posible aplicación en la actividad del negocio. Contamos con "
         "distintas medidas y alternativas para tareas de reparación y mantenimiento, sin "
         "asumir qué modelos utilizan actualmente. La idea es que nuestro vendedor pueda "
         "acercarse, conocer la necesidad concreta y mostrar el catálogo técnico disponible. "
         "¿Qué día conviene que pase el vendedor?\n\n"
-        "Fran · Carbones SA\nCarbones SA · CABA"
+        "Fran · Componentes Delta SA\nComponentes Delta SA · CABA"
     )
 
 
@@ -394,10 +395,10 @@ def test_live_draft_can_be_edited_then_requires_audited_approval(
     campaign, _, outbound, _ = _operational_data(owner)
     Campaign.objects.filter(pk=campaign.pk).update(
         profile_snapshot={
-            "company_name": "Carbones SA",
+            "company_name": "Componentes Delta SA",
             "salesperson_name": "Fran",
             "address": "CABA",
-            "signature": "Fran · Carbones SA",
+            "signature": "Fran · Componentes Delta SA",
         }
     )
     OutboundMessage.objects.filter(pk=outbound.pk).update(
@@ -473,10 +474,10 @@ def test_draft_editor_normalizes_browser_crlf_and_accepts_migrated_short_copy(
     campaign, _, outbound, _ = _operational_data(owner)
     Campaign.objects.filter(pk=campaign.pk).update(
         profile_snapshot={
-            "company_name": "Carbones SA",
+            "company_name": "Componentes Delta SA",
             "salesperson_name": "Fran",
             "address": "CABA",
-            "signature": "Fran · Carbones SA",
+            "signature": "Fran · Componentes Delta SA",
         }
     )
     migrated_body = _reviewable_body().replace(
@@ -521,7 +522,7 @@ def test_manual_approval_migration_updates_existing_unsent_drafts(
     OutboundMessage.objects.filter(pk=outbound.pk).update(
         subject="PUBLICIDAD - Consulta técnica",
         body_text=(
-            "Contenido conservado.\nFran · Carbones SA\nCarbones SA · CABA\n"
+            "Contenido conservado.\nFran · Componentes Delta SA\nComponentes Delta SA · CABA\n"
             "Si no querés recibir más mensajes, respondé BAJA."
         ),
         state=OutboundMessage.State.PREPARED,
@@ -534,7 +535,7 @@ def test_manual_approval_migration_updates_existing_unsent_drafts(
 
     outbound.refresh_from_db()
     assert outbound.subject == "Consulta técnica"
-    assert outbound.body_text.endswith("Carbones SA · CABA")
+    assert outbound.body_text.endswith("Componentes Delta SA · CABA")
     assert "BAJA" not in outbound.body_text
     assert outbound.state == OutboundMessage.State.REVIEW_READY
     assert outbound.next_attempt_at is None

@@ -40,7 +40,7 @@ class RecordingTransport:
 def test_fake_embeddings_are_deterministic_and_normalized() -> None:
     provider = FakeEmbeddingProvider(dimensions=128)
     request = EmbeddingRequest(
-        texts=("carbones para motores", "carbones para motores", "agenda reunión"),
+        texts=("componentes industriales", "componentes industriales", "agenda reunión"),
         correlation_id="correlation",
         idempotency_key="embedding-key",
         model="fake-embedding",

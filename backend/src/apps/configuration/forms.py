@@ -45,7 +45,6 @@ class BusinessProfileForm(forms.ModelForm):  # type: ignore[type-arg]
             "website",
             "signature",
             "additional_instructions",
-            "relevance_threshold",
         )
         widgets = {
             "description": forms.Textarea(attrs={"rows": 3}),
@@ -65,7 +64,6 @@ class BusinessProfileForm(forms.ModelForm):  # type: ignore[type-arg]
             "address": "Domicilio comercial",
             "signature": "Firma de los correos",
             "additional_instructions": "Instrucciones adicionales",
-            "relevance_threshold": "Umbral de relevancia predeterminado",
         }
 
 

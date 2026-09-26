@@ -3,17 +3,17 @@
 An email automation system for a single B2B company, built around a hard limit on what the AI is
 allowed to do on its own.
 
-The system maintains relationships with existing customers — it reads inbound replies, answers the
+The system maintains relationships with existing customers as it reads inbound replies, answers the
 intents it is explicitly permitted to answer, and hands anything else to a person. Asking for a
 meeting is one of the things it hands over. It also finds new prospects, from an open dataset, and
 sends them a fixed, human-approved message. The AI never writes the first message and never chooses
 who receives it.
 
 Every automatic reply is grounded in versioned facts, recorded with the policy and model that
-produced it, and gradeable afterwards — including a "should have been a human" outcome. Automation
+produced it, and gradeable afterwards, including a "should have been a human" outcome. Automation
 ships in shadow mode: it decides, records, and sends nothing until someone turns it on.
 
-The application's interface is in Spanish, because its users are. This README, and the reference
+The application's interface is in Spanish, because its users are spanish speakers. This README, and the reference
 docs it links to, are the only part in English.
 
 ## What the AI may and may not do

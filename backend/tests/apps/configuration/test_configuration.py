@@ -28,16 +28,16 @@ from apps.configuration.services import (
 
 def profile_values(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
-        "company_name": "Carbones del Sur",
+        "company_name": "Componentes del Sur",
         "salesperson_name": "Fran Pérez",
         "phone": "1234",
         "whatsapp": "5678",
         "description": "Fabricación local",
-        "products": "Carbones para motores",
+        "products": "Componentes industriales",
         "differentiators": "Stock",
         "address": "CABA",
         "website": "https://example.com",
-        "signature": "Fran\nCarbones del Sur",
+        "signature": "Fran\nComponentes del Sur",
         "additional_instructions": "Tono directo",
         "relevance_threshold": 75,
     }
@@ -335,12 +335,12 @@ def test_business_profile_view_renders_and_saves(client: Client, owner: User) ->
 
     assert response.status_code == 302
     profile = BusinessProfile.objects.get(owner=owner)
-    assert profile.company_name == "Carbones del Sur"
+    assert profile.company_name == "Componentes del Sur"
     assert profile.profile_version == 1
 
     page = client.get(reverse("business-profile"))
     assert page.status_code == 200
-    assert "Carbones del Sur" in page.content.decode()
+    assert "Componentes del Sur" in page.content.decode()
 
 
 @pytest.mark.django_db
@@ -379,7 +379,7 @@ def test_business_profile_view_reports_form_errors(client: Client, owner: User) 
 
     response = client.post(
         reverse("business-profile"),
-        profile_values(relevance_threshold=101),
+        profile_values(website="not-a-url"),
     )
 
     assert response.status_code == 200

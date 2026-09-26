@@ -60,7 +60,6 @@ export type CampaignDetail = DashboardCampaign & {
   window_start?: string;
   window_end?: string;
   timezone_name?: string;
-  relevance_threshold?: number;
   reminder_enabled?: boolean;
   reminder_delay_days?: number;
   audience_hash?: string | null;
@@ -208,7 +207,6 @@ export type BusinessProfile = {
   website: string;
   signature: string;
   additional_instructions: string;
-  relevance_threshold: number;
   profile_version: number;
 };
 

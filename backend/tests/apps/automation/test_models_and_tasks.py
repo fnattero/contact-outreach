@@ -183,7 +183,7 @@ def test_revision_hash_does_not_duplicate_the_body_in_a_decision_manifest(owner)
         actor=owner,
         title="Producto",
         category="Catálogo",
-        text="Los carbones se ofrecen en distintas medidas.",
+        text="Los componentes se ofrecen en distintas medidas.",
     )
 
     assert isinstance(revision, KnowledgeFactRevision)

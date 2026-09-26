@@ -76,7 +76,7 @@ def test_fake_embeddings_work_without_external_calls() -> None:
     provider = get_embedding_provider()
     result = provider.embed(
         EmbeddingRequest(
-            texts=("carbones",),
+            texts=("componentes",),
             correlation_id="correlation",
             idempotency_key="embedding-key",
             model="fake-embedding",

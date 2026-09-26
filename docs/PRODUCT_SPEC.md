@@ -3,7 +3,7 @@
 ## 1. Propósito y alcance
 
 Contact Outreach es una aplicación web de una sola empresa para encontrar compradores B2B de
-carbones para motores, enviar campañas desde Gmail y concentrar las relaciones comerciales en
+componentes industriales, enviar campañas desde Gmail y concentrar las relaciones comerciales en
 `Contactos`. La aplicación se entrega como un workspace único con frontend Next.js/React y un
 backend modular Django REST desplegables de forma independiente. PostgreSQL, Redis y almacenamiento
 S3-compatible son servicios privados separados. No es un SaaS multiempresa y no ofrece registro
@@ -125,9 +125,11 @@ oficiales se consultan con `WebsiteFetcher` SSRF-safe sólo para encontrar email
 Overture no ofrece uno útil. No se infieren direcciones.
 
 Las identidades descubiertas se resuelven hacia `Organization` y `EmailAddress`; los datos
-históricos de `Prospect` y `AIAnalysis` permanecen legibles mientras dura el cutover. Nuevas
-campañas no invocan LLM para relevancia ni redacción. Su objetivo cuenta enrollments únicos con una
-dirección elegible y un mensaje inicial preparado. Se revalida elegibilidad al preparar, aprobar,
+históricos de `Prospect` y `AIAnalysis` permanecen legibles. Ninguna campaña invoca al LLM: el
+camino de análisis y redacción fue eliminado y el descubrimiento no llama a ningún proveedor de
+lenguaje. La elegibilidad es el único filtro de prospectos; ver A-059 en `docs/ASSUMPTIONS.md`
+por el scoring de relevancia pendiente. Su objetivo cuenta enrollments únicos con una dirección
+elegible y un mensaje inicial preparado. Se revalida elegibilidad al preparar, aprobar,
 encolar y justo antes de Gmail: dirección válida, sin Contacto de la organización, sin
 restricciones, campaña/mode correctos, barreras Gmail y adjuntos íntegros.
 
@@ -142,7 +144,7 @@ cliente. La revisión inicial seed es:
   ```text
   Buen día:
 
-  Nos ponemos en contacto para acercarle nuestra propuesta de carbones para motores y compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para motores y herramientas eléctricas. Si le resulta de interés, puede responder este correo y con gusto ampliaremos la información.
+  Nos ponemos en contacto para acercarle nuestra propuesta de componentes industriales y compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para equipos y herramientas eléctricas. Si le resulta de interés, puede responder este correo y con gusto ampliaremos la información.
 
   Saludos.
   ```

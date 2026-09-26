@@ -133,7 +133,6 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
             "window_start",
             "window_end",
             "timezone_name",
-            "relevance_threshold",
             "extractor_provider",
             "website_fetcher",
             "llm_provider",
@@ -144,7 +143,6 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
         widgets = {
             "window_start": forms.TimeInput(attrs={"type": "time"}),
             "window_end": forms.TimeInput(attrs={"type": "time"}),
-            "relevance_threshold": forms.HiddenInput,
         }
         labels = {
             "name": "Nombre de la campaña",
@@ -160,7 +158,6 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
             "window_start": "Hora de inicio",
             "window_end": "Hora de finalización",
             "timezone_name": "Zona horaria",
-            "relevance_threshold": "Umbral mínimo de relevancia",
             "llm_model": "Modelo de inteligencia artificial",
         }
         help_texts = {
@@ -192,9 +189,6 @@ class CampaignForm(forms.ModelForm):  # type: ignore[type-arg]
             ),
             "reminder_delay_days": (
                 "Se cuentan desde el envío confirmado y se respeta el próximo horario permitido."
-            ),
-            "relevance_threshold": (
-                "Puntaje mínimo, de 0 a 100, para considerar que un prospecto es relevante."
             ),
             "llm_model": (
                 "Nombre exacto del modelo que usará el proveedor de inteligencia artificial."

@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Flex, Form, Input, InputNumber, Modal } from "antd";
+import { Alert, Flex, Form, Input, Modal } from "antd";
 import { useEffect, useState } from "react";
 import { AuthError } from "@/components/auth-provider";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
@@ -104,9 +104,6 @@ export default function ProfileSettingsPage() {
             <Form.Item label="Diferenciadores" name="differentiators" extra="Contá qué te distingue frente a otras opciones."><Input.TextArea rows={4} /></Form.Item>
             <Form.Item label="Firma" name="signature" extra="Texto que cierra los mensajes enviados."><Input.TextArea rows={3} /></Form.Item>
             <Form.Item label="Instrucciones adicionales" name="additional_instructions" extra="Reglas específicas para redactar contenido."><Input.TextArea rows={4} /></Form.Item>
-            <Form.Item label="Umbral de relevancia" name="relevance_threshold" extra="Define desde qué nivel una coincidencia se considera relevante.">
-              <InputNumber min={0} max={100} />
-            </Form.Item>
           </FormSection>
         </div>
       </Form>
