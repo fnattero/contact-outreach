@@ -14,6 +14,19 @@ COPY src ./src
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
+# Quality-gate stage. Never copied into `runtime`, so the production image keeps no dev tooling.
+# Test sources are not COPYd because `.dockerignore` excludes `tests`; the repository root is
+# bind-mounted at /repo instead, which `tests/test_settings.py` requires to read infra files.
+FROM builder AS dev
+
+ENV PYTHONPATH=/repo/backend/src \
+    DJANGO_SETTINGS_MODULE=contact_outreach.settings_test \
+    COVERAGE_FILE=/tmp/.coverage
+
+RUN pip install --no-cache-dir ".[dev]"
+
+WORKDIR /repo/backend
+
 FROM python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
