@@ -215,7 +215,8 @@ make test-e2e        # fake-provider end-to-end tests
 make security-check  # pip-audit and pnpm audit --prod
 ```
 
-`make check` is the gate before review. Tests run with the network blocked and against fake
+`make check` is the gate before review. The gates run inside the `backend-tests` and `frontend-tests`
+compose services, so no local Python or Node is needed; the `*-local` targets run the same commands natively (for CI). Tests run with the network blocked and against fake
 providers; a test that reaches the real internet is a bug.
 
 ## Before enabling real effects

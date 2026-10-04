@@ -302,16 +302,3 @@ def workspace_summary_metrics(
         responses_after_initial=responses_after_initial,
         responses_after_reminder=responses_after_reminder,
     )
-
-
-def duration_label(value: timedelta | None) -> str:
-    if value is None:
-        return "—"
-    total_minutes = max(0, round(value.total_seconds() / 60))
-    if total_minutes < 60:
-        return f"{total_minutes} min"
-    hours, minutes = divmod(total_minutes, 60)
-    if hours < 48:
-        return f"{hours} h" if not minutes else f"{hours} h {minutes} min"
-    days, remaining_hours = divmod(hours, 24)
-    return f"{days} días" if not remaining_hours else f"{days} días {remaining_hours} h"

@@ -5,7 +5,6 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
 from apps.audit.models import AuditEvent
-from apps.configuration.forms import SearchCategoryForm
 from apps.configuration.models import (
     DEFAULT_AUTOMATIC_REPLY_PROMPT,
     BusinessProfile,
@@ -143,70 +142,6 @@ def test_default_automatic_reply_prompt_contains_only_style_preferences() -> Non
     assert "No inventes precios" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
     assert "reglas de seguridad" not in DEFAULT_AUTOMATIC_REPLY_PROMPT.casefold()
     assert len(DEFAULT_AUTOMATIC_REPLY_PROMPT) < MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
-
-
-def test_category_form_accepts_variants_without_operator_syntax() -> None:
-    rejected = SearchCategoryForm(
-        {
-            "name": "Motores",
-            "active": "on",
-            "sort_order": 1,
-            "variants_text": "(motor.*)",
-        }
-    )
-    accepted = SearchCategoryForm(
-        {
-            "name": "Motores",
-            "active": "on",
-            "sort_order": 1,
-            "variants_text": "motor*\ntaller electromecánico, bobinado de motores",
-        }
-    )
-    obsolete_pipe_syntax = SearchCategoryForm(
-        {
-            "name": "Motores",
-            "active": "on",
-            "sort_order": 1,
-            "variants_text": "industrial_equipment | motor",
-        }
-    )
-
-    assert not rejected.is_valid()
-    assert "variants_text" in rejected.errors
-    assert not obsolete_pipe_syntax.is_valid()
-    assert "No hace falta usar |" in obsolete_pipe_syntax.errors["variants_text"][0]
-    assert accepted.is_valid(), accepted.errors
-    assert list(accepted.fields) == ["name", "variants_text", "active", "sort_order"]
-    assert accepted.parsed_rules == [
-        {"taxonomy_code": "", "name_terms": ["motor*"]},
-        {"taxonomy_code": "", "name_terms": ["taller electromecanico"]},
-        {"taxonomy_code": "", "name_terms": ["bobinado de motores"]},
-    ]
-
-
-@pytest.mark.django_db
-def test_category_form_preserves_hidden_taxonomy_for_existing_variants() -> None:
-    category = SearchCategory.objects.get(name="Bobinados de motores")
-    display_form = SearchCategoryForm(instance=category)
-    form = SearchCategoryForm(
-        {
-            "name": category.name,
-            "active": "on",
-            "sort_order": category.sort_order,
-            "variants_text": "bobinad*\nrebobinad*\nservicio de inducidos",
-        },
-        instance=category,
-    )
-
-    assert "|" not in display_form.initial["variants_text"]
-    assert display_form.initial["variants_text"].splitlines() == ["bobinad*", "rebobinad*"]
-    assert form.is_valid(), form.errors
-    assert form.parsed_rules == [
-        {"taxonomy_code": "services_and_business", "name_terms": ["bobinad*"]},
-        {"taxonomy_code": "", "name_terms": ["bobinad*"]},
-        {"taxonomy_code": "", "name_terms": ["rebobinad*"]},
-        {"taxonomy_code": "", "name_terms": ["servicio de inducidos"]},
-    ]
 
 
 @pytest.mark.django_db

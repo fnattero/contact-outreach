@@ -113,6 +113,13 @@ permission/idempotency/provider error.
 
 **Terminado:** no template participa de behavior v2 y el image viejo sigue independiente.
 
+> **Fase 6 completada (2026-10-04).** El runtime ya no contiene views, forms, templates ni
+> static de la UI Django. Quedan `apps/core/views.py` (handlers de error y `CSRF_FAILURE_VIEW`) y
+> `apps/health/views.py` (compartido con la API). Las capacidades que sólo existían en la UI vieja
+> se movieron a `/api/v1` (supresiones, rubros activar/archivar, lista de prospectos con
+> procedencia y atribución). No se portaron por estar ya muertas: zonas personalizadas,
+> regeneración de mensajes/análisis (el dominio las rechaza) e inyección de inbound falso.
+
 ## Fase 7 — Hardening y release
 
 **Objetivo:** revalidar seguridad/operación completa.

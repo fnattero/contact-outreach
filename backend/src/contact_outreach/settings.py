@@ -166,7 +166,6 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
@@ -197,7 +196,6 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.accounts.middleware.MembershipSessionMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.core.security.ApplicationSecurityHeadersMiddleware",
 ]
@@ -210,13 +208,9 @@ TEMPLATES = [
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
-            "builtins": ["apps.dashboard.templatetags.ui_extras"],
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-                "apps.accounts.permissions.capabilities_context",
-                "apps.dashboard.context_processors.runtime_safety",
             ],
         },
     }
@@ -281,7 +275,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -316,8 +309,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # The sign-in page is a frontend route; the backend only redirects here for non-API requests.
 LOGIN_URL = "/login"
-LOGIN_REDIRECT_URL = "dashboard"
-LOGOUT_REDIRECT_URL = "login"
 
 TRUSTED_PROXY_IPS = env_list("DJANGO_TRUSTED_PROXY_IPS")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")

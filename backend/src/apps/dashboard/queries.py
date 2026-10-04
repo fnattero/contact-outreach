@@ -7,7 +7,7 @@ from django.db import models
 from django.db.models import OuterRef, Prefetch, QuerySet, Subquery
 from django.http import QueryDict
 
-from apps.campaigns.models import Campaign, OutboundMessage
+from apps.campaigns.models import OutboundMessage
 from apps.mailbox.models import InboundMessage
 from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail, WebsiteSnapshot
 
@@ -160,27 +160,3 @@ def response_queryset(
     if end := parsed_date(params.get("date_to", "")):
         queryset = queryset.filter(external_at__date__lte=end)
     return queryset.order_by("-external_at")
-
-
-def workspace_campaigns(
-    workspace_id: uuid.UUID | str,
-    *,
-    include_drafts: bool = True,
-) -> QuerySet[Campaign]:
-    queryset = Campaign.objects.filter(workspace_id=workspace_id)
-    if not include_drafts:
-        queryset = queryset.exclude(state=Campaign.State.DRAFT)
-    return queryset.only("id", "name")
-
-
-def owner_campaigns(owner_id: int) -> QuerySet[Campaign]:
-    """Compatibility shim: creator is resolved to a Workspace, never used as scope."""
-
-    from apps.accounts.models import Membership
-
-    workspace_id = (
-        Membership.objects.filter(user_id=owner_id).values_list("workspace_id", flat=True).first()
-    )
-    return (
-        workspace_campaigns(workspace_id) if workspace_id is not None else Campaign.objects.none()
-    )

@@ -6,6 +6,16 @@ Primary design source: `docs/DESIGN.md` (read before code inspection)
 
 Scope: the Next.js application in `frontend/`, the Django REST API under `/api/v1/`, and the still-addressable server-rendered Django UI.
 
+> **Update 2026-10-04.** The server-rendered Django UI described in "Server-rendered Django routes"
+> and "Legacy Django surface" has been removed; the backend is API-only (`/api/v1/`, plus the
+> DEBUG-only schema/docs and the error handlers). Sections that audit that surface, and the
+> permission rows that compare it with the API, are kept as history of the original findings.
+> Resolved since this audit: automation writing-instructions GET now requires `manage_automation`;
+> the attention-queue controls are hidden from VENDEDOR; catalog, profile and integrations pages
+> have a local guard (the shell already blocked sellers); the draft, authorize, campaign-action,
+> automation, attention and Overture views declare their permission classes; the scheduled-attempt
+> endpoints work; category creation goes through the audited service.
+
 ## Conventions
 
 - `PUBLIC` means no authenticated session is required.

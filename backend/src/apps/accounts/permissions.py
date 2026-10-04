@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from enum import StrEnum
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import ParamSpec, TypeVar, cast
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -109,17 +109,3 @@ def require_capability(
         return cast(Callable[P, R], wrapped)
 
     return decorator
-
-
-admin_required = require_capability(Capability.MANAGE_USERS)
-
-
-def capabilities_context(request: HttpRequest) -> dict[str, Any]:
-    request_user = getattr(request, "user", None)
-    if request_user is None or not request_user.is_authenticated:
-        return {"current_membership": None, "can_administer": False}
-    membership = membership_for(request_user)
-    return {
-        "current_membership": membership,
-        "can_administer": membership is not None and membership.role == Membership.Role.ADMIN,
-    }

@@ -8,14 +8,12 @@ from django.core.exceptions import ValidationError
 from django.test import override_settings
 
 from apps.audit.models import AuditEvent
-from apps.configuration.forms import IntegrationConfigurationForm
 from apps.configuration.integrations import (
     GMAIL_CLIENT_SECRET_PURPOSE,
     LLM_KEY_PURPOSE,
     get_gmail_oauth_client_secret,
     get_llm_api_key,
     redact_provider_error,
-    runtime_integration_configuration,
     save_integration_configuration,
     validate_encrypted_integration_credentials,
 )
@@ -108,32 +106,20 @@ def test_connected_gmail_credentials_cannot_be_replaced(owner: User) -> None:
 
 
 @pytest.mark.django_db
-def test_integration_form_rejects_secret_bearing_and_insecure_remote_urls(owner: User) -> None:
-    runtime = runtime_integration_configuration(owner.pk)
-    form = IntegrationConfigurationForm(
-        integration_values(
-            openai_compatible_base_url="http://attacker.example/v1?key=leak",
-        ),
-        user=owner,
-        runtime=runtime,
-    )
-
-    assert not form.is_valid()
-    assert "openai_compatible_base_url" in form.errors
+def test_secret_bearing_and_insecure_remote_urls_are_rejected(owner: User) -> None:
+    with pytest.raises(ValidationError):
+        save_integration_configuration(
+            owner=owner,
+            values=integration_values(
+                llm_provider="openai-compatible",
+                openai_compatible_base_url="http://attacker.example/v1?key=leak",
+            ),
+        )
+    assert not IntegrationConfiguration.objects.exists()
 
 
 @pytest.mark.django_db
 def test_embedding_provider_requires_openai_connection_details(owner: User) -> None:
-    runtime = runtime_integration_configuration(owner.pk)
-    form = IntegrationConfigurationForm(
-        integration_values(embedding_provider="openai-compatible"),
-        user=owner,
-        runtime=runtime,
-    )
-
-    assert not form.is_valid()
-    assert "openai_compatible_base_url" in form.errors
-
     with pytest.raises(ValidationError, match="clave de acceso"):
         save_integration_configuration(
             owner=owner,
