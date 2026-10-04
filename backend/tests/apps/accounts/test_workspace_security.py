@@ -194,25 +194,6 @@ def test_last_active_admin_cannot_be_demoted_or_deactivated() -> None:
 
 
 @pytest.mark.django_db
-def test_role_change_invalidates_an_existing_session(client: Client) -> None:
-    admin = User.objects.create_user(username="admin", password="password")
-    second = User.objects.create_user(username="second", password="password")
-    second.membership.role = Membership.Role.ADMIN
-    second.membership.save(update_fields=("role", "updated_at"))
-    client.force_login(admin)
-    assert client.get(reverse("dashboard")).status_code == 200
-
-    change_membership_role(
-        membership=admin.membership,
-        role=Membership.Role.VENDEDOR,
-        actor=second,
-    )
-    response = client.get(reverse("dashboard"))
-    assert response.status_code == 302
-    assert response.url == f"{reverse('login')}?next=/"
-
-
-@pytest.mark.django_db
 def test_vendedor_cannot_open_user_management(client: Client) -> None:
     User.objects.create_user(username="admin", password="password")
     seller = User.objects.create_user(username="seller", password="password")

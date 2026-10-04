@@ -314,7 +314,8 @@ CATALOG_MAX_BYTES = 15 * 1024 * 1024
 MIN_FREE_DISK_BYTES = int(os.getenv("MIN_FREE_DISK_BYTES", str(100 * 1024 * 1024)))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_URL = "login"
+# The sign-in page is a frontend route; the backend only redirects here for non-API requests.
+LOGIN_URL = "/login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 

@@ -10,8 +10,8 @@ import { StatusBadge } from "@/components/design-system/status-badge";
 import { getBackgroundJobs, problemMessage, retryBackgroundJob, type BackgroundJob, type Problem } from "@/lib/api";
 
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Argentina/Buenos_Aires" });
-const taskLabels: Record<string, string> = { "campaign.discovery": "Descubrimiento de campaña", "campaign.delivery": "Entrega de campaña", "gmail.sync": "Sincronización de Gmail", "prospect.enrichment": "Enriquecimiento de contactos" };
-const entityLabels: Record<string, string> = { OutboundMessage: "Mensaje", Campaign: "Campaña", Contact: "Contacto" };
+const taskLabels: Record<string, string> = { "campaign.discovery": "Descubrimiento de campaña", "campaign.delivery": "Entrega de campaña", "gmail.sync": "Sincronización de Gmail", "prospect.enrichment": "Enriquecimiento de contactos", "mailbox.deliver_message": "Entregar correo", "mailbox.sync_gmail_connection": "Sincronizar Gmail", "campaigns.advance_extraction_run": "Continuar extracción de campaña", "prospects.process_pipeline": "Procesar prospecto", "overture.sync_snapshot": "Sincronizar datos de Overture", "overture.discover_releases": "Comprobar versiones de Overture" };
+const entityLabels: Record<string, string> = { OutboundMessage: "Mensaje", Campaign: "Campaña", Contact: "Contacto", "GmailConnection": "Conexión de Gmail", "OvertureRelease": "Versión de Overture", "Prospect": "Prospecto", "SearchCategory": "Rubro", "SearchRun": "Ejecución de extracción", "SearchZone": "Zona", "SuppressionEntry": "Supresión" };
 
 function taskLabel(value: string): string { return taskLabels[value] ?? (value.includes("discovery") ? "Descubrimiento de campaña" : value.includes("send") || value.includes("delivery") ? "Entrega de campaña" : "Tarea operativa"); }
 function entityLabel(value: string): string { return entityLabels[value] ?? "Recurso operativo"; }
