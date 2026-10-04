@@ -80,9 +80,15 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
 
 ## 5. Secretos y OAuth
 
-- `FIELD_ENCRYPTION_KEY`, `DJANGO_SECRET_KEY`, DB/Redis/S3, barreras live, claves HMAC, bootstrap,
-  token de proxy, LLM API key y Google client secret viven fuera del repositorio/dashboard.
-- Secretos estáticos se leen sólo del entorno. El refresh token Gmail obtenido por OAuth se cifra
+- `FIELD_ENCRYPTION_KEY`, `DJANGO_SECRET_KEY`, DB/Redis/S3, barreras live, claves HMAC, bootstrap y
+  token de proxy viven fuera del repositorio/dashboard.
+- La LLM API key y el Google client secret pueden venir del entorno o guardarse desde el dashboard
+  (decisión 2026-10-04). Guardarlas exige reautenticación reciente de contraseña (5 intentos cada 5
+  min), rol con `manage_integrations`, límite sensible por usuario, cifrado Fernet con subclave de
+  propósito, valor write-only (la API sólo informa `configured` y origen), auditoría sin valores y
+  validación de URLs (HTTPS, sin credenciales ni hosts de metadata). Cambiar credenciales de Google
+  con Gmail conectado exige desconectar antes.
+- Los secretos del entorno se leen sólo del entorno. El refresh token Gmail obtenido por OAuth se cifra
   con Fernet autenticado y subclave de propósito; UI, errores, audit y logs muestran sólo estado.
 - Rotar client credentials exige desconectar Gmail. OAuth usa state/PKCE, redirect exacto y scopes
   `gmail.send` + `gmail.readonly`, nunca SMTP password ni `mail.google.com`.

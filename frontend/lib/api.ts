@@ -225,6 +225,35 @@ export type CreatedUser = {
   expires_at: string;
 };
 
+export type IntegrationConfiguration = {
+  extractor_provider: string;
+  overture_min_confidence: string;
+  website_fetcher: string;
+  llm_provider: string;
+  llm_model: string;
+  ollama_base_url: string;
+  openai_compatible_base_url: string;
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimensions: number;
+  gmail_provider: string;
+  gmail_oauth_client_id: string;
+  /** Credentials are only ever reported as state; their values cannot be read back. */
+  llm_credential: { configured: boolean; source: string };
+  gmail_credential: { configured: boolean; source: string };
+  revision: number;
+};
+
+export type IntegrationConfigurationPatch = Partial<
+  Omit<IntegrationConfiguration, "llm_credential" | "gmail_credential" | "revision" | "embedding_dimensions">
+> & {
+  embedding_dimensions?: number;
+  llm_api_key?: string;
+  remove_llm_api_key?: boolean;
+  gmail_oauth_client_secret?: string;
+  remove_gmail_oauth_client_secret?: boolean;
+};
+
 export type IntegrationStatus = {
   extractor: { provider: string; overture_min_confidence: string };
   website_fetcher: { provider: string };
@@ -1171,4 +1200,15 @@ export function logout(): Promise<void> {
 
 export function problemMessage(problem: Problem): string {
   return problem.detail ?? "No fue posible completar la solicitud.";
+}
+
+export function getIntegrationConfiguration(): Promise<IntegrationConfiguration> {
+  return request<IntegrationConfiguration>("/api/v1/integrations/configuration/");
+}
+
+export function saveIntegrationConfiguration(patch: IntegrationConfigurationPatch): Promise<IntegrationConfiguration> {
+  return request<IntegrationConfiguration>("/api/v1/integrations/configuration/", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
+import { ConfigurationForm } from "./configuration-form";
 import { StatusBadge } from "@/components/design-system/status-badge";
 import {
   disconnectGmail,
@@ -95,14 +96,8 @@ export default function IntegrationsSettingsPage() {
 
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Integraciones" description="Estado operativo seguro. Las credenciales pertenecen al entorno y nunca se muestran aquí." />
+      <PageHeader title="Integraciones" description="Estado de las conexiones y configuración de proveedores. Las credenciales se guardan cifradas y nunca se muestran." />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
-      <Alert
-        type="info"
-        showIcon
-        message="Las credenciales se administran como secretos del backend"
-        description="Esta pantalla sólo expone proveedor, configuración segura y estado de conexión."
-      />
       <Card title="Servicios conectados">
         <div className="integration-list">
           <div className="integration-row">
@@ -137,6 +132,7 @@ export default function IntegrationsSettingsPage() {
           </div>
         </div>
       </Card>
+      <ConfigurationForm />
       <Card title="Confianza de búsqueda">
         <div className="integration-confidence"><strong>{percent(status.extractor.overture_min_confidence)}</strong><span>Confianza mínima</span><p>Define el mínimo de confianza requerido para aceptar resultados de búsqueda.</p></div>
       </Card>

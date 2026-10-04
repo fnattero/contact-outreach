@@ -72,7 +72,7 @@ from apps.api.gmail import (
     GmailTestView,
 )
 from apps.api.health import DegradedHealthView
-from apps.api.integrations import IntegrationStatusView
+from apps.api.integrations import IntegrationConfigurationView, IntegrationStatusView
 from apps.api.knowledge import (
     KnowledgeContextApproveView,
     KnowledgeContextRevisionView,
@@ -196,6 +196,11 @@ urlpatterns = [
     path("overture/status/", OvertureStatusView.as_view(), name="api-overture-status"),
     path("overture/sync/", OvertureSyncView.as_view(), name="api-overture-sync"),
     path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
+    path(
+        "integrations/configuration/",
+        IntegrationConfigurationView.as_view(),
+        name="api-integrations-configuration",
+    ),
     path(
         "integrations/gmail/connection/",
         GmailConnectionView.as_view(),
