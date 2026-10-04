@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from decimal import Decimal
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.contrib.auth.models import User
@@ -13,7 +15,7 @@ from django.urls import reverse
 
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import ContactLedger
-from apps.configuration.models import SearchCategory, SearchZone
+from apps.configuration.models import IntegrationConfiguration, SearchCategory, SearchZone
 from apps.integrations.contracts import SearchRequest
 from apps.integrations.factory import get_extractor_provider
 from apps.integrations.fakes import FakeGmailProvider
@@ -37,36 +39,150 @@ from apps.prospects.email_validation import MXStatus
 from apps.prospects.models import Prospect, WebsiteSnapshot
 from contact_outreach.tasks import healthcheck
 
+PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF"
+PASSWORD = "correct-password"
+
+
+class Operator:
+    """A signed-in administrator driving the application only through ``/api/v1``.
+
+    These tests used to post to the server-rendered pages; the browser now talks to the API, so
+    that is the surface that has to work end to end. CSRF is enforced exactly as in production.
+    """
+
+    def __init__(self, username: str) -> None:
+        self.client = Client(enforce_csrf_checks=True)
+        self.csrf = self._csrf()
+        response = self.post(
+            reverse("api-auth-login"), {"username": username, "password": PASSWORD}
+        )
+        assert response.status_code == 200, response.content
+        self.csrf = self._csrf()
+
+    def _csrf(self) -> str:
+        return str(self.client.get(reverse("api-auth-csrf")).json()["data"]["csrf_token"])
+
+    def get(self, url: str, params: dict[str, Any] | None = None):
+        return self.client.get(url, params or {})
+
+    def post(self, url: str, payload: dict[str, Any] | None = None, **headers: str):
+        return self.client.post(
+            url,
+            data=json.dumps(payload or {}),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=self.csrf,
+            **headers,
+        )
+
+    def patch(self, url: str, payload: dict[str, Any]):
+        return self.client.patch(
+            url,
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=self.csrf,
+        )
+
+    def save_profile(self, company: str) -> None:
+        response = self.patch(
+            reverse("api-workspace-profile"),
+            {
+                "company_name": company,
+                "salesperson_name": "Vendedor",
+                "phone": "",
+                "whatsapp": "",
+                "description": "Proveedor industrial",
+                "products": "Componentes industriales",
+                "differentiators": "Atención directa",
+                "address": "CABA",
+                "website": "",
+                "signature": f"Vendedor · {company}",
+                "additional_instructions": "",
+            },
+        )
+        assert response.status_code == 200, response.content
+
+    def upload_catalog(self, name: str) -> str:
+        response = self.client.post(
+            reverse("api-catalogs"),
+            {
+                "name": name,
+                "file": SimpleUploadedFile("catalogo.pdf", PDF, content_type="application/pdf"),
+            },
+            HTTP_X_CSRFTOKEN=self.csrf,
+        )
+        assert response.status_code == 201, response.content
+        return str(response.json()["data"]["id"])
+
+    def create_review_only_campaign(self, name: str, catalog_id: str) -> str:
+        category = SearchCategory.objects.get(name="Bobinados de motores")
+        zone = SearchZone.objects.get(name="Palermo")
+        response = self.post(
+            reverse("api-campaigns"),
+            {
+                "name": name,
+                "delivery_mode": Campaign.DeliveryMode.REVIEW_ONLY,
+                "approval_mode": Campaign.ApprovalMode.CAMPAIGN,
+                "reminder_delay_days": 3,
+                "location_text": "Ciudad Autónoma de Buenos Aires, Argentina",
+                "objective": 1,
+                "max_raw_records": 10,
+                "overture_min_confidence": "0.750",
+                "daily_limit": 30,
+                "message_interval_minutes": 1,
+                "weekdays": [0, 1, 2, 3, 4, 5, 6],
+                "window_start": "00:01",
+                "window_end": "23:59",
+                "timezone_name": "America/Argentina/Buenos_Aires",
+                "catalogs": [catalog_id],
+                "categories": [str(category.pk)],
+                "provinces": [str(zone.parent_id)],
+                "zones": [str(zone.pk)],
+            },
+        )
+        assert response.status_code == 201, response.content
+        return str(response.json()["data"]["id"])
+
+    def run_action(self, campaign_id: str, action: str):
+        return self.post(
+            reverse("api-campaign-action", args=(campaign_id, action)),
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+
+    def connect_gmail(self) -> None:
+        """Run the whole OAuth round trip against the fake provider: start, then the callback."""
+        started = self.post(reverse("api-gmail-oauth-start"))
+        assert started.status_code == 200, started.content
+        query = parse_qs(urlsplit(started.json()["data"]["authorization_url"]).query)
+        callback = self.get(
+            reverse("api-gmail-oauth-callback"),
+            {"state": query["state"][0], "code": query["code"][0]},
+        )
+        assert callback.status_code == 302
+        assert callback["Location"].endswith("gmail=connected"), callback["Location"]
+
+
+def _use_overture_extractor(owner: User) -> None:
+    """Switch the workspace to the local Overture extractor.
+
+    Provider selection is deployment configuration, not something the API edits, so the test sets
+    the stored configuration directly.
+    """
+    IntegrationConfiguration.objects.update_or_create(
+        workspace=owner.membership.workspace,
+        defaults={"owner": owner, "extractor_provider": "overture"},
+    )
+
 
 @pytest.mark.e2e
 @pytest.mark.django_db
-def test_owner_dashboard_fake_provider_and_worker_flow(client: Client) -> None:
-    owner = User.objects.create_user(username="owner", password="correct-password")
-    assert client.login(username="owner", password="correct-password")
-    assert client.get(reverse("dashboard")).status_code == 200
+def test_owner_signs_in_and_the_fake_providers_and_worker_run(owner: User) -> None:
+    operator = Operator(owner.username)
 
-    configured = client.post(
-        reverse("integrations"),
-        {
-            "extractor_provider": "fake",
-            "overture_min_confidence": "0.750",
-            "website_fetcher": "fake",
-            "llm_provider": "fake",
-            "llm_model": "fake-deterministic",
-            "ollama_base_url": "http://127.0.0.1:11434",
-            "openai_compatible_base_url": "",
-            "llm_api_key": "",
-            "embedding_provider": "fake",
-            "embedding_model": "text-embedding-3-small",
-            "embedding_dimensions": "1536",
-            "gmail_provider": "fake",
-            "gmail_oauth_client_id": "",
-            "gmail_oauth_client_secret": "",
-            "current_password": "correct-password",
-        },
-    )
-    assert configured.status_code == 302
-
+    assert operator.get(reverse("api-dashboard-summary")).status_code == 200
+    status = operator.get(reverse("api-integrations-status")).json()["data"]
+    assert status["extractor"]["provider"] == "fake"
+    assert status["llm"]["provider"] == "fake"
+    assert status["gmail"]["provider"] == "fake"
     batch = get_extractor_provider(owner_id=owner.pk).search(
         SearchRequest(query="demo", correlation_id="e2e", idempotency_key="e2e")
     )
@@ -78,101 +194,43 @@ def test_owner_dashboard_fake_provider_and_worker_flow(client: Client) -> None:
 @pytest.mark.django_db
 @override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
 def test_review_only_fake_flow_searches_drafts_and_exposes_content_without_gmail(
-    client: Client,
     owner: User,
     private_catalog_dir: object,
     django_capture_on_commit_callbacks: Any,
 ) -> None:
     del private_catalog_dir
-    assert client.login(username=owner.username, password="correct-password")
-    assert (
-        client.post(
-            reverse("business-profile"),
-            {
-                "company_name": "Componentes Revisión",
-                "salesperson_name": "Vendedor",
-                "phone": "",
-                "whatsapp": "",
-                "description": "Proveedor industrial",
-                "products": "Componentes industriales",
-                "differentiators": "Atención directa",
-                "address": "CABA",
-                "website": "",
-                "signature": "Vendedor · Componentes Revisión",
-                "additional_instructions": "",
-                "relevance_threshold": "70",
-            },
-        ).status_code
-        == 302
+    operator = Operator(owner.username)
+    operator.save_profile("Componentes Revisión")
+    campaign_id = operator.create_review_only_campaign(
+        "Aceptación solo revisión", operator.upload_catalog("Catálogo revisión")
     )
-    assert (
-        client.post(
-            reverse("catalogs"),
-            {
-                "name": "Catálogo revisión",
-                "file": SimpleUploadedFile(
-                    "catalogo.pdf",
-                    b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF",
-                    content_type="application/pdf",
-                ),
-            },
-        ).status_code
-        == 302
-    )
-    category = SearchCategory.objects.get(name="Bobinados de motores")
-    zone = SearchZone.objects.get(name="Palermo")
-    catalog = owner.catalogs.get()
-    created = client.post(
-        reverse("campaign-create"),
-        {
-            "name": "Aceptación solo revisión",
-            "delivery_mode": Campaign.DeliveryMode.REVIEW_ONLY,
-            "approval_mode": Campaign.ApprovalMode.CAMPAIGN,
-            "reminder_delay_days": "3",
-            "location_text": "Ciudad Autónoma de Buenos Aires, Argentina",
-            "objective": "1",
-            "max_raw_records": "10",
-            "overture_min_confidence": "0.750",
-            "daily_limit": "30",
-            "message_interval_minutes": "1",
-            "weekdays": ["0", "1", "2", "3", "4", "5", "6"],
-            "window_start": "00:01",
-            "window_end": "23:59",
-            "timezone_name": "America/Argentina/Buenos_Aires",
-            "relevance_threshold": "70",
-            "catalog": str(catalog.pk),
-            "catalogs": [str(catalog.pk)],
-            "categories": [str(category.pk)],
-            "provinces": [str(zone.parent_id)],
-            "zones": [str(zone.pk)],
-        },
-    )
-    assert created.status_code == 302
-    campaign = Campaign.objects.get(name="Aceptación solo revisión")
 
     with django_capture_on_commit_callbacks(execute=True):
-        started = client.post(reverse("campaign-action", args=(campaign.pk, "start")), follow=True)
+        started = operator.run_action(campaign_id, "start-discovery")
+    assert started.status_code == 200, started.content
 
-    assert started.status_code == 200
-    campaign.refresh_from_db()
+    campaign = Campaign.objects.get(pk=campaign_id)
     assert campaign.state == Campaign.State.AWAITING_APPROVAL
     assert campaign.search_runs.exists()
     assert campaign.prospects.exists()
 
-    approved = client.post(reverse("campaign-approve", args=(campaign.pk,)), follow=True)
-    assert approved.status_code == 200
+    with django_capture_on_commit_callbacks(execute=True):
+        approved = operator.run_action(campaign_id, "approve")
+    assert approved.status_code == 200, approved.content
 
     message = campaign.messages.get(kind=OutboundMessage.Kind.INITIAL)
     assert message.state == OutboundMessage.State.REVIEW_READY
     assert message.message_id == ""
     assert deliver_outbound_messages() == 0
-    detail = client.get(reverse("outbound-detail", args=(message.pk,)))
-    assert detail.status_code == 200
-    assert message.subject in detail.content.decode()
-    assert message.body_text in detail.content.decode()
-    assert "Este correo no fue enviado" in detail.content.decode()
-    dashboard = client.get(reverse("dashboard"), {"campaign": campaign.pk})
-    assert dashboard.context["metrics"]["review_ready"] == 1
+
+    detail = operator.get(reverse("api-outbound-message-detail", args=(message.pk,))).json()["data"]
+    assert detail["subject"] == message.subject
+    assert detail["body_text"] == message.body_text
+    assert detail["state"] == OutboundMessage.State.REVIEW_READY
+    assert detail["sent_at"] is None and detail["message_id"] is None
+    campaign_view = operator.get(reverse("api-campaign-detail", args=(campaign_id,))).json()["data"]
+    assert campaign_view["metrics"]["review_ready"] == 1
+    assert campaign_view["metrics"]["sent"] == 0
     assert not GmailConnection.objects.filter(owner=owner).exists()
     assert not FakeGmailMessage.objects.exists()
     assert not ContactLedger.objects.exists()
@@ -182,39 +240,18 @@ def test_review_only_fake_flow_searches_drafts_and_exposes_content_without_gmail
 @pytest.mark.django_db
 @override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
 def test_review_only_local_overture_flow_never_uses_network_mime_or_gmail_send(
-    client: Client,
     owner: User,
     private_catalog_dir: object,
     monkeypatch: pytest.MonkeyPatch,
     django_capture_on_commit_callbacks: Any,
 ) -> None:
     del private_catalog_dir
-    assert client.login(username=owner.username, password="correct-password")
+    operator = Operator(owner.username)
+    _use_overture_extractor(owner)
 
-    configured = client.post(
-        reverse("integrations"),
-        {
-            "extractor_provider": "overture",
-            "overture_min_confidence": "0.750",
-            "website_fetcher": "fake",
-            "llm_provider": "fake",
-            "llm_model": "fake-deterministic",
-            "ollama_base_url": "http://127.0.0.1:11434",
-            "openai_compatible_base_url": "",
-            "llm_api_key": "",
-            "embedding_provider": "fake",
-            "embedding_model": "text-embedding-3-small",
-            "embedding_dimensions": "1536",
-            "gmail_provider": "fake",
-            "gmail_oauth_client_id": "",
-            "gmail_oauth_client_secret": "",
-            "current_password": "correct-password",
-        },
-    )
-    assert configured.status_code == 302
-
-    connected = client.post(reverse("gmail-connect"), follow=True)
-    assert connected.status_code == 200
+    operator.connect_gmail()
+    connection = operator.get(reverse("api-gmail-connection")).json()["data"]
+    assert connection["connected"] is True
     assert GmailConnection.objects.filter(owner=owner).exists()
     assert not FakeGmailMessage.objects.exists()
 
@@ -233,16 +270,8 @@ def test_review_only_local_overture_flow_never_uses_network_mime_or_gmail_send(
         "iter_places",
         reject_external_call("el lector remoto de Overture"),
     )
-    monkeypatch.setattr(
-        HttpWebsiteFetcher,
-        "fetch",
-        reject_external_call("el fetcher HTTP"),
-    )
-    monkeypatch.setattr(
-        OllamaProvider,
-        "analyze",
-        reject_external_call("Ollama por HTTP"),
-    )
+    monkeypatch.setattr(HttpWebsiteFetcher, "fetch", reject_external_call("el fetcher HTTP"))
+    monkeypatch.setattr(OllamaProvider, "analyze", reject_external_call("Ollama por HTTP"))
     monkeypatch.setattr(
         OpenAICompatibleProvider,
         "analyze",
@@ -276,42 +305,9 @@ def test_review_only_local_overture_flow_never_uses_network_mime_or_gmail_send(
 
     monkeypatch.setattr("apps.campaigns.delivery._message_bytes", reject_mime)
 
-    assert (
-        client.post(
-            reverse("business-profile"),
-            {
-                "company_name": "Componentes Overture",
-                "salesperson_name": "Vendedor",
-                "phone": "",
-                "whatsapp": "",
-                "description": "Proveedor industrial",
-                "products": "Componentes industriales",
-                "differentiators": "Atención directa",
-                "address": "CABA",
-                "website": "",
-                "signature": "Vendedor · Componentes Overture",
-                "additional_instructions": "",
-                "relevance_threshold": "70",
-            },
-        ).status_code
-        == 302
-    )
-    assert (
-        client.post(
-            reverse("catalogs"),
-            {
-                "name": "Catálogo Overture local",
-                "file": SimpleUploadedFile(
-                    "catalogo.pdf",
-                    b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF",
-                    content_type="application/pdf",
-                ),
-            },
-        ).status_code
-        == 302
-    )
+    operator.save_profile("Componentes Overture")
+    catalog_id = operator.upload_catalog("Catálogo Overture local")
 
-    category = SearchCategory.objects.get(name="Bobinados de motores")
     zone = SearchZone.objects.get(name="Palermo")
     province = zone.parent
     assert province is not None
@@ -430,39 +426,13 @@ def test_review_only_local_overture_flow_never_uses_network_mime_or_gmail_send(
     partition.is_active = True
     partition.save(update_fields=("status", "is_active", "updated_at"))
 
-    catalog = owner.catalogs.get()
-    created = client.post(
-        reverse("campaign-create"),
-        {
-            "name": "Aceptación Overture local",
-            "delivery_mode": Campaign.DeliveryMode.REVIEW_ONLY,
-            "approval_mode": Campaign.ApprovalMode.CAMPAIGN,
-            "reminder_delay_days": "3",
-            "location_text": "Ciudad Autónoma de Buenos Aires, Argentina",
-            "objective": "1",
-            "max_raw_records": "10",
-            "overture_min_confidence": "0.750",
-            "daily_limit": "30",
-            "message_interval_minutes": "1",
-            "weekdays": ["0", "1", "2", "3", "4", "5", "6"],
-            "window_start": "00:01",
-            "window_end": "23:59",
-            "timezone_name": "America/Argentina/Buenos_Aires",
-            "relevance_threshold": "70",
-            "catalog": str(catalog.pk),
-            "catalogs": [str(catalog.pk)],
-            "categories": [str(category.pk)],
-            "provinces": [str(zone.parent_id)],
-            "zones": [str(zone.pk)],
-        },
-    )
-    assert created.status_code == 302
-    campaign = Campaign.objects.get(name="Aceptación Overture local")
+    campaign_id = operator.create_review_only_campaign("Aceptación Overture local", catalog_id)
+    campaign = Campaign.objects.get(pk=campaign_id)
 
     with django_capture_on_commit_callbacks(execute=True):
-        started = client.post(reverse("campaign-action", args=(campaign.pk, "start")), follow=True)
+        started = operator.run_action(campaign_id, "start-discovery")
+    assert started.status_code == 200, started.content
 
-    assert started.status_code == 200
     campaign.refresh_from_db()
     assert campaign.state == Campaign.State.AWAITING_APPROVAL
     run = campaign.search_runs.get()
@@ -470,8 +440,9 @@ def test_review_only_local_overture_flow_never_uses_network_mime_or_gmail_send(
     email = prospect.emails.get(is_primary=True)
     website_snapshot = WebsiteSnapshot.objects.get(prospect=prospect)
 
-    approved = client.post(reverse("campaign-approve", args=(campaign.pk,)), follow=True)
-    assert approved.status_code == 200
+    with django_capture_on_commit_callbacks(execute=True):
+        approved = operator.run_action(campaign_id, "approve")
+    assert approved.status_code == 200, approved.content
 
     message = campaign.messages.get(kind=OutboundMessage.Kind.INITIAL)
     assert campaign.overture_snapshot_id == snapshot.pk
@@ -490,11 +461,22 @@ def test_review_only_local_overture_flow_never_uses_network_mime_or_gmail_send(
     assert message.mime_sha256 == ""
     assert deliver_outbound_messages() == 0
 
-    detail = client.get(reverse("outbound-detail", args=(message.pk,)))
-    assert detail.status_code == 200
-    assert message.subject in detail.content.decode()
-    assert message.body_text in detail.content.decode()
-    assert "Este correo no fue enviado" in detail.content.decode()
+    detail = operator.get(reverse("api-outbound-message-detail", args=(message.pk,))).json()["data"]
+    assert detail["subject"] == message.subject
+    assert detail["body_text"] == message.body_text
+    assert detail["state"] == OutboundMessage.State.REVIEW_READY
+    assert detail["sent_at"] is None
+
+    # Overture's attribution stays visible to the team, on the coverage status and on the record.
+    coverage = operator.get(reverse("api-overture-status")).json()["data"]
+    assert coverage["attribution"]["attribution"] == OVERTURE_ATTRIBUTION
+    assert coverage["attribution"]["release_id"] == "2026-07-22.0"
+    listed = operator.get(reverse("api-prospects")).json()["data"]
+    provenance = next(item for item in listed if item["id"] == str(prospect.pk))["provenance"]
+    assert provenance["overture_id"] == overture_id
+    assert provenance["release_id"] == "2026-07-22.0"
+    assert OVERTURE_ATTRIBUTION in provenance["attribution"]
+    assert provenance["contact_source"]["source"] == "overture"
 
     assert mx_queries == ["bobinados-overture.example"]
     assert unexpected_external_calls == []

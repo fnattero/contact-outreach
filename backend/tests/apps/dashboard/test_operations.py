@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
@@ -16,16 +17,23 @@ from django.utils import timezone
 
 from apps.audit.models import AuditEvent, BackgroundJob
 from apps.audit.observability import RedactingJsonFormatter, correlation_id_var
-from apps.audit.services import record_event
-from apps.automation.models import HumanTask, ReplyDecision
 from apps.campaigns.models import Campaign, OutboundMessage, SearchQuery, SearchRun
 from apps.catalogs.services import create_catalog
-from apps.contacts.models import Contact, Conversation, EmailAddress, Organization
-from apps.dashboard.csv_export import spreadsheet_safe
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection, InboundMessage
-from apps.overture.models import OvertureDatasetSnapshot
-from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail, WebsiteSnapshot
+from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail
+
+
+def _api(client: Client, method: str, url: str, payload: dict[str, object] | None = None, **extra):
+    """Call the JSON API as an already signed-in client (CSRF is not enforced on this client)."""
+    kwargs = {"content_type": "application/json", **extra}
+    if method == "get":
+        return client.get(url, payload or {}, **extra)
+    return getattr(client, method)(url, data=json.dumps(payload or {}), **kwargs)
+
+
+def _idempotent() -> dict[str, str]:
+    return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
 def _operational_data(owner: User) -> tuple[Campaign, Prospect, OutboundMessage, InboundMessage]:
@@ -159,206 +167,6 @@ def _reviewable_body() -> str:
 
 
 @pytest.mark.django_db
-def test_operational_views_filter_paginate_and_export_safely(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    campaign, prospect, outbound, inbound = _operational_data(owner)
-    ProspectEmail.objects.create(
-        prospect=prospect,
-        original_email="contacto@example.net",
-        normalized_email="contacto@example.net",
-        domain="example.net",
-        local_part="contacto",
-        source="fixture-secondary",
-        provider_order=0,
-        mx_status=ProspectEmail.MXStatus.VALID,
-        mx_checked_at=timezone.now(),
-        is_primary=False,
-    )
-    OutboundMessage.objects.create(
-        kind=OutboundMessage.Kind.MANUAL_REPLY,
-        campaign=campaign,
-        prospect=prospect,
-        prospect_email=outbound.prospect_email,
-        parent_inbound=inbound,
-        sent_by=owner,
-        recipient=outbound.recipient,
-        recipient_normalized=outbound.recipient_normalized,
-        subject="Re: Consulta",
-        body_text="Respuesta manual",
-        catalog=outbound.catalog,
-        catalog_version=outbound.catalog_version,
-        state=OutboundMessage.State.SENT,
-        delivery_mode=Campaign.DeliveryMode.LIVE,
-        idempotency_key=f"manual:{inbound.pk}",
-        message_id=f"<manual-{inbound.pk}@example.invalid>",
-    )
-    record_event(action="campaign.checked", entity=campaign, actor=owner)
-    organization = Organization.objects.create(
-        workspace=campaign.workspace,
-        name="Cliente operativo",
-        normalized_name="cliente operativo",
-    )
-    contact_email = EmailAddress.objects.create(
-        workspace=campaign.workspace,
-        organization=organization,
-        original_email="cliente-operativo@example.com",
-        normalized_email="cliente-operativo@example.com",
-        domain="example.com",
-        validity=EmailAddress.Validity.VALID,
-        is_preferred=True,
-    )
-    contact = Contact.objects.create(
-        workspace=campaign.workspace,
-        organization=organization,
-        preferred_email=contact_email,
-        name="Cliente operativo",
-        created_reason=Contact.CreatedReason.MANUAL_ENTRY,
-        created_by=owner,
-    )
-    conversation = Conversation.objects.create(
-        workspace=campaign.workspace,
-        contact=contact,
-        connection=inbound.connection,
-        gmail_thread_id="dashboard-review-thread",
-        subject="Consulta por envíos",
-    )
-    inbound.organization = organization
-    inbound.contact = contact
-    inbound.conversation = conversation
-    inbound.save(update_fields=("organization", "contact", "conversation", "updated_at"))
-    decision = ReplyDecision.objects.create(
-        workspace=campaign.workspace,
-        inbound=inbound,
-        contact=contact,
-        conversation=conversation,
-        mode="LIVE",
-        provider="fake",
-        model="fake",
-        policy_version="reply-policy-v1",
-        classification="INTERESTED",
-        intent="APPROVED_PRODUCT_INFORMATION",
-        action="REPLY",
-        confidence="0.900",
-        human_reason="HUMAN_TASK_OPEN",
-        context_manifest={},
-        context_hash="b" * 64,
-        state=ReplyDecision.State.REJECTED_POLICY,
-        error="Hay una revisión humana pendiente para este contacto.",
-    )
-    HumanTask.objects.create(
-        workspace=campaign.workspace,
-        contact=contact,
-        conversation=conversation,
-        inbound=inbound,
-        decision=decision,
-        kind="REPLY_REVIEW",
-        reason="HUMAN_TASK_OPEN",
-        status=HumanTask.Status.OPEN,
-        friendly_summary="Hay una revisión humana pendiente para este contacto.",
-        opened_at=timezone.now(),
-    )
-    client.force_login(owner)
-
-    dashboard = client.get(reverse("dashboard"), {"campaign": campaign.pk})
-    assert dashboard.status_code == 200
-    assert dashboard.context["metrics"]["raw"] == 3
-    assert dashboard.context["metrics"]["interested"] == 1
-    assert dashboard.context["metrics"]["sent"] == 0
-    assert dashboard.context["metrics"]["failed"] == 1
-    dashboard_page = dashboard.content.decode()
-    assert "Ya hay una revisión abierta para este contacto" in dashboard_page
-    assert "Hay una revisión humana pendiente para este contacto." in dashboard_page
-    assert client.get(reverse("dashboard"), {"campaign": "inválida"}).status_code == 200
-
-    prospects = client.get(
-        reverse("prospects"),
-        {"q": "Fórmula", "campaign": campaign.pk, "min_score": "90"},
-    )
-    assert list(prospects.context["page_obj"]) == [prospect]
-    assert "Actividad compatible" in prospects.content.decode()
-    assert "ventas@example.com" in prospects.content.decode()
-    assert "contacto@example.net" not in prospects.content.decode()
-    assert client.get(reverse("prospects"), {"min_score": "no-numérico"}).status_code == 200
-    assert client.get(reverse("prospects"), {"campaign": "inválida"}).status_code == 200
-    combined = client.get(
-        reverse("prospects"),
-        {
-            "state": "QUEUED",
-            "category": "motor",
-            "neighborhood": "paler",
-            "max_score": "95",
-            "date_from": "2020-01-01",
-            "date_to": "2030-01-01",
-        },
-    )
-    assert list(combined.context["page_obj"]) == [prospect]
-    assert client.get(reverse("prospects"), {"max_score": "x"}).status_code == 200
-
-    sent = client.get(
-        reverse("outbound-messages"),
-        {
-            "q": "Consulta",
-            "campaign": campaign.pk,
-            "state": "SEND_FAILED",
-            "kind": "FIRST_CONTACT",
-            "date_from": "2020-01-01",
-            "date_to": "2030-01-01",
-        },
-    )
-    assert list(sent.context["page_obj"]) == [outbound]
-    assert "Texto de prueba con BAJA." not in sent.content.decode()
-    detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
-    assert detail.status_code == 200
-    assert "Texto de prueba con BAJA." in detail.content.decode()
-    assert "no-store" in detail.headers["Cache-Control"]
-    OutboundMessage.objects.filter(pk=outbound.pk).update(
-        body_text="<script>alert('no ejecutar')</script>"
-    )
-    escaped_detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
-    assert "&lt;script&gt;" in escaped_detail.content.decode()
-    assert "<script>alert('no ejecutar')</script>" not in escaped_detail.content.decode()
-    other = User.objects.create_user(username="other-owner", password="other-password")
-    client.force_login(other)
-    assert client.get(reverse("outbound-detail", args=(outbound.pk,))).status_code == 404
-    client.force_login(owner)
-    responses = client.get(
-        reverse("responses"),
-        {
-            "q": "cliente",
-            "campaign": campaign.pk,
-            "classification": "INTERESTED",
-            "interest": "human",
-            "date_from": "2020-01-01",
-            "date_to": "2030-01-01",
-        },
-    )
-    assert list(responses.context["page_obj"]) == [inbound]
-    assert client.get(reverse("responses"), {"interest": "interested"}).status_code == 200
-    assert (
-        client.get(
-            reverse("audit-log"),
-            {"q": "checked", "action": "campaign", "entity": "Campaign"},
-        ).status_code
-        == 200
-    )
-    assert (
-        client.get(reverse("campaigns"), {"q": "observable", "state": "PAUSED"}).status_code == 200
-    )
-
-    csv_response = client.get(reverse("prospects-export"), {"campaign": campaign.pk})
-    assert csv_response.status_code == 200
-    assert "'=Taller Fórmula" in csv_response.content.decode("utf-8-sig")
-    assert "ventas@example.com" in csv_response.content.decode("utf-8-sig")
-    assert "contacto@example.net" not in csv_response.content.decode("utf-8-sig")
-    assert client.get(reverse("outbound-export")).status_code == 200
-    assert client.get(reverse("responses-export")).status_code == 200
-    assert spreadsheet_safe("+SUM(1,1)") == "'+SUM(1,1)"
-    assert spreadsheet_safe("normal") == "normal"
-
-
-@pytest.mark.django_db
 def test_review_ready_email_is_counted_and_labeled_as_not_sent(
     client: Client, owner: User, private_catalog_dir: Path
 ) -> None:
@@ -372,19 +180,23 @@ def test_review_ready_email_is_counted_and_labeled_as_not_sent(
     )
     client.force_login(owner)
 
-    dashboard = client.get(reverse("dashboard"), {"campaign": campaign.pk})
-    listing = client.get(
-        reverse("outbound-messages"),
+    campaign_view = _api(client, "get", reverse("api-campaign-detail", args=(campaign.pk,)))
+    listing = _api(
+        client,
+        "get",
+        reverse("api-outbound-messages"),
         {"campaign": campaign.pk, "state": OutboundMessage.State.REVIEW_READY},
     )
-    detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
+    detail = _api(client, "get", reverse("api-outbound-message-detail", args=(outbound.pk,)))
 
-    assert dashboard.context["metrics"]["review_ready"] == 1
-    assert dashboard.context["metrics"]["queued"] == 0
-    assert list(listing.context["page_obj"]) == [outbound]
-    assert "Listo para revisar" in listing.content.decode()
-    assert "Este correo no fue enviado" in detail.content.decode()
-    assert "no-store" in detail.headers["Cache-Control"]
+    metrics = campaign_view.json()["data"]["metrics"]
+    assert metrics["review_ready"] == 1
+    assert metrics["queued"] == 0
+    assert [row["id"] for row in listing.json()["data"]] == [str(outbound.pk)]
+    assert listing.json()["data"][0]["state_label"] == "Listo para revisar"
+    # A message waiting for review has not been sent.
+    assert detail.json()["data"]["state"] == OutboundMessage.State.REVIEW_READY
+    assert detail.json()["data"]["sent_at"] is None
 
 
 @pytest.mark.django_db
@@ -411,28 +223,24 @@ def test_live_draft_can_be_edited_then_requires_audited_approval(
         error="",
     )
     client.force_login(owner)
+    draft = reverse("api-outbound-message-draft", args=(outbound.pk,))
+    authorize = reverse("api-outbound-message-authorize", args=(outbound.pk,))
 
-    detail = client.get(reverse("outbound-detail", args=(outbound.pk,)))
+    detail = _api(client, "get", reverse("api-outbound-message-detail", args=(outbound.pk,)))
     assert detail.status_code == 200
-    assert detail.context["can_edit"] is True
-    assert detail.context["can_approve"] is True
-    assert "Aprobar para enviar" in detail.content.decode()
+    assert detail.json()["data"]["state"] == OutboundMessage.State.REVIEW_READY
+    assert detail.json()["data"]["approved_at"] is None
 
-    invalid = client.post(
-        reverse("outbound-edit", args=(outbound.pk,)),
-        {"subject": "Cambio inválido", "body_text": "Sin firma"},
-    )
+    invalid = _api(client, "patch", draft, {"subject": "Cambio inválido", "body_text": "Sin firma"})
     assert invalid.status_code == 400
     outbound.refresh_from_db()
     assert outbound.subject == "Consulta técnica"
 
     edited_body = _reviewable_body().replace("queremos conversar", "preferimos conversar")
-    edited = client.post(
-        reverse("outbound-edit", args=(outbound.pk,)),
-        {"subject": "Consulta para coordinar", "body_text": edited_body},
-        follow=True,
+    edited = _api(
+        client, "patch", draft, {"subject": "Consulta para coordinar", "body_text": edited_body}
     )
-    assert edited.status_code == 200
+    assert edited.status_code == 200, edited.content
     outbound.refresh_from_db()
     assert outbound.subject == "Consulta para coordinar"
     assert outbound.body_text == edited_body
@@ -441,8 +249,8 @@ def test_live_draft_can_be_edited_then_requires_audited_approval(
     assert outbound.state == OutboundMessage.State.REVIEW_READY
     assert outbound.approved_at is None
 
-    approved = client.post(reverse("outbound-approve", args=(outbound.pk,)), follow=True)
-    assert approved.status_code == 200
+    approved = _api(client, "post", authorize, **_idempotent())
+    assert approved.status_code == 200, approved.content
     outbound.refresh_from_db()
     assert outbound.state == OutboundMessage.State.QUEUED
     assert outbound.approved_by == owner
@@ -457,13 +265,16 @@ def test_live_draft_can_be_edited_then_requires_audited_approval(
     assert approval_event.after["content_revision"] == 2
     assert edited_body not in json.dumps(approval_event.after)
 
-    assert client.post(reverse("outbound-edit", args=(outbound.pk,)), {}).status_code == 400
-    assert client.post(reverse("outbound-approve", args=(outbound.pk,))).status_code == 302
+    assert _api(client, "patch", draft, {}).status_code == 400
+    # An approved message cannot be approved a second time under a new idempotency key.
+    assert _api(client, "post", authorize, **_idempotent()).status_code == 400
+    outbound.refresh_from_db()
+    assert outbound.state == OutboundMessage.State.QUEUED
 
     other = User.objects.create_user(username="review-other", password="password")
     client.force_login(other)
-    assert client.post(reverse("outbound-edit", args=(outbound.pk,)), {}).status_code == 403
-    assert client.post(reverse("outbound-approve", args=(outbound.pk,))).status_code == 403
+    assert _api(client, "patch", draft, {}).status_code == 403
+    assert _api(client, "post", authorize, **_idempotent()).status_code == 403
 
 
 @pytest.mark.django_db
@@ -496,16 +307,17 @@ def test_draft_editor_normalizes_browser_crlf_and_accepts_migrated_short_copy(
     )
     client.force_login(owner)
 
-    edited = client.post(
-        reverse("outbound-edit", args=(outbound.pk,)),
+    edited = _api(
+        client,
+        "patch",
+        reverse("api-outbound-message-draft", args=(outbound.pk,)),
         {
             "subject": "Consulta técnica actualizada",
             "body_text": migrated_body.replace("\n", "\r\n"),
         },
-        follow=True,
     )
 
-    assert edited.status_code == 200
+    assert edited.status_code == 200, edited.content
     outbound.refresh_from_db()
     assert outbound.subject == "Consulta técnica actualizada"
     assert outbound.body_text == migrated_body
@@ -543,128 +355,6 @@ def test_manual_approval_migration_updates_existing_unsent_drafts(
 
 
 @pytest.mark.django_db
-def test_overture_provenance_is_visible_on_prospect_campaign_and_message_pages(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    snapshot = OvertureDatasetSnapshot.objects.create(
-        release_id="2026-07-22.0",
-        schema_version="places-v2",
-        taxonomy_version="taxonomy-v1",
-        importer_version="contact-outreach-v1",
-        mapping_version="category-map-v2",
-        boundary_version="caba-v1",
-        boundary_manifest_sha256="b" * 64,
-        source_uri=("s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/"),
-        manifest_sha256="a" * 64,
-        status=OvertureDatasetSnapshot.Status.READY,
-        is_active=True,
-        source_licenses=["CDLA Permissive 2.0"],
-        attribution="© Overture Maps Foundation y sus colaboradores",
-    )
-    campaign, prospect, outbound, _ = _operational_data(owner)
-    Campaign.objects.filter(pk=campaign.pk).update(
-        extractor_provider="overture",
-        overture_snapshot=snapshot,
-    )
-    provider_data = {
-        "overture_id": "08f2a1072b1142d003f8",
-        "snapshot": {
-            "id": str(snapshot.pk),
-            "release_id": snapshot.release_id,
-            "schema_version": snapshot.schema_version,
-            "taxonomy_version": snapshot.taxonomy_version,
-            "importer_version": snapshot.importer_version,
-            "attribution": snapshot.attribution,
-            "source_licenses": snapshot.source_licenses,
-        },
-        "zone": {
-            "name": "Palermo",
-            "attribution": "Buenos Aires Data · CC-BY-2.5-AR",
-        },
-        "matched_rule": {
-            "taxonomy_code": "auto_electrical_repair",
-            "name_terms": ["bobinad*"],
-        },
-        "matched_rule_index": 2,
-        "match_quality": 2,
-        "confidence": "0.9130",
-        "provenance": {
-            "field_provenance": {
-                "/names/primary": [
-                    {
-                        "dataset": "meta",
-                        "record_id": "source-record-7",
-                    }
-                ]
-            },
-            "source_licenses": ["CDLA Permissive 2.0"],
-        },
-    }
-    Prospect.objects.filter(pk=prospect.pk).update(
-        provider_data=provider_data,
-        website="https://taller.example/",
-    )
-    ProspectEmail.objects.filter(pk=outbound.prospect_email_id).update(
-        source="website_mailto",
-        source_url="https://taller.example/contacto",
-        source_content_hash="c" * 64,
-    )
-    WebsiteSnapshot.objects.create(
-        prospect=prospect,
-        requested_url="https://taller.example/",
-        final_url="https://taller.example/contacto",
-        fetched_at=timezone.now(),
-        http_status=200,
-        content_type="text/html",
-        content_hash="d" * 64,
-        pages=[],
-        status=WebsiteSnapshot.Status.SUCCESS,
-    )
-    client.force_login(owner)
-
-    responses = (
-        client.get(reverse("prospects"), {"campaign": str(campaign.pk)}),
-        client.get(reverse("campaign-detail", args=(campaign.pk,))),
-        client.get(reverse("outbound-detail", args=(outbound.pk,))),
-    )
-
-    for response in responses:
-        content = response.content.decode()
-        assert response.status_code == 200
-        assert "2026-07-22.0" in content
-        assert str(snapshot.pk) in content
-        assert "08f2a1072b1142d003f8" in content
-        assert "auto_electrical_repair" in content
-        assert "bobinad*" in content
-        assert "/names/primary" in content
-        assert "source-record-7" in content
-        assert "sitio web, enlace directo de correo" in content
-        assert "https://taller.example/contacto" in content
-        assert "CDLA Permissive 2.0" in content
-        assert "© Overture Maps Foundation y sus colaboradores" in content
-        assert "Buenos Aires Data · CC-BY-2.5-AR" in content
-
-
-@pytest.mark.django_db
-def test_fake_and_legacy_prospects_render_without_overture_provenance(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    campaign, _, outbound, _ = _operational_data(owner)
-    client.force_login(owner)
-
-    pages = (
-        client.get(reverse("prospects"), {"campaign": str(campaign.pk)}),
-        client.get(reverse("campaign-detail", args=(campaign.pk,))),
-        client.get(reverse("outbound-detail", args=(outbound.pk,))),
-    )
-
-    assert all(page.status_code == 200 for page in pages)
-    assert all("no contiene procedencia Overture" in page.content.decode() for page in pages)
-
-
-@pytest.mark.django_db
 def test_failed_delivery_retry_is_explicit_same_row_and_audited(
     client: Client, owner: User, private_catalog_dir: Path
 ) -> None:
@@ -679,19 +369,21 @@ def test_failed_delivery_retry_is_explicit_same_row_and_audited(
         error="Proveedor corregible",
     )
     client.force_login(owner)
-    page = client.get(reverse("jobs"), {"state": "FAILED", "q": outbound.pk})
-    assert list(page.context["page_obj"]) == [job]
+    page = _api(
+        client, "get", reverse("api-background-jobs"), {"state": "FAILED", "q": str(outbound.pk)}
+    )
+    assert [row["id"] for row in page.json()["data"]] == [str(job.pk)]
 
-    rejected = client.post(reverse("job-retry", args=(job.pk,)), {"reason": "corto"})
-    assert rejected.status_code == 302
+    retry = reverse("api-background-job-retry", args=(job.pk,))
+    rejected = _api(client, "post", retry, {"reason": "corto"}, **_idempotent())
+    assert rejected.status_code == 400
     outbound.refresh_from_db()
     assert outbound.state == OutboundMessage.State.SEND_FAILED
 
-    accepted = client.post(
-        reverse("job-retry", args=(job.pk,)),
-        {"reason": "Se restauró la conexión del proveedor"},
+    accepted = _api(
+        client, "post", retry, {"reason": "Se restauró la conexión del proveedor"}, **_idempotent()
     )
-    assert accepted.status_code == 302
+    assert accepted.status_code == 200, accepted.content
     outbound.refresh_from_db()
     job.refresh_from_db()
     assert outbound.state == OutboundMessage.State.REVIEW_READY

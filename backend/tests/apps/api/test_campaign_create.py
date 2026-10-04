@@ -13,7 +13,10 @@ from django.utils import timezone
 from apps.campaigns.models import Campaign
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import create_catalog
-from apps.configuration.models import SearchCategory, SearchZone
+from apps.configuration.models import IntegrationConfiguration, SearchCategory, SearchZone
+from apps.configuration.services import save_business_profile
+from apps.integrations.factory import get_website_fetcher
+from apps.integrations.website import HttpWebsiteFetcher
 
 PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF"
 
@@ -300,3 +303,70 @@ def test_deleting_a_category_used_by_a_campaign_archives_it_instead(
         reverse("api-campaign-detail", args=(created.json()["data"]["id"],))
     )
     assert detail.json()["data"]["categories"][0]["name"] == campaign_api.category.name
+
+
+@pytest.mark.django_db
+def test_campaign_action_with_a_non_object_body_is_a_400_and_changes_nothing(
+    campaign_api: _Fixture,
+) -> None:
+    created = campaign_api.create()
+    campaign_id = created.json()["data"]["id"]
+
+    response = campaign_api.client.post(
+        reverse("api-campaign-action", args=(campaign_id, "start-discovery")),
+        data="[1, 2]",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=campaign_api.csrf,
+        HTTP_IDEMPOTENCY_KEY="3f2c1a44-8d2b-4f3a-9c55-0b9e6d1c7a10",
+    )
+
+    assert response.status_code == 400
+    assert Campaign.objects.get(pk=campaign_id).state == Campaign.State.DRAFT
+
+
+@pytest.mark.django_db
+def test_the_configured_website_fetcher_is_snapshotted_and_discovery_can_start(
+    campaign_api: _Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_business_profile(
+        owner=campaign_api.owner,
+        values={
+            "company_name": "Componentes Delta SA",
+            "salesperson_name": "Vendedor",
+            "phone": "",
+            "whatsapp": "",
+            "description": "",
+            "products": "Componentes industriales",
+            "differentiators": "",
+            "address": "CABA",
+            "website": "",
+            "signature": "Vendedor · Componentes Delta SA",
+            "additional_instructions": "",
+        },
+    )
+    IntegrationConfiguration.objects.create(
+        owner=campaign_api.owner,
+        workspace=campaign_api.owner.membership.workspace,
+        website_fetcher="http",
+    )
+    monkeypatch.setattr("apps.api.campaigns.orchestrate_extraction.delay", lambda campaign_id: None)
+
+    created = campaign_api.create(objective=450, max_raw_records=4000, name="Campaña 450")
+
+    assert created.status_code == 201, created.content
+    campaign = Campaign.objects.get(pk=created.json()["data"]["id"])
+    assert campaign.objective == 450
+    assert campaign.website_fetcher == "http"
+    assert isinstance(get_website_fetcher(campaign.website_fetcher), HttpWebsiteFetcher)
+
+    started = campaign_api.client.post(
+        reverse("api-campaign-action", args=(campaign.pk, "start-discovery")),
+        data="{}",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=campaign_api.csrf,
+        HTTP_IDEMPOTENCY_KEY="7b1a5e0c-2f43-4c1e-8e57-3c9d1a2f6b11",
+    )
+    assert started.status_code == 200, started.content
+    campaign.refresh_from_db()
+    assert campaign.state == Campaign.State.DISCOVERING
+    assert campaign.search_queries.count() == 1

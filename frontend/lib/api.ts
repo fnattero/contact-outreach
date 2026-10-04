@@ -280,7 +280,18 @@ export type Prospect = {
   primary_email: string | null;
   historical_score: number | null;
   campaign: { id: string; name: string };
+  provenance: Provenance | null;
   created_at: string;
+};
+
+export type Provenance = {
+  release_id: string | null;
+  overture_id: string | null;
+  confidence: string | null;
+  matched_rule: { taxonomy_code: string; name_terms: string[] } | null;
+  contact_source: { email: string; source: string; source_url: string | null } | null;
+  attribution: string[];
+  licenses: string[];
 };
 
 export type ProspectFilters = {
@@ -385,9 +396,18 @@ export type AttentionTask = {
   opened_at: string;
 };
 
+export type OvertureAttribution = {
+  release_id: string;
+  attribution: string;
+  licenses: string[];
+  notices: string[];
+};
+
 export type OvertureStatus = {
   latest_snapshot_id: string | null;
   active_snapshot_id: string | null;
+  /** Overture's terms require this to stay visible; null until a snapshot is active. */
+  attribution: OvertureAttribution | null;
   release_checks: Array<{ status: string; latest_release: string; created_at: string }>;
   partitions: Array<{
     id: string;

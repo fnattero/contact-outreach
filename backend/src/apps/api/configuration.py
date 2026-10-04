@@ -337,8 +337,8 @@ class MessageTemplateRevisionView(SchemaAPIView):
                 subject=cast(str, serializer.validated_data.get("subject", "")),
                 body=cast(str, serializer.validated_data["body"]),
             )
-        except ValidationError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         return Response(
             {"data": MessageTemplateSerializer(_template_data(template)).data},
             status=status.HTTP_201_CREATED,

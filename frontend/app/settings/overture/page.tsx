@@ -33,6 +33,16 @@ export default function OvertureSettingsPage() {
       <StatusBadge label={status.active_snapshot_id ? "Disponible" : "Pendiente"} level={status.active_snapshot_id ? "success" : "warning"} />
       <p>Un snapshot es una versión verificada de los datos geográficos que el sistema usa para buscar lugares. Mientras no haya uno activo, las búsquedas no tienen cobertura confirmada.</p>
     </section>
+    <Card title="Atribución y licencias">
+      {status.attribution ? (
+        <>
+          <p>{status.attribution.attribution}</p>
+          <p className="muted">Versión {status.attribution.release_id}</p>
+          {status.attribution.licenses.length ? <ul>{status.attribution.licenses.map((license) => <li key={license}>{license}</li>)}</ul> : null}
+          {status.attribution.notices.length ? <ul>{status.attribution.notices.map((notice) => <li key={notice}>{notice}</li>)}</ul> : null}
+        </>
+      ) : <p className="muted">La atribución aparecerá acá cuando haya un snapshot activo.</p>}
+    </Card>
     <Card title="Particiones importadas">
       {status.partitions.length ? <Table rowKey="id" dataSource={status.partitions} pagination={{ pageSize: 10, responsive: true }} columns={[
         { title: "Provincia", dataIndex: "province_name" },

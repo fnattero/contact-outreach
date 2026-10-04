@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import json
 from decimal import Decimal
-from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.contrib.auth.models import User
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.test import Client, override_settings
-from django.urls import reverse
+from django.test import override_settings
 
 from apps.audit.models import AuditEvent
 from apps.configuration.forms import IntegrationConfigurationForm
@@ -25,16 +21,6 @@ from apps.configuration.integrations import (
 )
 from apps.configuration.models import IntegrationConfiguration
 from apps.core.crypto import decrypt_secret, encrypt_secret
-from apps.integrations.embeddings import OpenAICompatibleEmbeddingProvider
-from apps.integrations.factory import (
-    get_embedding_provider,
-    get_extractor_provider,
-    get_gmail_provider,
-    get_llm_provider,
-)
-from apps.integrations.gmail import GmailAPIProvider
-from apps.integrations.llm import OpenAICompatibleProvider
-from apps.integrations.overture import OverturePlacesProvider
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.models import GmailConnection
 
@@ -72,201 +58,6 @@ def test_secret_ciphertext_is_randomized_and_bound_to_its_purpose() -> None:
     assert decrypt_secret(first, purpose=LLM_KEY_PURPOSE) == "provider-secret"
     with pytest.raises(ValidationError, match="descifrar"):
         decrypt_secret(first, purpose=GMAIL_CLIENT_SECRET_PURPOSE)
-
-
-@pytest.mark.django_db
-def test_integration_page_requires_login_password_and_csrf(owner: User) -> None:
-    assert Client().get(reverse("integrations")).status_code == 302
-
-    csrf_client = Client(enforce_csrf_checks=True)
-    csrf_client.force_login(owner)
-    assert csrf_client.post(reverse("integrations"), integration_values()).status_code == 403
-
-    client = Client()
-    client.force_login(owner)
-    response = client.post(
-        reverse("integrations"),
-        integration_values(
-            current_password="wrong-password",
-            llm_api_key="must-not-return-in-html",
-        ),
-    )
-    assert response.status_code == 200
-    assert b"contrase\xc3\xb1a actual no es correcta" in response.content.lower()
-    assert b"must-not-return-in-html" not in response.content
-    assert not IntegrationConfiguration.objects.exists()
-
-
-@pytest.mark.django_db
-def test_integration_page_reports_non_password_form_errors_without_throttling(
-    client: Client, owner: User
-) -> None:
-    client.force_login(owner)
-
-    response = client.post(
-        reverse("integrations"),
-        integration_values(llm_model=""),
-    )
-
-    assert response.status_code == 200
-    assert "llm_model" in response.context["form"].errors
-    assert "current_password" not in response.context["form"].errors
-    assert not IntegrationConfiguration.objects.exists()
-
-
-@pytest.mark.django_db
-def test_integration_password_reauthentication_is_throttled(client: Client, owner: User) -> None:
-    cache.clear()
-    client.force_login(owner)
-    for _ in range(5):
-        response = client.post(
-            reverse("integrations"),
-            integration_values(current_password="wrong-password"),
-            REMOTE_ADDR="127.0.0.77",
-        )
-        assert response.status_code == 200
-
-    blocked = client.post(
-        reverse("integrations"),
-        integration_values(current_password="correct-password"),
-        REMOTE_ADDR="127.0.0.77",
-    )
-
-    assert blocked.status_code == 429
-    assert b"Demasiados intentos" in blocked.content
-    assert not IntegrationConfiguration.objects.exists()
-
-
-@pytest.mark.django_db
-def test_debug_error_report_redacts_submitted_credentials(
-    client: Client, owner: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fail_unexpectedly(**kwargs: object) -> None:
-        del kwargs
-        raise RuntimeError("unexpected test failure")
-
-    monkeypatch.setattr(
-        "apps.configuration.views.save_integration_configuration",
-        fail_unexpectedly,
-    )
-    client.force_login(owner)
-    client.raise_request_exception = False
-    submitted = integration_values(
-        llm_api_key="debug-llm-credential",
-        gmail_oauth_client_secret="debug-google-credential",
-    )
-
-    with override_settings(DEBUG=True):
-        response = client.post(reverse("integrations"), submitted)
-
-    assert response.status_code == 500
-    for value in submitted.values():
-        if isinstance(value, str) and value.startswith(("debug-", "correct-")):
-            assert value.encode() not in response.content
-
-
-@pytest.mark.django_db
-def test_dashboard_refuses_secret_storage_without_external_root_key(
-    client: Client, owner: User
-) -> None:
-    client.force_login(owner)
-    with override_settings(FIELD_ENCRYPTION_KEY=""):
-        response = client.post(
-            reverse("integrations"),
-            integration_values(llm_api_key="must-not-leak-with-missing-root"),
-        )
-
-    assert response.status_code == 200
-    assert b"FIELD_ENCRYPTION_KEY" in response.content
-    assert b"must-not-leak-with-missing-root" not in response.content
-    assert not IntegrationConfiguration.objects.exists()
-
-
-@pytest.mark.django_db
-def test_dashboard_saves_write_only_purpose_bound_credentials(client: Client, owner: User) -> None:
-    client.force_login(owner)
-    response = client.post(
-        reverse("integrations"),
-        integration_values(
-            extractor_provider="overture",
-            overture_min_confidence=Decimal("0.800"),
-            website_fetcher="http",
-            llm_provider="openai-compatible",
-            llm_model="provider-model",
-            openai_compatible_base_url="https://llm.example.test/v1",
-            llm_api_key="llm-dashboard-secret",
-            embedding_provider="openai-compatible",
-            embedding_model="text-embedding-3-small",
-            embedding_dimensions=1536,
-            gmail_provider="api",
-            gmail_oauth_client_id="client-id.apps.googleusercontent.com",
-            gmail_oauth_client_secret="google-dashboard-secret",
-        ),
-    )
-
-    assert response.status_code == 302
-    configuration = IntegrationConfiguration.objects.get(owner=owner)
-    serialized_model = " ".join(
-        (
-            configuration.llm_api_key_encrypted,
-            configuration.gmail_oauth_client_secret_encrypted,
-        )
-    )
-    for secret in (
-        "llm-dashboard-secret",
-        "google-dashboard-secret",
-    ):
-        assert secret not in serialized_model
-    assert (
-        decrypt_secret(configuration.llm_api_key_encrypted, purpose=LLM_KEY_PURPOSE)
-        == "llm-dashboard-secret"
-    )
-    assert (
-        decrypt_secret(
-            configuration.gmail_oauth_client_secret_encrypted,
-            purpose=GMAIL_CLIENT_SECRET_PURPOSE,
-        )
-        == "google-dashboard-secret"
-    )
-
-    runtime = runtime_integration_configuration(owner.pk)
-    assert runtime.extractor_provider == "overture"
-    assert runtime.website_fetcher == "http"
-    assert runtime.llm_provider == "openai-compatible"
-    assert runtime.embedding_provider == "openai-compatible"
-    assert runtime.embedding_model == "text-embedding-3-small"
-    assert runtime.embedding_dimensions == 1536
-    assert runtime.gmail_provider == "api"
-    assert runtime.overture_min_confidence == Decimal("0.800")
-
-    extractor = get_extractor_provider("overture", owner_id=owner.pk)
-    llm = get_llm_provider(
-        "openai-compatible",
-        base_url="https://llm.example.test/v1",
-        model="provider-model",
-        owner_id=owner.pk,
-    )
-    gmail = get_gmail_provider(owner_id=owner.pk)
-    embedding = get_embedding_provider(owner_id=owner.pk)
-    assert isinstance(extractor, OverturePlacesProvider)
-    assert isinstance(llm, OpenAICompatibleProvider)
-    assert llm.api_key == "llm-dashboard-secret"
-    assert isinstance(embedding, OpenAICompatibleEmbeddingProvider)
-    assert embedding.api_key == "llm-dashboard-secret"
-    assert isinstance(gmail, GmailAPIProvider)
-    assert gmail.client_secret == "google-dashboard-secret"
-
-    audit = AuditEvent.objects.get(action="integration_configuration.saved")
-    audit_json = json.dumps({"before": audit.before, "after": audit.after})
-    assert "dashboard-secret" not in audit_json
-    assert configuration.llm_api_key_encrypted not in audit_json
-
-    page = client.get(reverse("integrations"))
-    assert page.headers["Cache-Control"] == (
-        "max-age=0, no-cache, no-store, must-revalidate, private"
-    )
-    assert b"dashboard-secret" not in page.content
-    assert b'value="llm-dashboard-secret"' not in page.content
 
 
 @pytest.mark.django_db
@@ -314,29 +105,6 @@ def test_connected_gmail_credentials_cannot_be_replaced(owner: User) -> None:
             ),
         )
     assert not IntegrationConfiguration.objects.exists()
-
-
-@pytest.mark.django_db
-def test_google_sign_in_uses_dashboard_oauth_configuration(client: Client, owner: User) -> None:
-    save_integration_configuration(
-        owner=owner,
-        values=integration_values(
-            gmail_provider="api",
-            gmail_oauth_client_id="dashboard-client-id.apps.googleusercontent.com",
-            gmail_oauth_client_secret="dashboard-google-secret",
-        ),
-    )
-    client.force_login(owner)
-
-    response = client.post(reverse("gmail-connect"))
-
-    assert response.status_code == 302
-    target = urlsplit(response["Location"])
-    assert target.netloc == "accounts.google.com"
-    query = parse_qs(target.query)
-    assert query["client_id"] == ["dashboard-client-id.apps.googleusercontent.com"]
-    assert query["redirect_uri"] == ["http://testserver/gmail/oauth/callback/"]
-    assert "dashboard-google-secret" not in response["Location"]
 
 
 @pytest.mark.django_db

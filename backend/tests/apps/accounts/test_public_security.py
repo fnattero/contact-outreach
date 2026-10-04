@@ -83,21 +83,6 @@ def test_railway_proxy_honors_only_its_marked_https_header() -> None:
     assert "HTTP_X_FORWARDED_HOST" not in request.META
 
 
-@pytest.mark.django_db
-def test_browser_security_headers_are_applied_to_public_pages(client: Client) -> None:
-    response = client.get(reverse("login"))
-
-    assert response.status_code == 200
-    csp = response["Content-Security-Policy"]
-    assert "default-src 'self'" in csp
-    assert "script-src 'self'" in csp
-    assert "'unsafe-inline'" not in csp
-    assert response["X-Frame-Options"] == "DENY"
-    assert response["X-Content-Type-Options"] == "nosniff"
-    assert response["Referrer-Policy"] == "same-origin"
-    assert "camera=()" in response["Permissions-Policy"]
-
-
 def test_templates_do_not_contain_inline_scripts() -> None:
     template_root = Path(__file__).resolve().parents[3] / "templates"
     inline_script = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>", re.IGNORECASE)
@@ -248,3 +233,15 @@ def test_security_header_middleware_does_not_weaken_a_stricter_upstream_policy()
     response = ApplicationSecurityHeadersMiddleware(upstream)(request)
 
     assert response["Content-Security-Policy"] == "default-src 'none'"
+
+
+@pytest.mark.django_db
+def test_security_headers_are_applied_to_api_and_error_responses(client: Client) -> None:
+    for response in (
+        client.get(reverse("api-auth-csrf")),
+        client.get("/this-route-does-not-exist/"),
+    ):
+        assert response["X-Content-Type-Options"] == "nosniff"
+        assert response["Referrer-Policy"] == "same-origin"
+        assert response["Cross-Origin-Opener-Policy"] == "same-origin"
+        assert "frame-ancestors" in response["Content-Security-Policy"]

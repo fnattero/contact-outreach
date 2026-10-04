@@ -507,7 +507,7 @@ def test_kill_switch_pauses_live_campaign(owner: User, private_catalog_dir: Path
 
 @pytest.mark.django_db
 @override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False)
-def test_late_invalid_email_is_not_sent_and_error_is_visible(
+def test_late_invalid_email_is_not_sent_and_the_error_is_reported(
     client: Client, owner: User, private_catalog_dir: Path
 ) -> None:
     del private_catalog_dir
@@ -520,9 +520,9 @@ def test_late_invalid_email_is_not_sent_and_error_is_visible(
     assert deliver_message(message.pk, now=DELIVERY_NOW) == OutboundMessage.State.SEND_FAILED
     assert not FakeGmailMessage.objects.exists()
     client.force_login(owner)
-    response = client.get(reverse("campaign-detail", args=(campaign.pk,)))
-    assert response.status_code == 200
-    assert "Elegí un email válido antes de continuar" in response.content.decode()
+    detail = client.get(reverse("api-outbound-message-detail", args=(message.pk,)))
+    assert detail.status_code == 200
+    assert "Elegí un email válido antes de continuar" in detail.json()["data"]["error"]
 
 
 class AmbiguousThenFoundProvider:

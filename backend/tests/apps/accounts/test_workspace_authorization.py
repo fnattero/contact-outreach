@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth.models import User
@@ -156,108 +157,6 @@ def _thread(
 
 
 @pytest.mark.django_db
-def test_vendedor_route_method_matrix_and_private_timelines(
-    client: Client,
-    private_catalog_dir: Path,
-) -> None:
-    del private_catalog_dir
-    admin = User.objects.create_user(username="admin", password="password")
-    seller = User.objects.create_user(username="seller", password="password")
-    catalog = _catalog(admin)
-    draft = _campaign(admin, catalog, name="Borrador secreto", state=Campaign.State.DRAFT)
-    campaign = _campaign(admin, catalog, name="Campaña visible", state=Campaign.State.PAUSED)
-    sent, inbound = _thread(admin, campaign, catalog)
-    unsent, _ = _thread(
-        admin,
-        campaign,
-        catalog,
-        message_state=OutboundMessage.State.SEND_FAILED,
-        suffix="unsent",
-    )
-    assert inbound is not None
-    client.force_login(seller)
-
-    readable = (
-        reverse("dashboard"),
-        reverse("campaigns"),
-        reverse("campaign-detail", args=(campaign.pk,)),
-        reverse("outbound-messages"),
-        reverse("outbound-detail", args=(sent.pk,)),
-        reverse("responses"),
-        reverse("response-thread", args=(inbound.pk,)),
-    )
-    for url in readable:
-        response = client.get(url)
-        assert response.status_code == 200, url
-        assert "private" in response.headers["Cache-Control"]
-        assert "no-store" in response.headers["Cache-Control"]
-
-    campaign_list = client.get(reverse("campaigns"))
-    campaign_page = client.get(reverse("campaign-detail", args=(campaign.pk,)))
-    sent_page = client.get(reverse("outbound-detail", args=(sent.pk,)))
-    thread_page = client.get(reverse("response-thread", args=(inbound.pk,)))
-    assert "Campaña visible" in campaign_list.content.decode()
-    assert "Borrador secreto" not in campaign_list.content.decode()
-    assert "Nueva campaña" not in campaign_list.content.decode()
-    assert "Audiencia y consultas" not in campaign_page.content.decode()
-    assert "Configuración congelada" not in campaign_page.content.decode()
-    assert "Ver prospectos" not in campaign_page.content.decode()
-    assert "Contenido sent" in sent_page.content.decode()
-    assert "Descargar PDF" not in sent_page.content.decode()
-    assert "Detalles técnicos" not in sent_page.content.decode()
-    assert "Respuesta visible del cliente" in thread_page.content.decode()
-    assert "Responder manualmente" not in thread_page.content.decode()
-    assert client.get(reverse("campaign-detail", args=(draft.pk,))).status_code == 404
-    assert client.get(reverse("outbound-detail", args=(unsent.pk,))).status_code == 404
-
-    for url in readable:
-        assert client.post(url).status_code == 405, url
-
-    forbidden_gets = (
-        reverse("account-users"),
-        reverse("campaign-create"),
-        reverse("prospects"),
-        reverse("prospects-export"),
-        reverse("outbound-export"),
-        reverse("responses-export"),
-        reverse("business-profile"),
-        reverse("prompts"),
-        reverse("integrations"),
-        reverse("overture-datasets"),
-        reverse("categories"),
-        reverse("catalogs"),
-        reverse("catalog-download", args=(catalog.pk,)),
-        reverse("suppressions"),
-        reverse("audit-log"),
-        reverse("jobs"),
-        reverse("gmail-settings"),
-        reverse("health-degraded"),
-    )
-    for url in forbidden_gets:
-        assert client.get(url).status_code == 403, url
-
-    unknown_id = UUID(int=0)
-    forbidden_posts = (
-        reverse("campaign-create"),
-        reverse("campaign-action", args=(campaign.pk, "cancel")),
-        reverse("outbound-edit", args=(unsent.pk,)),
-        reverse("outbound-approve", args=(unsent.pk,)),
-        reverse("manual-reply", args=(inbound.pk,)),
-        reverse("gmail-connect"),
-        reverse("gmail-test"),
-        reverse("gmail-disconnect"),
-        reverse("gmail-fake-inbound"),
-        reverse("overture-sync"),
-        reverse("config-toggle", args=("searchcategory", unknown_id)),
-        reverse("config-delete", args=("searchcategory", unknown_id)),
-        reverse("job-retry", args=(unknown_id,)),
-        reverse("account-user-unlock"),
-    )
-    for url in forbidden_posts:
-        assert client.post(url).status_code == 403, url
-
-
-@pytest.mark.django_db
 def test_second_admin_operates_shared_workspace_resources(
     client: Client,
     private_catalog_dir: Path,
@@ -307,14 +206,25 @@ def test_second_admin_operates_shared_workspace_resources(
     assert runtime_integration_configuration(second_admin.pk).llm_model == "shared-model"
     assert GmailConnection.objects.get(workspace=second_admin.membership.workspace) == connection
 
-    client.force_login(second_admin)
-    assert client.get(reverse("campaigns")).status_code == 200
-    assert client.get(reverse("campaign-detail", args=(campaign.pk,))).status_code == 200
-    assert client.get(reverse("business-profile")).context["profile"].pk == profile.pk
-    assert client.get(reverse("gmail-settings")).context["connection"].pk == connection.pk
-    assert client.get(reverse("catalog-download", args=(catalog.pk,))).status_code == 200
-    changed = client.post(reverse("campaign-action", args=(campaign.pk, "cancel")))
-    assert changed.status_code == 302
+    secure = Client(enforce_csrf_checks=True)
+    secure.force_login(second_admin)
+    csrf = str(secure.get(reverse("api-auth-csrf")).json()["data"]["csrf_token"])
+    assert secure.get(reverse("api-campaigns")).status_code == 200
+    assert secure.get(reverse("api-campaign-detail", args=(campaign.pk,))).status_code == 200
+    shared_profile = secure.get(reverse("api-workspace-profile")).json()["data"]
+    assert shared_profile["company_name"] == "Empresa actualizada"
+    shared_connection = secure.get(reverse("api-gmail-connection")).json()["data"]
+    assert shared_connection["connected"] is True
+    assert shared_connection["email"] == connection.email
+    assert secure.get(reverse("api-catalog-download", args=(catalog.pk,))).status_code == 200
+    changed = secure.post(
+        reverse("api-campaign-action", args=(campaign.pk, "cancel")),
+        data="{}",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+        HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+    )
+    assert changed.status_code == 200, changed.content
     campaign.refresh_from_db()
     assert campaign.state == Campaign.State.CANCELLED
 

@@ -91,3 +91,19 @@ def test_audit_and_jobs_are_admin_only_and_redact_sensitive_audit_payload(owner:
     detail = client.get(reverse("api-background-job-detail", args=(job.pk,)))
     assert detail.status_code == 200
     assert detail.json()["data"]["error"] == "Provider failure (redacted)"
+
+
+@pytest.mark.django_db
+def test_audit_log_is_authenticated_and_read_only(owner: User) -> None:
+    url = reverse("api-audit-events")
+    assert Client().get(url).status_code == 401
+
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+    assert client.get(url).status_code == 200
+    for method in ("post", "put", "patch", "delete"):
+        response = getattr(client, method)(
+            url, data="{}", content_type="application/json", HTTP_X_CSRFTOKEN=csrf
+        )
+        assert response.status_code == 405, method

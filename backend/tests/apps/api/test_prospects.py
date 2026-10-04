@@ -174,3 +174,67 @@ def test_prospect_list_is_restricted_to_campaign_managers(
     denied = seller.get(reverse("api-prospects"))
     assert denied.status_code == 403
     assert "Taller Uno" not in denied.content.decode()
+
+
+@pytest.mark.django_db
+def test_overture_prospects_expose_provenance_attribution_and_licences(
+    owner: User, audience: dict[str, object]
+) -> None:
+    taller = audience["taller"]
+    assert isinstance(taller, Prospect)
+    taller.provider_data = {
+        "overture_id": "08f2a100-6f6a-4f31-9a6f-2e931c237f81",
+        "confidence": "0.920",
+        "matched_rule": {"taxonomy_code": "", "name_terms": ["bobinado"]},
+        "snapshot": {
+            "release_id": "2026-07-22.0",
+            "attribution": "Overture Maps Foundation, overturemaps.org",
+            "source_licenses": ["CDLA Permissive 2.0"],
+        },
+        "zone": {"attribution": "Instituto Geográfico Nacional"},
+        "provenance": {"source_licenses": ["CDLA Permissive 2.0", "ODbL 1.0"]},
+    }
+    taller.save(update_fields=("provider_data", "updated_at"))
+    client = Client()
+    client.force_login(owner)
+
+    rows = {item["name"]: item for item in client.get(reverse("api-prospects")).json()["data"]}
+
+    provenance = rows["Taller Uno"]["provenance"]
+    assert provenance["overture_id"] == "08f2a100-6f6a-4f31-9a6f-2e931c237f81"
+    assert provenance["release_id"] == "2026-07-22.0"
+    assert provenance["confidence"] == "0.920"
+    assert provenance["matched_rule"] == {"taxonomy_code": "", "name_terms": ["bobinado"]}
+    assert provenance["attribution"] == [
+        "Overture Maps Foundation, overturemaps.org",
+        "Instituto Geográfico Nacional",
+    ]
+    assert provenance["licenses"] == ["CDLA Permissive 2.0", "ODbL 1.0"]
+    assert provenance["contact_source"]["email"] == "uno@taller.example"
+    # Records that never came from Overture simply have no provenance to show.
+    assert rows["Ferretería Dos"]["provenance"] is None
+
+
+@pytest.mark.django_db
+def test_malformed_provider_data_never_breaks_the_prospect_list(
+    owner: User, audience: dict[str, object]
+) -> None:
+    taller = audience["taller"]
+    assert isinstance(taller, Prospect)
+    taller.provider_data = {
+        "overture_id": "x",
+        "snapshot": "not-a-mapping",
+        "provenance": ["not", "a", "mapping"],
+        "matched_rule": "nor-this",
+    }
+    taller.save(update_fields=("provider_data", "updated_at"))
+    client = Client()
+    client.force_login(owner)
+
+    response = client.get(reverse("api-prospects"))
+
+    assert response.status_code == 200
+    row = next(item for item in response.json()["data"] if item["name"] == "Taller Uno")
+    assert row["provenance"]["attribution"] == []
+    assert row["provenance"]["licenses"] == []
+    assert row["provenance"]["matched_rule"] is None

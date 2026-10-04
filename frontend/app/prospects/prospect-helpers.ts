@@ -24,6 +24,21 @@ export function stateLevel(state: string): SemanticLevel {
   return byValue.get(state)?.level ?? "inactive";
 }
 
+const CONTACT_SOURCE_LABELS: Record<string, string> = {
+  overture: "Overture Places",
+  website_mailto: "Sitio web, enlace directo de correo",
+  website_visible_text: "Sitio web, texto visible",
+};
+
+export function contactSourceLabel(source: string): string {
+  return CONTACT_SOURCE_LABELS[source] ?? source;
+}
+
+/** Every distinct attribution line shown by the rows, in first-seen order. */
+export function collectAttribution(rows: ReadonlyArray<{ provenance: { attribution: string[] } | null }>): string[] {
+  return [...new Set(rows.flatMap((row) => row.provenance?.attribution ?? []))];
+}
+
 export type FilterFormValues = {
   q?: string;
   campaign?: string;

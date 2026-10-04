@@ -38,7 +38,7 @@ from apps.overture.releases import official_places_source_uri
 
 @pytest.mark.django_db
 def test_liveness_is_public_and_does_not_check_dependencies(client: Client) -> None:
-    response = client.get(reverse("health-live"))
+    response = client.get(reverse("api-health-live"))
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert response.headers["Cache-Control"] == (
@@ -48,7 +48,7 @@ def test_liveness_is_public_and_does_not_check_dependencies(client: Client) -> N
 
 @pytest.mark.django_db
 def test_readiness_checks_database_and_cache(client: Client) -> None:
-    response = client.get(reverse("health-ready"))
+    response = client.get(reverse("api-health-ready"))
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
@@ -56,7 +56,7 @@ def test_readiness_checks_database_and_cache(client: Client) -> None:
 @pytest.mark.django_db
 def test_readiness_reports_dependency_failure_without_details(client: Client) -> None:
     with patch("apps.health.views.cache.set", side_effect=RuntimeError("secret detail")):
-        response = client.get(reverse("health-ready"))
+        response = client.get(reverse("api-health-ready"))
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable"}
     assert b"secret detail" not in response.content
@@ -65,14 +65,14 @@ def test_readiness_reports_dependency_failure_without_details(client: Client) ->
 @pytest.mark.django_db
 def test_readiness_reports_database_failure_without_details(client: Client) -> None:
     with patch("apps.health.views.connection.cursor", side_effect=RuntimeError("database detail")):
-        response = client.get(reverse("health-ready"))
+        response = client.get(reverse("api-health-ready"))
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable"}
     assert b"database detail" not in response.content
 
 
 def test_health_rejects_post(client: Client) -> None:
-    assert client.post(reverse("health-live")).status_code == 405
+    assert client.post(reverse("api-health-live")).status_code == 405
 
 
 @pytest.mark.django_db
@@ -82,7 +82,7 @@ def test_degraded_health_reports_storage_and_provider_configuration(
     admin = User.objects.create_user(username="health-admin", password="password")
     client.force_login(admin)
     with override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
     assert response.status_code == 200
     payload = response.json()
     assert payload["components"]["storage"] == "ok"
@@ -109,12 +109,12 @@ def test_degraded_health_requires_tested_gmail_connection(
         GMAIL_PROVIDER="fake",
     )
     with settings_override:
-        not_tested = client.get(reverse("health-degraded"))
+        not_tested = client.get(reverse("api-health-degraded"))
         assert not_tested.json()["components"]["gmail"] == "not_ready"
 
         connection.last_tested_at = timezone.now()
         connection.save(update_fields=("last_tested_at", "updated_at"))
-        ready = client.get(reverse("health-degraded"))
+        ready = client.get(reverse("api-health-degraded"))
 
     assert ready.json()["components"]["gmail"] == "ready"
 
@@ -139,7 +139,7 @@ def test_degraded_health_reports_missing_local_gmail_api_configuration(
         GMAIL_OAUTH_CLIENT_ID="",
         GMAIL_OAUTH_CLIENT_SECRET="",
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.json()["components"]["gmail"] == "missing_configuration"
 
@@ -165,7 +165,7 @@ def test_degraded_health_uses_encrypted_dashboard_configuration(
         ),
     )
     with override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.json()["components"] == {
         "storage": "ok",
@@ -948,7 +948,7 @@ def test_degraded_health_reports_storage_unavailable_when_root_is_missing(
     client.force_login(owner)
     missing_root = tmp_path / "does-not-exist"
     with override_settings(PRIVATE_STORAGE_ROOT=missing_root, MIN_FREE_DISK_BYTES=1):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     payload = response.json()
     assert payload["components"]["storage"] == "unavailable"
@@ -965,7 +965,7 @@ def test_degraded_health_reports_unsupported_gmail_provider(
         MIN_FREE_DISK_BYTES=1,
         GMAIL_PROVIDER="outscraper",
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.json()["components"]["gmail"] == "unsupported"
 
@@ -982,7 +982,7 @@ def test_degraded_health_reports_gmail_check_failure_without_details(
             side_effect=RuntimeError("secret owner detail"),
         ),
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.status_code == 200
     payload = response.json()
@@ -1003,7 +1003,7 @@ def test_degraded_health_reports_llm_check_failure_without_details(
             side_effect=RuntimeError("secret api key detail"),
         ),
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     payload = response.json()
     assert payload["components"]["llm"] == "unavailable"
@@ -1020,7 +1020,7 @@ def test_degraded_health_reports_missing_overture_dataset(
         override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1),
         patch("apps.health.views.get_active_snapshot", return_value=None),
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.json()["components"]["extractor"] == "missing_dataset"
 
@@ -1044,7 +1044,7 @@ def test_degraded_health_reports_ready_extractor_when_snapshot_covers_all_active
         override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1),
         patch("apps.health.views.get_active_snapshot", return_value=mock_snapshot),
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.json()["components"]["extractor"] == "ready"
 
@@ -1068,6 +1068,6 @@ def test_degraded_health_reports_stale_extractor_when_snapshot_misses_active_zon
         override_settings(PRIVATE_STORAGE_ROOT=tmp_path, MIN_FREE_DISK_BYTES=1),
         patch("apps.health.views.get_active_snapshot", return_value=mock_snapshot),
     ):
-        response = client.get(reverse("health-degraded"))
+        response = client.get(reverse("api-health-degraded"))
 
     assert response.json()["components"]["extractor"] == "stale"

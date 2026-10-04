@@ -34,21 +34,23 @@ from apps.mailbox.tasks import deliver_message_task
 class FollowUpTopicInputSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(max_length=160)
     objective = serializers.CharField(max_length=1000)
-    instructions = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    # The service takes these as required keyword arguments, so omitted values need a default
+    # here or the call fails with a TypeError (a 500) instead of using "none".
+    instructions = serializers.CharField(max_length=2000, allow_blank=True, default="")
     cadence_days = serializers.IntegerField(min_value=7, max_value=365)
     mode = serializers.ChoiceField(choices=FollowUpTopic.Mode.choices)
-    next_due_at = serializers.DateTimeField(required=False, allow_null=True)
+    next_due_at = serializers.DateTimeField(allow_null=True, default=None)
     active = serializers.BooleanField(default=True)
 
 
 class PlanInputSerializer(serializers.Serializer[dict[str, Any]]):
     preferred_email_id = serializers.UUIDField()
     purpose = serializers.ChoiceField(choices=ContactCommunicationPlan.Purpose.choices)
-    goal_text = serializers.CharField(max_length=1000, required=False, allow_blank=True)
+    goal_text = serializers.CharField(max_length=1000, allow_blank=True, default="")
     cadence_days = serializers.IntegerField(min_value=7, max_value=365)
     mode = serializers.ChoiceField(choices=FollowUpTopic.Mode.choices)
     enabled = serializers.BooleanField(default=True)
-    next_due_at = serializers.DateTimeField(required=False, allow_null=True)
+    next_due_at = serializers.DateTimeField(allow_null=True, default=None)
 
 
 class PlanStateSerializer(serializers.Serializer[dict[str, Any]]):

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from email import policy
 from email.parser import BytesParser
-from pathlib import Path
 
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured, ValidationError
-from django.test import Client, override_settings
-from django.urls import reverse
+from django.test import override_settings
 
 from apps.integrations.contracts import GmailConnectionData, ProviderError
 from apps.integrations.gmail import GMAIL_SCOPES
@@ -236,56 +234,6 @@ def test_token_crypto_rejects_missing_key_empty_and_invalid_ciphertext() -> None
     with override_settings(FIELD_ENCRYPTION_KEY=""):
         with pytest.raises(ImproperlyConfigured, match="FIELD_ENCRYPTION_KEY"):
             encrypt_token("secret")
-
-
-@pytest.mark.django_db
-def test_fake_oauth_connect_test_only_self_and_disconnect(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    client.force_login(owner)
-    begin = client.post(reverse("gmail-connect"))
-    assert begin.status_code == 302
-    callback = client.get(begin["Location"])
-    assert callback.status_code == 302
-
-    connection = GmailConnection.objects.get(owner=owner)
-    assert set(connection.scopes) == set(GMAIL_SCOPES)
-    assert "fake-refresh-token" not in connection.refresh_token_encrypted
-    assert decrypt_token(connection.refresh_token_encrypted) == "fake-refresh-token"
-
-    blocked = client.post(reverse("gmail-test"))
-    assert blocked.status_code == 302
-    assert not FakeGmailMessage.objects.exists()
-
-    with override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False):
-        tested = client.post(
-            reverse("gmail-test"),
-            {"recipient": "attacker@example.com"},
-        )
-    assert tested.status_code == 302
-    connection.refresh_from_db()
-    assert connection.last_tested_at is not None
-    fake = FakeGmailMessage.objects.get()
-    assert fake.recipient == connection.email
-    assert fake.recipient != "attacker@example.com"
-
-    disconnected = client.post(reverse("gmail-disconnect"))
-    assert disconnected.status_code == 302
-    connection.refresh_from_db()
-    assert connection.status == GmailConnection.Status.DISCONNECTED
-    assert connection.refresh_token_encrypted == ""
-
-
-@pytest.mark.django_db
-def test_gmail_mutations_require_login_and_post(owner: User) -> None:
-    anonymous = Client()
-    assert anonymous.get(reverse("gmail-settings")).status_code == 302
-    logged_in = Client()
-    logged_in.force_login(owner)
-    assert logged_in.get(reverse("gmail-connect")).status_code == 405
-    assert logged_in.get(reverse("gmail-test")).status_code == 405
-    assert logged_in.get(reverse("gmail-disconnect")).status_code == 405
 
 
 class _StubExchangeProvider:

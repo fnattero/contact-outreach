@@ -337,3 +337,60 @@ def test_preferred_email_changes_and_rejects_an_invalid_address(owner: User) -> 
     assert rejected.status_code == 400
     contact.refresh_from_db()
     assert contact.preferred_email == secondary
+
+
+@pytest.mark.django_db
+def test_admin_creates_a_communication_plan_through_the_api(owner: User) -> None:
+    contact, email = _validated_contact(owner, suffix="nuevo-plan")
+    api = _Api(owner)
+    url = reverse("api-contact-communication-plans", args=(contact.pk,))
+    payload = {
+        "preferred_email_id": str(email.pk),
+        "purpose": ContactCommunicationPlan.Purpose.CHECK_IN,
+        "cadence_days": 30,
+        "mode": FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+    }
+
+    created = api.send("post", url, payload)
+
+    assert created.status_code == 201, created.content
+    plan = ContactCommunicationPlan.objects.get(contact=contact)
+    assert plan.preferred_email == email
+    assert plan.state == ContactCommunicationPlan.State.ACTIVE
+    listed = api.client.get(url)
+    assert [item["id"] for item in listed.json()["data"]] == [str(plan.pk)]
+
+    too_frequent = api.send("post", url, {**payload, "cadence_days": 3})
+    assert too_frequent.status_code == 400
+    assert "cadence_days" in too_frequent.json()["field_errors"]
+
+    seller = _Api(
+        User.objects.create_user(username="seller-newplan", password="password-for-tests-7")
+    )
+    assert seller.send("post", url, payload).status_code == 403
+
+
+@pytest.mark.django_db
+def test_follow_up_topics_can_be_saved_with_only_the_required_fields(owner: User) -> None:
+    api = _Api(owner)
+    url = reverse("api-follow-up-topics")
+    payload = {
+        "name": "Seguimiento trimestral",
+        "objective": "Retomar el contacto.",
+        "cadence_days": 90,
+        "mode": FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
+    }
+
+    created = api.send("post", url, payload)
+
+    assert created.status_code == 201, created.content
+    topic = FollowUpTopic.objects.get(name="Seguimiento trimestral")
+    assert topic.instructions == ""
+    updated = api.send(
+        "patch",
+        reverse("api-follow-up-topic-detail", args=(topic.pk,)),
+        {**payload, "cadence_days": 60},
+    )
+    assert updated.status_code == 200, updated.content
+    topic.refresh_from_db()
+    assert topic.cadence_days == 60

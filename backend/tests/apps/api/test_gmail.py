@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -118,3 +119,58 @@ def test_gmail_test_and_disconnect_fail_without_a_usable_connection(owner: User)
         )
         assert response.status_code == 400
         assert response.json()["code"] == "validation_error"
+
+
+@pytest.mark.django_db
+def test_fake_oauth_connects_tests_only_itself_and_disconnects(owner: User, settings: Any) -> None:
+    from urllib.parse import parse_qs, urlsplit
+
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+
+    def post(name: str):
+        return client.post(
+            reverse(name), data="{}", content_type="application/json", HTTP_X_CSRFTOKEN=csrf
+        )
+
+    started = post("api-gmail-oauth-start")
+    assert started.status_code == 200
+    query = parse_qs(urlsplit(started.json()["data"]["authorization_url"]).query)
+    callback = client.get(
+        reverse("api-gmail-oauth-callback"), {"state": query["state"][0], "code": query["code"][0]}
+    )
+    assert callback["Location"].endswith("gmail=connected")
+    connection = client.get(reverse("api-gmail-connection")).json()["data"]
+    assert connection["connected"] is True
+    assert "refresh_token" not in str(connection)
+
+    # While the global send switches block live delivery, not even a self-test is allowed.
+    blocked = post("api-gmail-test")
+    assert blocked.status_code == 400
+    assert "bloqueo general" in blocked.json()["detail"]
+
+    settings.SEND_MODE = "live"
+    settings.SEND_KILL_SWITCH = False
+    tested = post("api-gmail-test")
+    assert tested.status_code == 200, tested.content
+    # The connection test only ever talks to the connected account itself.
+    assert tested.json()["data"]["email"] == connection["email"]
+
+    disconnected = post("api-gmail-disconnect")
+    assert disconnected.status_code == 200, disconnected.content
+    assert client.get(reverse("api-gmail-connection")).json()["data"]["connected"] is False
+    assert not GmailConnection.objects.filter(
+        owner=owner, status=GmailConnection.Status.CONNECTED
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_gmail_state_changing_endpoints_need_login_csrf_and_post(owner: User) -> None:
+    for name in ("api-gmail-oauth-start", "api-gmail-test", "api-gmail-disconnect"):
+        url = reverse(name)
+        assert Client().post(url).status_code in {401, 403}, name
+        secure = Client(enforce_csrf_checks=True)
+        secure.force_login(owner)
+        assert secure.post(url, data="{}", content_type="application/json").status_code == 403, name
+        assert secure.get(url).status_code == 405, name

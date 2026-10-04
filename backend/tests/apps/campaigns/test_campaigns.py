@@ -8,8 +8,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, override_settings
-from django.urls import reverse
+from django.test import override_settings
 
 from apps.audit.models import AuditEvent
 from apps.campaigns import services as campaign_services
@@ -28,7 +27,6 @@ from apps.campaigns.services import (
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import create_catalog
 from apps.configuration.models import (
-    IntegrationConfiguration,
     SearchCategory,
     SearchZone,
     normalize_name,
@@ -39,8 +37,6 @@ from apps.configuration.services import (
     save_config_item,
     save_prompt_configuration,
 )
-from apps.integrations.factory import get_website_fetcher
-from apps.integrations.website import HttpWebsiteFetcher
 from apps.overture.models import (
     OvertureCoveragePartition,
     OvertureDatasetSnapshot,
@@ -725,93 +721,3 @@ def test_referenced_category_is_archived_instead_of_deleted(
     assert result == "archived"
     assert category.archived_at is not None
     assert not category.active
-
-
-@pytest.mark.django_db
-@pytest.mark.e2e
-def test_campaign_creation_and_actions_through_dashboard(
-    client: Client,
-    owner: User,
-    private_catalog_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    del private_catalog_dir
-    save_business_profile(owner=owner, values=profile_values())
-    IntegrationConfiguration.objects.create(owner=owner, website_fetcher="http")
-    catalog = make_catalog(owner)
-    category = SearchCategory.objects.get(name="Bobinados de motores")
-    zone = SearchZone.objects.get(name="Palermo")
-    client.force_login(owner)
-    response = client.post(
-        reverse("campaign-create"),
-        {
-            "name": "Dashboard 450",
-            "delivery_mode": Campaign.DeliveryMode.REVIEW_ONLY,
-            "approval_mode": Campaign.ApprovalMode.CAMPAIGN,
-            "reminder_delay_days": 3,
-            "location_text": "CABA",
-            "objective": 450,
-            "max_raw_records": 4000,
-            "overture_min_confidence": "0.900",
-            "daily_limit": 25,
-            "message_interval_minutes": 7,
-            "weekdays": [0, 1, 2, 3, 4],
-            "window_start": "09:00",
-            "window_end": "17:00",
-            "timezone_name": "America/Argentina/Buenos_Aires",
-            "relevance_threshold": 80,
-            "extractor_provider": "overture",
-            "website_fetcher": "fake",
-            "llm_provider": "openai-compatible",
-            "llm_base_url": "https://attacker.example/v1",
-            "llm_model": "attacker-controlled",
-            "catalog": catalog.pk,
-            "catalogs": [catalog.pk],
-            "categories": [category.pk],
-            "provinces": [zone.parent_id],
-            "zones": [zone.pk],
-        },
-    )
-    assert response.status_code == 302
-    campaign = Campaign.objects.get(name="Dashboard 450")
-    assert campaign.objective == 450
-    assert campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY
-    assert campaign.extractor_provider == "fake"
-    assert campaign.website_fetcher == "http"
-    assert isinstance(get_website_fetcher(campaign.website_fetcher), HttpWebsiteFetcher)
-    assert campaign.llm_provider == "fake"
-    assert campaign.llm_base_url == ""
-    assert campaign.llm_model == "fake-deterministic"
-    detail = client.get(reverse("campaign-detail", args=(campaign.pk,)))
-    assert detail.status_code == 200
-    assert b"Dashboard 450" in detail.content
-    monkeypatch.setattr(
-        "apps.campaigns.views.orchestrate_extraction.delay",
-        lambda campaign_id: campaign_id,
-    )
-    started = client.post(reverse("campaign-action", args=(campaign.pk, "start")))
-    assert started.status_code == 302
-    campaign.refresh_from_db()
-    assert campaign.state == Campaign.State.DISCOVERING
-    assert campaign.search_queries.count() == 1
-
-
-@pytest.mark.django_db
-def test_campaign_views_require_login_and_mutations_require_csrf(
-    owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    campaign = make_campaign(owner, make_catalog(owner))
-    anonymous = Client()
-    assert anonymous.get(reverse("campaigns")).status_code == 302
-    logged_in = Client()
-    logged_in.force_login(owner)
-    assert (
-        logged_in.get(reverse("campaign-action", args=(campaign.pk, "cancel"))).status_code == 405
-    )
-    csrf_client = Client(enforce_csrf_checks=True)
-    csrf_client.force_login(owner)
-    assert (
-        csrf_client.post(reverse("campaign-action", args=(campaign.pk, "cancel"))).status_code
-        == 403
-    )

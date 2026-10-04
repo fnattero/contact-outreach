@@ -96,6 +96,17 @@ class OvertureStatusView(SchemaAPIView):
                 "data": {
                     "latest_snapshot_id": str(latest.pk) if latest else None,
                     "active_snapshot_id": str(active.pk) if active else None,
+                    # Overture's terms require the attribution and notices to stay visible.
+                    "attribution": (
+                        {
+                            "release_id": active.release_id,
+                            "attribution": active.attribution,
+                            "licenses": [str(item) for item in active.source_licenses or []],
+                            "notices": [str(item) for item in active.notices or []],
+                        }
+                        if active
+                        else None
+                    ),
                     "release_checks": [
                         {
                             "status": item.status,

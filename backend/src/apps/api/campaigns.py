@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 from hashlib import sha256
-from typing import Any, cast
+from typing import Any
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -22,6 +22,7 @@ from apps.accounts.permissions import Capability, has_capability, workspace_for_
 from apps.api.concurrency import add_etag
 from apps.api.errors import raise_domain_error
 from apps.api.pagination import PageQuerySerializer, page_slice
+from apps.api.payloads import json_object
 from apps.api.permissions import (
     ExportDataPermission,
     ManageCampaignsPermission,
@@ -40,6 +41,7 @@ from apps.configuration.models import SearchCategory, SearchZone
 from apps.contacts.models import CampaignEnrollment
 from apps.dashboard.csv_export import csv_download
 from apps.dashboard.queries import prospect_queryset
+from apps.mailbox.tasks import deliver_message_task
 from apps.prospects.models import Prospect
 
 
@@ -415,6 +417,11 @@ class CampaignDetailView(SchemaAPIView):
         )
 
 
+def _prepare_review_messages(message_ids: list[str]) -> None:
+    for message_id in message_ids:
+        deliver_message_task.delay(message_id)
+
+
 class CampaignActionView(SchemaAPIView):
     # Approval is additionally gated by APPROVE_CAMPAIGNS inside post(); both capabilities are
     # held by ADMIN only today.
@@ -463,6 +470,17 @@ class CampaignActionView(SchemaAPIView):
             try:
                 if action == "approve":
                     campaign = approve_campaign(campaign_id, actor=locked_user)
+                    if campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY:
+                        # Review-only messages are prepared (never sent) by the delivery task, so
+                        # without this they would sit in QUEUED and never become reviewable.
+                        queued_ids = [
+                            str(pk)
+                            for pk in campaign.messages.filter(
+                                kind=OutboundMessage.Kind.INITIAL,
+                                state=OutboundMessage.State.QUEUED,
+                            ).values_list("pk", flat=True)
+                        ]
+                        transaction.on_commit(lambda: _prepare_review_messages(queued_ids))
                 elif action == "start-approved":
                     campaign = start_per_message_campaign(campaign_id, actor=locked_user)
                 else:
@@ -476,14 +494,16 @@ class CampaignActionView(SchemaAPIView):
                         campaign_id=campaign_id,
                         target_state=targets[action],
                         actor=locked_user,
-                        reason=str(cast(dict[str, Any], request.data).get("reason", "")),
+                        reason=str(json_object(request).get("reason", "")),
                     )
                     if action == "start-discovery":
                         transaction.on_commit(
                             lambda: orchestrate_extraction.delay(str(campaign.pk))
                         )
-            except (Campaign.DoesNotExist, ValidationError) as exc:
-                raise serializers.ValidationError(str(exc)) from exc
+            except Campaign.DoesNotExist as exc:
+                raise serializers.ValidationError({"campaign_id": "La campaña no existe."}) from exc
+            except ValidationError as exc:
+                raise_domain_error(exc)
             body = {"data": _campaign_data(campaign, include_admin=True)}
             ApiIdempotencyRecord.objects.create(
                 user=locked_user,
@@ -638,6 +658,58 @@ class CampaignProspectListView(SchemaAPIView):
         )
 
 
+def _mapping(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _provenance_data(prospect: Prospect) -> dict[str, object] | None:
+    """Where this record came from, plus the attribution and licences its data carries.
+
+    Returns None for records that carry no Overture provenance (fake or older campaigns).
+    """
+    data = _mapping(prospect.provider_data)
+    campaign_snapshot = prospect.campaign.overture_snapshot
+    dataset = _mapping(data.get("snapshot"))
+    zone = _mapping(data.get("zone"))
+    provenance = _mapping(data.get("provenance"))
+    if campaign_snapshot is None and not dataset and not data.get("overture_id"):
+        return None
+    licenses = provenance.get("source_licenses") or dataset.get("source_licenses") or []
+    attribution = list(
+        dict.fromkeys(
+            str(value) for value in (dataset.get("attribution"), zone.get("attribution")) if value
+        )
+    )
+    rule = _mapping(data.get("matched_rule"))
+    email = next((item for item in prospect.emails.all() if item.is_primary), None)
+    return {
+        "release_id": (
+            campaign_snapshot.release_id if campaign_snapshot else dataset.get("release_id")
+        ),
+        "overture_id": data.get("overture_id") or None,
+        "confidence": data.get("confidence") or None,
+        "matched_rule": (
+            {
+                "taxonomy_code": str(rule.get("taxonomy_code") or ""),
+                "name_terms": [str(term) for term in rule.get("name_terms") or []],
+            }
+            if rule
+            else None
+        ),
+        "contact_source": (
+            {
+                "email": email.normalized_email,
+                "source": email.source,
+                "source_url": email.source_url or None,
+            }
+            if email
+            else None
+        ),
+        "attribution": attribution,
+        "licenses": [str(item) for item in licenses] if isinstance(licenses, list) else [],
+    }
+
+
 class ProspectListQuerySerializer(PageQuerySerializer):
     campaign = serializers.UUIDField(required=False)
     state = serializers.ChoiceField(required=False, choices=Prospect.PipelineState.choices)
@@ -673,6 +745,7 @@ class ProspectListView(SchemaAPIView):
                         # Only campaigns that predate fixed-message outreach carry a score.
                         "historical_score": getattr(item, "latest_score", None),
                         "campaign": {"id": str(item.campaign_id), "name": item.campaign.name},
+                        "provenance": _provenance_data(item),
                         "created_at": item.created_at,
                     }
                     for item in rows
@@ -687,11 +760,10 @@ class ProspectExportView(SchemaAPIView):
 
     def get(self, request: Request) -> HttpResponse:
         workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
-        prospects = (
-            Prospect.objects.filter(campaign__workspace=workspace)
-            .select_related("campaign")
-            .prefetch_related("emails")
-        )
+        # The same filters as the list view, so "export" downloads what the screen is showing.
+        query = ProspectListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        prospects = prospect_queryset(request.query_params).filter(campaign__workspace=workspace)
         return csv_download(
             filename="prospectos.csv",
             headers=("campaña", "prospecto", "email", "rubro", "barrio", "estado"),

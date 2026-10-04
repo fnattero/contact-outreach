@@ -223,3 +223,51 @@ def test_category_management_rejects_unknown_ids_vendedor_and_anonymous(owner: U
     admin = Client(enforce_csrf_checks=True)
     admin.force_login(owner)
     assert _post(admin, missing, {}, _csrf(admin)).status_code == 404
+
+
+@pytest.mark.django_db
+def test_message_template_revision_is_created_active_and_audited_through_the_api(
+    owner: User,
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+    url = reverse("api-message-template-revisions")
+    client.get(url)  # seeds the default templates for the workspace
+
+    created = _post(
+        client,
+        url,
+        {"kind": "INITIAL", "subject": "Propuesta renovada", "body": "Cuerpo actualizado."},
+        csrf,
+    )
+
+    assert created.status_code == 201, created.content
+    assert created.json()["data"]["revision"] == 2
+    active = [
+        item
+        for item in client.get(url).json()["data"]
+        if item["kind"] == "INITIAL" and item["active"]
+    ]
+    assert [item["subject"] for item in active] == ["Propuesta renovada"]
+
+
+@pytest.mark.django_db
+def test_message_template_rules_reach_the_client_and_sellers_cannot_edit(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+    url = reverse("api-message-template-revisions")
+
+    # Campaign copy is fixed text with no per-recipient variables; the service says why it refuses.
+    refused = _post(
+        client, url, {"kind": "INITIAL", "subject": "Hola", "body": "Hola {{nombre}}"}, csrf
+    )
+    assert refused.status_code == 400
+    assert refused.json()["detail"]
+
+    vendor = User.objects.create_user(username="template-vendor", password="vendor-password-1")
+    seller = Client(enforce_csrf_checks=True)
+    seller.force_login(vendor)
+    denied = _post(seller, url, {"kind": "INITIAL", "subject": "x", "body": "y"}, _csrf(seller))
+    assert denied.status_code == 403

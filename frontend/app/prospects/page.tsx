@@ -16,8 +16,10 @@ import {
   type Problem,
   type Prospect,
 } from "@/lib/api";
+import { ProvenanceDetails } from "./provenance-details";
 import {
   PIPELINE_STATE_OPTIONS,
+  collectAttribution,
   filtersFromForm,
   hasActiveFilters,
   stateLabel,
@@ -114,6 +116,7 @@ export default function ProspectsPage() {
               rowKey="id"
               dataSource={rows}
               scroll={{ x: 900 }}
+              expandable={{ expandedRowRender: (row) => <ProvenanceDetails provenance={row.provenance} />, rowExpandable: () => true }}
               pagination={{ current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false, onChange: (next) => { setLoading(true); setPage(next); } }}
               locale={{ emptyText: "Ningún prospecto coincide con los filtros." }}
               columns={[
@@ -138,6 +141,11 @@ export default function ProspectsPage() {
                 { title: "Alta", dataIndex: "created_at", render: (value: string) => <time className="data-text" dateTime={value}>{dateFormatter.format(new Date(value))}</time> },
               ]}
             />
+            {collectAttribution(rows).length ? (
+              <footer className="provenance-attribution" aria-label="Atribución de datos">
+                {collectAttribution(rows).map((line) => <p key={line} className="muted">{line}</p>)}
+              </footer>
+            ) : null}
           </>
         ) : (
           <EmptyState headline="Todavía no hay prospectos" explanation="Los negocios aparecen acá cuando una campaña termina su búsqueda." actionLabel="Ir a campañas" actionHref="/campaigns" />
