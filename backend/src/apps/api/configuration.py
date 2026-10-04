@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Any, cast
 from uuid import UUID
 
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.core.exceptions import PermissionDenied, ValidationError
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import ManageConfigurationPermission, authenticated_user
 from apps.api.schema import SchemaAPIView
 from apps.configuration.message_templates import (
@@ -43,14 +43,16 @@ class SearchCategorySerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class CategoryRuleInputSerializer(serializers.Serializer[dict[str, Any]]):
-    taxonomy_code = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    # save_config_item reads this key unconditionally, so it must always be present.
+    taxonomy_code = serializers.CharField(max_length=160, allow_blank=True, default="")
     name_terms = serializers.ListField(
         child=serializers.CharField(max_length=80), required=False, default=list
     )
 
 
 class CategoryRulesInputSerializer(serializers.Serializer[dict[str, Any]]):
-    rules = serializers.ListField(child=CategoryRuleInputSerializer(), max_length=40)
+    # Product rule: a category admits at most 20 search rules (it bounds the Overture query).
+    rules = serializers.ListField(child=CategoryRuleInputSerializer(), max_length=20)
 
 
 class SearchZoneSerializer(serializers.Serializer[dict[str, Any]]):
@@ -160,15 +162,16 @@ class SearchCategoryListView(SchemaAPIView):
         serializer = SearchCategoryInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            category = SearchCategory.objects.create(
-                workspace=authenticated_user(request).membership.workspace,
-                name=cast(str, serializer.validated_data["name"]),
-                sort_order=cast(int, serializer.validated_data["sort_order"]),
+            category = save_config_item(
+                item=SearchCategory(
+                    name=cast(str, serializer.validated_data["name"]),
+                    sort_order=cast(int, serializer.validated_data["sort_order"]),
+                ),
+                actor=authenticated_user(request),
             )
-        except IntegrityError as exc:
-            raise serializers.ValidationError(
-                {"name": "Ya existe una categoría con ese nombre."}
-            ) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        assert isinstance(category, SearchCategory)
         return Response(
             {"data": SearchCategorySerializer(_category_data(category)).data},
             status=status.HTTP_201_CREATED,
@@ -202,8 +205,8 @@ class SearchCategoryRulesView(SchemaAPIView):
                 actor=authenticated_user(request),
                 category_rules=cast(list[dict[str, object]], serializer.validated_data["rules"]),
             )
-        except ValidationError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         assert isinstance(saved, SearchCategory)
         return Response({"data": SearchCategorySerializer(_category_data(saved)).data})
 

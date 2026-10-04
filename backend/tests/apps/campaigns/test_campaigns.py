@@ -13,7 +13,6 @@ from django.urls import reverse
 
 from apps.audit.models import AuditEvent
 from apps.campaigns import services as campaign_services
-from apps.campaigns.forms import CampaignForm
 from apps.campaigns.models import (
     Campaign,
     CampaignCategorySelection,
@@ -102,37 +101,6 @@ def campaign_values(catalog: Catalog, **overrides: object) -> dict[str, object]:
     return values
 
 
-@pytest.mark.django_db
-def test_campaign_form_excludes_legacy_custom_zones(owner: User) -> None:
-    custom_zone = SearchZone.objects.create(
-        workspace=owner.membership.workspace,
-        name="Corredor custom",
-        normalized_name="corredor custom",
-        kind=SearchZone.Kind.CUSTOM,
-        level=SearchZone.Level.CUSTOM,
-        source=SearchZone.Source.CUSTOM,
-        selectable=True,
-        active=True,
-        boundary_geojson={
-            "type": "Polygon",
-            "coordinates": [
-                [
-                    [-58.6, -34.7],
-                    [-58.5, -34.7],
-                    [-58.5, -34.6],
-                    [-58.6, -34.6],
-                    [-58.6, -34.7],
-                ]
-            ],
-        },
-        boundary_hash="custom-hash",
-    )
-    form = CampaignForm(workspace=owner.membership.workspace)
-
-    assert custom_zone not in form.fields["zones"].queryset
-    assert not form.fields["zones"].queryset.filter(level=SearchZone.Level.CUSTOM).exists()
-
-
 def make_campaign(owner: User, catalog: Catalog, **overrides: object) -> Campaign:
     category = SearchCategory.objects.get(name="Bobinados de motores")
     zone = SearchZone.objects.get(name="Palermo")
@@ -215,10 +183,7 @@ def make_ready_partition(zone: SearchZone, release_id: str) -> OvertureCoverageP
 
 
 @pytest.mark.django_db
-def test_campaign_form_defaults_and_validates_limits() -> None:
-    form = CampaignForm()
-    assert form.fields["objective"].initial == 300
-    assert Campaign.DeliveryMode.REVIEW_ONLY in dict(form.fields["delivery_mode"].choices)
+def test_campaign_model_rejects_inconsistent_limits() -> None:
     campaign = Campaign(
         objective=400,
         max_raw_records=300,
