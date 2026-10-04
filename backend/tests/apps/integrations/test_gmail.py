@@ -56,7 +56,7 @@ def test_gmail_api_oauth_refresh_profile_send_reply_reconcile_and_revoke() -> No
                     "scope": " ".join(GMAIL_SCOPES),
                 },
             ),
-            HTTPResponse(200, {"emailAddress": "owner@gmail.com"}),
+            HTTPResponse(200, {"emailAddress": "owner@example.invalid"}),
             HTTPResponse(200, {"id": "gmail-1", "threadId": "thread-1"}),
             HTTPResponse(200, {"id": "gmail-2", "threadId": "thread-existing"}),
             HTTPResponse(200, {"messages": []}),
@@ -74,7 +74,7 @@ def test_gmail_api_oauth_refresh_profile_send_reply_reconcile_and_revoke() -> No
     assert "code_challenge=challenge" in url
     assert "access_type=offline" in url
     data = provider.exchange_code("code", "http://localhost/callback")
-    assert data.email == "owner@gmail.com"
+    assert data.email == "owner@example.invalid"
     assert set(data.scopes) == set(GMAIL_SCOPES)
 
     request = GmailSendRequest(
@@ -141,14 +141,14 @@ def test_gmail_api_refreshes_access_token_and_validates_responses() -> None:
     transport = StubTransport(
         [
             HTTPResponse(200, {"access_token": "fresh"}),
-            HTTPResponse(200, {"emailAddress": "owner@gmail.com"}),
+            HTTPResponse(200, {"emailAddress": "owner@example.invalid"}),
             HTTPResponse(200, {}),
-            HTTPResponse(200, {"emailAddress": "owner@gmail.com", "historyId": "55"}),
+            HTTPResponse(200, {"emailAddress": "owner@example.invalid", "historyId": "55"}),
             HTTPResponse(200, {"messages": []}),
         ]
     )
     provider = _provider(transport, refresh_token="refresh")
-    assert provider.test_connection().email == "owner@gmail.com"
+    assert provider.test_connection().email == "owner@example.invalid"
     with pytest.raises(ValidationProviderError, match="IDs"):
         provider.send(
             GmailSendRequest(
@@ -196,7 +196,7 @@ def test_gmail_api_incremental_sync_maps_allowed_headers_and_bodies() -> None:
                             {"name": "In-Reply-To", "value": "<root@example.com>"},
                             {"name": "References", "value": "<root@example.com>"},
                             {"name": "From", "value": "Prospecto <ventas@example.com>"},
-                            {"name": "To", "value": "owner@gmail.com"},
+                            {"name": "To", "value": "owner@example.invalid"},
                             {"name": "Subject", "value": "PUBLICIDAD - Consulta"},
                             {"name": "X-Untrusted-Secret", "value": "discard-me"},
                         ],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from hashlib import sha256
 from typing import Protocol
 
@@ -8,8 +9,12 @@ from rest_framework.response import Response
 
 
 class VersionedResource(Protocol):
-    pk: object
-    updated_at: object
+    # Read-only members: mutable protocol attributes are invariant, so models would not match.
+    @property
+    def pk(self) -> object: ...
+
+    @property
+    def updated_at(self) -> datetime: ...
 
 
 class PreconditionRequired(APIException):

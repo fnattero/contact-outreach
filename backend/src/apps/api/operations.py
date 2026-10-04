@@ -17,6 +17,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.api.mailbox import _outbound_data
+from apps.api.payloads import json_object
 from apps.api.permissions import ViewAuditPermission, ViewJobsPermission, authenticated_user
 from apps.api.schema import SchemaAPIView
 from apps.audit.models import ApiIdempotencyRecord, AuditEvent, BackgroundJob
@@ -166,7 +167,7 @@ class BackgroundJobRetryView(SchemaAPIView):
             raise serializers.ValidationError(
                 {"Idempotency-Key": "Enviá una clave UUID para esta acción."}
             ) from exc
-        reason = str(request.data.get("reason", ""))
+        reason = str(json_object(request).get("reason", ""))
         actor = authenticated_user(request)
         try:
             job = BackgroundJob.objects.get(pk=job_id)

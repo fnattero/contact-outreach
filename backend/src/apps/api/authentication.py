@@ -12,7 +12,7 @@ class ApiSessionAuthentication(SessionAuthentication):
         return "Session"
 
 
-class SessionAuthenticationSchema(OpenApiAuthenticationExtension):
+class SessionAuthenticationSchema(OpenApiAuthenticationExtension):  # type: ignore[no-untyped-call]
     target_class = "apps.api.authentication.ApiSessionAuthentication"
     name = "sessionAuth"
 

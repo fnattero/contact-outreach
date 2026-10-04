@@ -29,7 +29,7 @@ from apps.configuration.services import (
 def profile_values(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "company_name": "Componentes del Sur",
-        "salesperson_name": "Fran Pérez",
+        "salesperson_name": "Vendedor Pérez",
         "phone": "1234",
         "whatsapp": "5678",
         "description": "Fabricación local",
@@ -37,7 +37,7 @@ def profile_values(**overrides: object) -> dict[str, object]:
         "differentiators": "Stock",
         "address": "CABA",
         "website": "https://example.com",
-        "signature": "Fran\nComponentes del Sur",
+        "signature": "Vendedor\nComponentes del Sur",
         "additional_instructions": "Tono directo",
         "relevance_threshold": 75,
     }

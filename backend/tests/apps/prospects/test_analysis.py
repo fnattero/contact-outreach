@@ -36,9 +36,9 @@ from apps.prospects.tasks import process_prospect_pipeline, recover_prospect_pip
 
 PROFILE = {
     "company_name": "Componentes Delta SA",
-    "salesperson_name": "Fran",
+    "salesperson_name": "Vendedor",
     "address": "CABA",
-    "signature": "Fran · Componentes Delta SA",
+    "signature": "Vendedor · Componentes Delta SA",
     "description": "Proveedor de componentes industriales",
     "products": "Componentes industriales para equipos eléctricos",
     "differentiators": "Atención técnica",
@@ -230,7 +230,7 @@ def test_validate_operator_message_accepts_grounded_operator_copy() -> None:
         (lambda body: body.replace("Buen día.", "Buen día 🙂."), "emojis"),
         (lambda body: body.replace("Buen día.", "Buen día, garantizamos el stock."), "prohibido"),
         (lambda body: body.replace("Buen día.", "Sabemos que ustedes compran."), "no permitido"),
-        (lambda body: body.replace(signature_block(PROFILE), "Fran"), "firma"),
+        (lambda body: body.replace(signature_block(PROFILE), "Vendedor"), "firma"),
     ],
 )
 def test_validate_operator_message_rejects_unsafe_copy(mutate: object, match: str) -> None:

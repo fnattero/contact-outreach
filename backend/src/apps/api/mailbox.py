@@ -357,6 +357,7 @@ class OutboundMessageAuthorizeView(SchemaAPIView):
             message = approve_message_for_delivery(message_id, actor=actor)
         except ValidationError as exc:
             raise serializers.ValidationError(str(exc)) from exc
-        if message.campaign_id and message.campaign.state == message.campaign.State.RUNNING:
+        campaign = message.campaign
+        if campaign is not None and campaign.state == campaign.State.RUNNING:
             transaction.on_commit(lambda: deliver_message_task.delay(str(message.pk)))
         return Response({"data": _outbound_data(message, include_admin=True)})

@@ -107,9 +107,9 @@ def _run(owner: User) -> SearchRun:
         catalog=catalog,
         profile_snapshot={
             "company_name": "Componentes Delta SA",
-            "salesperson_name": "Fran",
+            "salesperson_name": "Vendedor",
             "address": "CABA",
-            "signature": "Fran · Componentes Delta SA",
+            "signature": "Vendedor · Componentes Delta SA",
             "description": "Proveedor de componentes industriales",
             "products": "Componentes industriales para equipos eléctricos",
             "differentiators": "Atención técnica",

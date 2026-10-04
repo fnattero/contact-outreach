@@ -204,6 +204,7 @@ class SearchCategoryRulesView(SchemaAPIView):
             )
         except ValidationError as exc:
             raise serializers.ValidationError(str(exc)) from exc
+        assert isinstance(saved, SearchCategory)
         return Response({"data": SearchCategorySerializer(_category_data(saved)).data})
 
     patch = post

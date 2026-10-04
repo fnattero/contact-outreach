@@ -154,7 +154,7 @@ def _reviewable_body() -> str:
         "asumir qué modelos utilizan actualmente. La idea es que nuestro vendedor pueda "
         "acercarse, conocer la necesidad concreta y mostrar el catálogo técnico disponible. "
         "¿Qué día conviene que pase el vendedor?\n\n"
-        "Fran · Componentes Delta SA\nComponentes Delta SA · CABA"
+        "Vendedor · Componentes Delta SA\nComponentes Delta SA · CABA"
     )
 
 
@@ -396,9 +396,9 @@ def test_live_draft_can_be_edited_then_requires_audited_approval(
     Campaign.objects.filter(pk=campaign.pk).update(
         profile_snapshot={
             "company_name": "Componentes Delta SA",
-            "salesperson_name": "Fran",
+            "salesperson_name": "Vendedor",
             "address": "CABA",
-            "signature": "Fran · Componentes Delta SA",
+            "signature": "Vendedor · Componentes Delta SA",
         }
     )
     OutboundMessage.objects.filter(pk=outbound.pk).update(
@@ -475,9 +475,9 @@ def test_draft_editor_normalizes_browser_crlf_and_accepts_migrated_short_copy(
     Campaign.objects.filter(pk=campaign.pk).update(
         profile_snapshot={
             "company_name": "Componentes Delta SA",
-            "salesperson_name": "Fran",
+            "salesperson_name": "Vendedor",
             "address": "CABA",
-            "signature": "Fran · Componentes Delta SA",
+            "signature": "Vendedor · Componentes Delta SA",
         }
     )
     migrated_body = _reviewable_body().replace(
@@ -522,7 +522,7 @@ def test_manual_approval_migration_updates_existing_unsent_drafts(
     OutboundMessage.objects.filter(pk=outbound.pk).update(
         subject="PUBLICIDAD - Consulta técnica",
         body_text=(
-            "Contenido conservado.\nFran · Componentes Delta SA\nComponentes Delta SA · CABA\n"
+            "Contenido conservado.\nVendedor · Componentes Delta SA\nComponentes Delta SA · CABA\n"
             "Si no querés recibir más mensajes, respondé BAJA."
         ),
         state=OutboundMessage.State.PREPARED,

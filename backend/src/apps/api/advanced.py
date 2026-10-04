@@ -11,6 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.accounts.permissions import Capability, has_capability
+from apps.api.payloads import json_object
 from apps.api.permissions import authenticated_user
 from apps.api.schema import SchemaAPIView
 from apps.automation.models import HumanTask
@@ -134,8 +135,9 @@ class OvertureSyncView(SchemaAPIView):
         actor = authenticated_user(request)
         if not has_capability(actor, Capability.MANAGE_INTEGRATIONS):
             raise PermissionDenied
-        release_id = cast(str, request.data.get("release_id", ""))
-        province_code = cast(str, request.data.get("province_code", ""))
+        body = json_object(request)
+        release_id = cast(str, body.get("release_id", ""))
+        province_code = cast(str, body.get("province_code", ""))
         try:
             release_id = validate_release_id(release_id)
         except ValidationError as exc:

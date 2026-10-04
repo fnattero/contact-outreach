@@ -126,7 +126,7 @@ def test_degraded_health_reports_missing_local_gmail_api_configuration(
     client.force_login(owner)
     GmailConnection.objects.create(
         owner=owner,
-        email="owner@gmail.com",
+        email="owner@example.invalid",
         scopes=list(GMAIL_SCOPES),
         refresh_token_encrypted=encrypt_token("refresh"),
         status=GmailConnection.Status.CONNECTED,

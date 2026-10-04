@@ -38,7 +38,7 @@ def test_mime_is_plain_text_with_exact_pdf_and_stable_message_id() -> None:
 
     pdf = b"%PDF-1.4\nfixture\n%%EOF"
     built = build_message(
-        sender="owner@gmail.com",
+        sender="owner@example.invalid",
         recipient="ventas@example.com",
         subject="PUBLICIDAD - Consulta",
         body_text="Mensaje en texto plano.",
@@ -64,7 +64,7 @@ def test_mime_is_plain_text_with_exact_pdf_and_stable_message_id() -> None:
     assert attachments[0].get_payload(decode=True) == pdf
 
     renamed = build_message(
-        sender="owner@gmail.com",
+        sender="owner@example.invalid",
         recipient="ventas@example.com",
         subject="Asunto",
         body_text="Texto",
@@ -100,7 +100,7 @@ def test_mime_preserves_ordered_pdfs_and_enforces_source_and_final_limits(
     first = b"%PDF-" + b"a" * (8 * 1024 * 1024 - 5)
     second = b"%PDF-" + b"b" * (MAX_SOURCE_PDF_BYTES - len(first) - 5)
     built = build_message(
-        sender="owner@gmail.com",
+        sender="owner@example.invalid",
         recipient="ventas@example.com",
         subject="Propuesta",
         body_text="Adjuntamos ambos catálogos.",
@@ -121,7 +121,7 @@ def test_mime_preserves_ordered_pdfs_and_enforces_source_and_final_limits(
 
     with pytest.raises(ValidationError, match="17 MiB"):
         build_message(
-            sender="owner@gmail.com",
+            sender="owner@example.invalid",
             recipient="ventas@example.com",
             subject="Propuesta",
             body_text="Adjuntos demasiado grandes.",
@@ -138,7 +138,7 @@ def test_mime_preserves_ordered_pdfs_and_enforces_source_and_final_limits(
     monkeypatch.setattr(mime_module, "MAX_SERIALIZED_MIME_BYTES", 100)
     with pytest.raises(ValidationError, match="24 MiB"):
         build_message(
-            sender="owner@gmail.com",
+            sender="owner@example.invalid",
             recipient="ventas@example.com",
             subject="Propuesta",
             body_text="Correo serializado demasiado grande.",
@@ -155,7 +155,7 @@ def test_build_message_rejects_conflicting_or_malformed_pdf_attachments() -> Non
     from apps.mailbox.mime import MAX_PDF_BYTES
 
     common_kwargs = {
-        "sender": "owner@gmail.com",
+        "sender": "owner@example.invalid",
         "recipient": "ventas@example.com",
         "subject": "Propuesta",
         "body_text": "Texto",
@@ -215,7 +215,7 @@ def test_build_reply_message_validates_headers() -> None:
 
     with pytest.raises(ValidationError, match="identificador del mensaje anterior"):
         build_reply_message(
-            sender="owner@gmail.com",
+            sender="owner@example.invalid",
             recipient="ventas@example.com",
             subject="Re: Propuesta",
             body_text="Texto",
@@ -333,7 +333,7 @@ def test_connect_gmail_rejects_non_personal_domain_when_provider_is_api(
 def test_connect_gmail_rejects_scope_mismatch(owner: User, monkeypatch: pytest.MonkeyPatch) -> None:
     stub = _StubExchangeProvider(
         GmailConnectionData(
-            email="user@gmail.com",
+            email="user@example.invalid",
             refresh_token="fake-refresh-token",
             scopes=("https://www.googleapis.com/auth/gmail.readonly",),
             history_id="1",
@@ -354,7 +354,7 @@ def test_connect_gmail_rejects_missing_history_id(
 ) -> None:
     stub = _StubExchangeProvider(
         GmailConnectionData(
-            email="user@gmail.com",
+            email="user@example.invalid",
             refresh_token="fake-refresh-token",
             scopes=GMAIL_SCOPES,
             history_id="",

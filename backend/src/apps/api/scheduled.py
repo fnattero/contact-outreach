@@ -182,26 +182,23 @@ class ContactPlanStateView(SchemaAPIView):
             pk=plan_id, contact_id=contact_id, contact__workspace_id=actor.membership.workspace_id
         ).exists():
             raise NotFound
-        if action == "snooze":
-            serializer = SnoozeSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            function = snooze_contact_communication_plan
-            kwargs = {
-                "actor": actor,
-                "plan_id": plan_id,
-                "until": serializer.validated_data["until"],
-            }
-        else:
-            serializer = PlanStateSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            function = set_contact_communication_plan_state
-            kwargs = {
-                "actor": actor,
-                "plan_id": plan_id,
-                "state": serializer.validated_data["state"],
-            }
         try:
-            plan = function(**kwargs)
+            if action == "snooze":
+                snooze = SnoozeSerializer(data=request.data)
+                snooze.is_valid(raise_exception=True)
+                plan = snooze_contact_communication_plan(
+                    actor=actor,
+                    plan_id=plan_id,
+                    until=snooze.validated_data["until"],
+                )
+            else:
+                change = PlanStateSerializer(data=request.data)
+                change.is_valid(raise_exception=True)
+                plan = set_contact_communication_plan_state(
+                    actor=actor,
+                    plan_id=plan_id,
+                    state=change.validated_data["state"],
+                )
         except (ValidationError, PermissionDenied, ContactCommunicationPlan.DoesNotExist) as exc:
             raise serializers.ValidationError(str(exc)) from exc
         return Response({"data": _plan_data(plan)})
