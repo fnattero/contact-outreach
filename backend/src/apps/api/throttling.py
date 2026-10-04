@@ -58,6 +58,9 @@ class ApiRateThrottle(SimpleRateThrottle):
             return str(getattr(settings, "API_PUBLIC_THROTTLE_RATE", "30/h"))
         if path.endswith("/auth/login/"):
             return str(getattr(settings, "API_SENSITIVE_THROTTLE_RATE", "10/h"))
+        if path.endswith("/auth/reauthenticate/"):
+            # Password confirmation guards credential changes, so guessing must stay expensive.
+            return str(getattr(settings, "API_REAUTH_THROTTLE_RATE", "5/5m"))
         if path.endswith(".csv") or path.endswith("/export.csv"):
             return str(getattr(settings, "API_EXPORT_THROTTLE_RATE", "5/h"))
         if request.method not in {"GET", "HEAD", "OPTIONS"}:

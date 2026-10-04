@@ -145,3 +145,81 @@ def test_category_rules_are_capped_at_twenty_and_model_messages_reach_the_client
 
     valid = _post(client, url, {"rules": [{"name_terms": ["bobinado de motores"]}]}, csrf)
     assert valid.status_code == 200, valid.content
+
+
+def _category(name: str = "Rubro temporal") -> SearchCategory:
+    return SearchCategory.objects.create(
+        workspace=SearchCategory.objects.get(name="Bobinados de motores").workspace,
+        name=name,
+    )
+
+
+@pytest.mark.django_db
+def test_toggling_a_category_hides_it_from_selection_but_not_from_management(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+    category = _category()
+    toggle = reverse("api-search-category-toggle", args=(category.pk,))
+    listing = reverse("api-search-categories")
+
+    off = _post(client, toggle, {}, csrf)
+    assert off.status_code == 200, off.content
+    assert off.json()["data"]["active"] is False
+
+    selectable = {item["id"] for item in client.get(listing).json()["data"]}
+    managed = {
+        item["id"]: item["active"]
+        for item in client.get(listing, {"include_inactive": "true"}).json()["data"]
+    }
+    assert str(category.pk) not in selectable
+    assert managed[str(category.pk)] is False
+
+    on = _post(client, toggle, {}, csrf)
+    assert on.json()["data"]["active"] is True
+    assert str(category.pk) in {item["id"] for item in client.get(listing).json()["data"]}
+    assert (
+        AuditEvent.objects.filter(
+            action="searchcategory.toggled", entity_id=str(category.pk)
+        ).count()
+        == 2
+    )
+
+
+@pytest.mark.django_db
+def test_deleting_an_unused_category_removes_it_and_is_audited(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+    category = _category()
+
+    response = client.delete(
+        reverse("api-search-category-detail", args=(category.pk,)), HTTP_X_CSRFTOKEN=csrf
+    )
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"] == {"outcome": "deleted"}
+    assert not SearchCategory.objects.filter(pk=category.pk).exists()
+    assert AuditEvent.objects.filter(action="searchcategory.deleted", actor=owner).exists()
+
+
+@pytest.mark.django_db
+def test_category_management_rejects_unknown_ids_vendedor_and_anonymous(owner: User) -> None:
+    category = _category()
+    detail = reverse("api-search-category-detail", args=(category.pk,))
+    toggle = reverse("api-search-category-toggle", args=(category.pk,))
+    missing = reverse("api-search-category-toggle", args=("00000000-0000-4000-8000-000000000009",))
+
+    assert Client().post(toggle).status_code in {401, 403}
+    vendor = User.objects.create_user(username="category-mgr-vendor", password="vendor-password-1")
+    seller = Client(enforce_csrf_checks=True)
+    seller.force_login(vendor)
+    seller_csrf = _csrf(seller)
+    assert _post(seller, toggle, {}, seller_csrf).status_code == 403
+    assert seller.delete(detail, HTTP_X_CSRFTOKEN=seller_csrf).status_code == 403
+    category.refresh_from_db()
+    assert category.active is True
+
+    admin = Client(enforce_csrf_checks=True)
+    admin.force_login(owner)
+    assert _post(admin, missing, {}, _csrf(admin)).status_code == 404

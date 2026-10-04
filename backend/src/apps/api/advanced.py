@@ -5,14 +5,18 @@ from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from rest_framework import serializers, status
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.accounts.permissions import Capability, has_capability
 from apps.api.payloads import json_object
-from apps.api.permissions import authenticated_user
+from apps.api.permissions import (
+    ManageAutomationPermission,
+    ManageIntegrationsPermission,
+    ViewContactsPermission,
+    authenticated_user,
+)
 from apps.api.schema import SchemaAPIView
 from apps.automation.models import HumanTask
 from apps.automation.presentation import review_reason_for_task
@@ -30,12 +34,10 @@ class HumanTaskResolutionSerializer(serializers.Serializer[dict[str, object]]):
 
 
 class AttentionView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ViewContactsPermission)
 
     def get(self, request: Request) -> Response:
         actor = authenticated_user(request)
-        if not has_capability(actor, Capability.VIEW_CONTACTS):
-            raise PermissionDenied
         data = []
         for task in attention_queryset(workspace_id=actor.membership.workspace_id)[:100]:
             reason = review_reason_for_task(task)
@@ -57,12 +59,10 @@ class AttentionView(SchemaAPIView):
 
 
 class HumanTaskActionView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ManageAutomationPermission)
 
     def post(self, request: Request, task_id: UUID, action: str) -> Response:
         actor = authenticated_user(request)
-        if not has_capability(actor, Capability.MANAGE_AUTOMATION):
-            raise PermissionDenied
         if action not in {"resolve", "dismiss"}:
             raise serializers.ValidationError({"action": "La acción no existe."})
         task = HumanTask.objects.filter(
@@ -86,12 +86,9 @@ class HumanTaskActionView(SchemaAPIView):
 
 
 class OvertureStatusView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def get(self, request: Request) -> Response:
-        actor = authenticated_user(request)
-        if not has_capability(actor, Capability.MANAGE_INTEGRATIONS):
-            raise PermissionDenied
         latest = get_latest_snapshot()
         active = get_active_snapshot()
         return Response(
@@ -129,12 +126,10 @@ class OvertureStatusView(SchemaAPIView):
 
 
 class OvertureSyncView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
     def post(self, request: Request) -> Response:
         actor = authenticated_user(request)
-        if not has_capability(actor, Capability.MANAGE_INTEGRATIONS):
-            raise PermissionDenied
         body = json_object(request)
         release_id = cast(str, body.get("release_id", ""))
         province_code = cast(str, body.get("province_code", ""))

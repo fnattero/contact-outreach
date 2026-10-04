@@ -23,9 +23,11 @@ from apps.configuration.models import (
     WorkspaceMessageTemplateRevision,
 )
 from apps.configuration.services import (
+    delete_or_archive_config_item,
     runtime_prompt_configuration,
     save_config_item,
     save_prompt_configuration,
+    toggle_config_item,
 )
 
 
@@ -37,9 +39,16 @@ class SearchCategoryInputSerializer(serializers.Serializer[dict[str, Any]]):
 class SearchCategorySerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField()
     name = serializers.CharField()
+    active = serializers.BooleanField()
     sort_order = serializers.IntegerField()
     rules_revision = serializers.IntegerField()
     rules = serializers.ListField(child=serializers.DictField())
+
+
+class CategoryListQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    # Selection lists (campaign creation) want active categories only; the management page also
+    # needs the inactive ones, otherwise a category switched off could never be switched back on.
+    include_inactive = serializers.BooleanField(required=False, default=False)
 
 
 class CategoryRuleInputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -100,6 +109,7 @@ def _category_data(category: SearchCategory) -> dict[str, object]:
     return {
         "id": category.pk,
         "name": category.name,
+        "active": category.active,
         "sort_order": category.sort_order,
         "rules_revision": category.rules_revision,
         "rules": [
@@ -148,12 +158,15 @@ class SearchCategoryListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
+        query = CategoryListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
         workspace_id = authenticated_user(request).membership.workspace_id
         categories = SearchCategory.objects.filter(
             workspace_id=workspace_id,
-            active=True,
             archived_at__isnull=True,
         ).prefetch_related("rules")
+        if not query.validated_data["include_inactive"]:
+            categories = categories.filter(active=True)
         return Response(
             {"data": [SearchCategorySerializer(_category_data(item)).data for item in categories]}
         )
@@ -176,6 +189,42 @@ class SearchCategoryListView(SchemaAPIView):
             {"data": SearchCategorySerializer(_category_data(category)).data},
             status=status.HTTP_201_CREATED,
         )
+
+
+class SearchCategoryDetailView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageConfigurationPermission)
+
+    def delete(self, request: Request, category_id: UUID) -> Response:
+        """Remove a category, or archive it when a campaign already references it."""
+        try:
+            outcome = delete_or_archive_config_item(
+                model=SearchCategory,
+                item_id=category_id,
+                actor=authenticated_user(request),
+            )
+        except SearchCategory.DoesNotExist as exc:
+            raise NotFound from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        return Response({"data": {"outcome": outcome}})
+
+
+class SearchCategoryToggleView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageConfigurationPermission)
+
+    def post(self, request: Request, category_id: UUID) -> Response:
+        try:
+            category = toggle_config_item(
+                model=SearchCategory,
+                item_id=category_id,
+                actor=authenticated_user(request),
+            )
+        except SearchCategory.DoesNotExist as exc:
+            raise NotFound from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        assert isinstance(category, SearchCategory)
+        return Response({"data": SearchCategorySerializer(_category_data(category)).data})
 
 
 class SearchCategoryRulesView(SchemaAPIView):

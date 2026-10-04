@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.concurrency import add_etag
 from apps.api.errors import raise_domain_error
+from apps.api.pagination import PageQuerySerializer, page_slice
 from apps.api.permissions import (
     ExportDataPermission,
     ManageCampaignsPermission,
@@ -38,6 +39,7 @@ from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import SearchCategory, SearchZone
 from apps.contacts.models import CampaignEnrollment
 from apps.dashboard.csv_export import csv_download
+from apps.dashboard.queries import prospect_queryset
 from apps.prospects.models import Prospect
 
 
@@ -414,7 +416,9 @@ class CampaignDetailView(SchemaAPIView):
 
 
 class CampaignActionView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    # Approval is additionally gated by APPROVE_CAMPAIGNS inside post(); both capabilities are
+    # held by ADMIN only today.
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
 
     allowed_actions = frozenset(
         {"start-discovery", "approve", "start-approved", "pause", "resume", "cancel"}
@@ -630,6 +634,50 @@ class CampaignProspectListView(SchemaAPIView):
                     }
                     for item in prospects
                 ]
+            }
+        )
+
+
+class ProspectListQuerySerializer(PageQuerySerializer):
+    campaign = serializers.UUIDField(required=False)
+    state = serializers.ChoiceField(required=False, choices=Prospect.PipelineState.choices)
+    category = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    neighborhood = serializers.CharField(required=False, allow_blank=True, max_length=150)
+
+
+class ProspectListView(SchemaAPIView):
+    """Prospects across every campaign, with the same filters the export honours."""
+
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
+
+    def get(self, request: Request) -> Response:
+        query = ProspectListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        values = query.validated_data
+        workspace = workspace_for_user(authenticated_user(request), Capability.MANAGE_CAMPAIGNS)
+        prospects = prospect_queryset(request.query_params).filter(campaign__workspace=workspace)
+        rows, meta = page_slice(prospects, page=values["page"], page_size=values["page_size"])
+        return Response(
+            {
+                "data": [
+                    {
+                        "id": str(item.pk),
+                        "name": item.name,
+                        "address": item.address,
+                        "neighborhood": item.neighborhood,
+                        "category": item.category,
+                        "website": item.website,
+                        "pipeline_state": item.pipeline_state,
+                        "pipeline_state_label": item.get_pipeline_state_display(),
+                        "primary_email": getattr(item, "primary_email", None),
+                        # Only campaigns that predate fixed-message outreach carry a score.
+                        "historical_score": getattr(item, "latest_score", None),
+                        "campaign": {"id": str(item.campaign_id), "name": item.campaign.name},
+                        "created_at": item.created_at,
+                    }
+                    for item in rows
+                ],
+                "meta": meta,
             }
         )
 

@@ -79,7 +79,7 @@ class AutomationConfigurationView(SchemaAPIView):
 
 
 class AutomationLiveActionView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ManageAutomationPermission)
 
     def post(self, request: Request, action: str) -> Response:
         actor = authenticated_user(request)
@@ -112,7 +112,9 @@ class AutomationLiveActionView(SchemaAPIView):
 
 
 class WritingInstructionsView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    # The approved automatic-reply prompt is administrative configuration: reading it needs the
+    # same capability as editing it. Without this, any authenticated seller could read it.
+    permission_classes = (IsAuthenticated, ManageAutomationPermission)
 
     def get(self, request: Request) -> Response:
         runtime = runtime_prompt_configuration(authenticated_user(request).pk)

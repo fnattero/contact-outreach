@@ -12,6 +12,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.accounts.permissions import Capability, workspace_for_user
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import (
     ManageAutomationPermission,
     ManageContactsPermission,
@@ -204,10 +205,25 @@ class ContactPlanStateView(SchemaAPIView):
         return Response({"data": _plan_data(plan)})
 
 
-class ScheduledAttemptActionView(SchemaAPIView):
+def _require_attempt_in_contact(request: Request, contact_id: UUID, attempt_id: UUID) -> None:
+    """Answer 404 unless the attempt belongs to this contact inside the caller's workspace.
+
+    The services key on ``attempt_id`` alone, so without this a valid attempt could be reached
+    through any contact id in the URL.
+    """
+    if not ScheduledContactAttempt.objects.filter(
+        pk=attempt_id,
+        plan__contact_id=contact_id,
+        plan__contact__workspace_id=authenticated_user(request).membership.workspace_id,
+    ).exists():
+        raise NotFound
+
+
+class ScheduledAttemptDraftView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
-    def patch(self, request: Request, attempt_id: UUID) -> Response:
+    def patch(self, request: Request, contact_id: UUID, attempt_id: UUID) -> Response:
+        _require_attempt_in_contact(request, contact_id, attempt_id)
         serializer = DraftSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -216,19 +232,22 @@ class ScheduledAttemptActionView(SchemaAPIView):
                 attempt_id=attempt_id,
                 **serializer.validated_data,
             )
-        except (ValidationError, PermissionDenied, ScheduledContactAttempt.DoesNotExist) as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         return Response({"data": _attempt_data(attempt)})
 
-    def post(self, request: Request, attempt_id: UUID, action: str) -> Response:
-        if action != "authorize":
-            raise serializers.ValidationError({"action": "La acción no existe."})
+
+class ScheduledAttemptAuthorizeView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageContactsPermission)
+
+    def post(self, request: Request, contact_id: UUID, attempt_id: UUID) -> Response:
+        _require_attempt_in_contact(request, contact_id, attempt_id)
         try:
             attempt = authorize_scheduled_contact_attempt(
                 actor=authenticated_user(request), attempt_id=attempt_id
             )
-        except (ValidationError, PermissionDenied, ScheduledContactAttempt.DoesNotExist) as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         if attempt.outbound_message_id:
             from django.db import transaction
 

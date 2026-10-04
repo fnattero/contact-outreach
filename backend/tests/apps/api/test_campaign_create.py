@@ -276,3 +276,27 @@ def test_legacy_custom_zones_are_not_selectable_even_when_active(campaign_api: _
     errors = _field_errors(campaign_api.create(zones=[str(custom.pk)]))
 
     assert "zones" in errors
+
+
+@pytest.mark.django_db
+def test_deleting_a_category_used_by_a_campaign_archives_it_instead(
+    campaign_api: _Fixture,
+) -> None:
+    created = campaign_api.create()
+    assert created.status_code == 201, created.content
+
+    response = campaign_api.client.delete(
+        reverse("api-search-category-detail", args=(campaign_api.category.pk,)),
+        HTTP_X_CSRFTOKEN=campaign_api.csrf,
+    )
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"] == {"outcome": "archived"}
+    campaign_api.category.refresh_from_db()
+    assert campaign_api.category.archived_at is not None
+    assert campaign_api.category.active is False
+    # The campaign keeps the snapshot it was created with.
+    detail = campaign_api.client.get(
+        reverse("api-campaign-detail", args=(created.json()["data"]["id"],))
+    )
+    assert detail.json()["data"]["categories"][0]["name"] == campaign_api.category.name
