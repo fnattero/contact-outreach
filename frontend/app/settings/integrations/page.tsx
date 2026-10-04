@@ -3,7 +3,7 @@
 import { Alert, Button, Card, Dropdown, Flex } from "antd";
 import type { MenuProps } from "antd";
 import { useEffect, useState } from "react";
-import { AuthError } from "@/components/auth-provider";
+import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
@@ -29,6 +29,7 @@ function percent(value: string): string {
 }
 
 export default function IntegrationsSettingsPage() {
+  const { session } = useAuth();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [gmail, setGmail] = useState<GmailConnection | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -44,6 +45,7 @@ export default function IntegrationsSettingsPage() {
       .catch(setError);
   }, []);
 
+  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para ver integraciones." }} />;
   if (error && !status) return <AuthError error={error} />;
   if (!status) return <LoadingState layout="list" />;
 

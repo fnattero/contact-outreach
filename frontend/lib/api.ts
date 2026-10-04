@@ -244,6 +244,7 @@ export type IntegrationStatus = {
 export type SearchCategory = {
   id: string;
   name: string;
+  active: boolean;
   sort_order: number;
   rules_revision: number;
   rules: Array<{
@@ -253,6 +254,43 @@ export type SearchCategory = {
     active: boolean;
     sort_order: number;
   }>;
+};
+
+export type SuppressionReason = "UNSUBSCRIBE" | "BOUNCE" | "MANUAL";
+
+export type Suppression = {
+  id: string;
+  email: string;
+  reason: SuppressionReason;
+  reason_label: string;
+  source: string;
+  evidence: string;
+  created_at: string;
+};
+
+export type Prospect = {
+  id: string;
+  name: string;
+  address: string;
+  neighborhood: string;
+  category: string;
+  website: string;
+  pipeline_state: string;
+  pipeline_state_label: string;
+  primary_email: string | null;
+  historical_score: number | null;
+  campaign: { id: string; name: string };
+  created_at: string;
+};
+
+export type ProspectFilters = {
+  q?: string;
+  campaign?: string;
+  state?: string;
+  category?: string;
+  neighborhood?: string;
+  page?: number;
+  page_size?: number;
 };
 
 export type SearchZone = {
@@ -986,8 +1024,70 @@ export function reauthenticate(password: string): Promise<{ reauthentication_act
   });
 }
 
-export function getSearchCategories(): Promise<SearchCategory[]> {
-  return request<SearchCategory[]>("/api/v1/search-categories/");
+export function getSearchCategories(includeInactive = false): Promise<SearchCategory[]> {
+  return request<SearchCategory[]>(
+    `/api/v1/search-categories/${includeInactive ? "?include_inactive=true" : ""}`,
+  );
+}
+
+export function toggleSearchCategory(id: string): Promise<SearchCategory> {
+  return request<SearchCategory>(`/api/v1/search-categories/${encodeURIComponent(id)}/toggle/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+/** `deleted` when the category was removed, `archived` when campaigns already reference it. */
+export function deleteSearchCategory(id: string): Promise<{ outcome: "deleted" | "archived" }> {
+  return request<{ outcome: "deleted" | "archived" }>(
+    `/api/v1/search-categories/${encodeURIComponent(id)}/`,
+    { method: "DELETE" },
+  );
+}
+
+function queryString(params: Record<string, string | number | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : "";
+}
+
+export function getSuppressions(
+  params: { q?: string; page?: number; page_size?: number } = {},
+): Promise<ApiPage<Suppression[]>> {
+  return requestEnvelope<Suppression[]>(`/api/v1/suppressions/${queryString(params)}`) as Promise<
+    ApiPage<Suppression[]>
+  >;
+}
+
+export function createSuppression(input: {
+  email: string;
+  reason: SuppressionReason;
+  evidence?: string;
+}): Promise<Suppression> {
+  return request<Suppression>("/api/v1/suppressions/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getProspects(filters: ProspectFilters = {}): Promise<ApiPage<Prospect[]>> {
+  return requestEnvelope<Prospect[]>(`/api/v1/prospects/${queryString(filters)}`) as Promise<
+    ApiPage<Prospect[]>
+  >;
+}
+
+/** Same-origin CSV download for the current filters (the proxy forwards the session cookie). */
+export function prospectsExportUrl(filters: ProspectFilters = {}): string {
+  return `/api/v1/prospects/export.csv${queryString({
+    q: filters.q,
+    campaign: filters.campaign,
+    state: filters.state,
+    category: filters.category,
+    neighborhood: filters.neighborhood,
+  })}`;
 }
 
 export function createSearchCategory(name: string, sortOrder = 0): Promise<SearchCategory> {

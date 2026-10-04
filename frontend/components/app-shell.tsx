@@ -5,6 +5,7 @@ import {
   AuditOutlined,
   BookOutlined,
   ClockCircleOutlined,
+  ContactsOutlined,
   DashboardOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -17,6 +18,7 @@ import {
   SearchOutlined,
   SendOutlined,
   ShopOutlined,
+  StopOutlined,
   TagsOutlined,
   TeamOutlined,
   UserOutlined,
@@ -48,6 +50,7 @@ const operationItems: readonly NavigationItem[] = [
 ];
 
 const administrationItems: readonly NavigationItem[] = [
+  { key: "/prospects", label: "Audiencia", icon: <ContactsOutlined /> },
   { key: "/catalogs", label: "Catálogos", icon: <BookOutlined /> },
   { key: "/settings/profile", label: "Perfil comercial", icon: <ShopOutlined /> },
   { key: "/settings/message-templates", label: "Mensajes de campaña", icon: <MailOutlined /> },
@@ -56,6 +59,7 @@ const administrationItems: readonly NavigationItem[] = [
   { key: "/automation", label: "Automatización", icon: <RobotOutlined /> },
   { key: "/settings/integrations", label: "Integraciones", icon: <ApiOutlined /> },
   { key: "/settings/overture", label: "Datos de búsqueda", icon: <SearchOutlined /> },
+  { key: "/settings/suppressions", label: "Supresiones", icon: <StopOutlined /> },
   { key: "/settings/users", label: "Usuarios", icon: <UserOutlined /> },
   { key: "/audit", label: "Auditoría", icon: <AuditOutlined /> },
   { key: "/jobs", label: "Tareas", icon: <ClockCircleOutlined /> },

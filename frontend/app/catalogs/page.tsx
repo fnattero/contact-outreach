@@ -3,7 +3,7 @@
 import { Alert, Button, Card, Drawer, Flex, Form, Input, Progress, Table, Upload } from "antd";
 import type { UploadFile } from "antd";
 import { useEffect, useState } from "react";
-import { AuthError } from "@/components/auth-provider";
+import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
@@ -13,6 +13,7 @@ const sizeFormatter = new Intl.NumberFormat("es-AR");
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "America/Argentina/Buenos_Aires" });
 
 export default function CatalogsPage() {
+  const { session } = useAuth();
   const [form] = Form.useForm<{ name: string }>();
   const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -41,6 +42,7 @@ export default function CatalogsPage() {
     } catch (problem) { setError(problem); } finally { setUploading(false); }
   }
 
+  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para administrar catálogos." }} />;
   if (error && !catalogs.length && !loading) return <AuthError error={error} />;
 
   return (

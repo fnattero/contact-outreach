@@ -2,7 +2,7 @@
 
 import { Alert, Flex, Form, Input, Modal } from "antd";
 import { useEffect, useState } from "react";
-import { AuthError } from "@/components/auth-provider";
+import { AuthError, useAuth } from "@/components/auth-provider";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { LoadingState } from "@/components/design-system/states";
 import { PageHeader } from "@/components/design-system/page-header";
@@ -19,6 +19,7 @@ type Feedback =
   | { state: "saved" | "error"; message: string };
 
 export default function ProfileSettingsPage() {
+  const { session } = useAuth();
   const [form] = Form.useForm<Partial<BusinessProfile>>();
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +68,7 @@ export default function ProfileSettingsPage() {
     setCancelOpen(false);
   }
 
+  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para editar el perfil comercial." }} />;
   if (error && !profile && !loading) return <AuthError error={error} />;
   if (loading) return <LoadingState layout="form" />;
 
