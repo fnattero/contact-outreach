@@ -762,13 +762,6 @@ export function createContact(input: {
   });
 }
 
-export function updateContact(id: string, name: string): Promise<Contact> {
-  return request<Contact>(`/api/v1/contacts/${encodeURIComponent(id)}/`, {
-    method: "PATCH",
-    body: JSON.stringify({ name }),
-  });
-}
-
 export function addContactEmail(
   contactId: string,
   email: string,

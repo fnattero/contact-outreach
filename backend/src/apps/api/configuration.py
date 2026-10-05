@@ -68,7 +68,7 @@ class SearchZoneSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField()
     name = serializers.CharField()
     official_code = serializers.CharField()
-    level = serializers.CharField()
+    level = serializers.ChoiceField(choices=SearchZone.Level.choices)
     province_code = serializers.CharField()
     province_name = serializers.CharField()
     parent_id = serializers.UUIDField(allow_null=True)
@@ -86,7 +86,7 @@ class MessageTemplateInputSerializer(serializers.Serializer[dict[str, Any]]):
 
 class MessageTemplateSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField()
-    kind = serializers.CharField()
+    kind = serializers.ChoiceField(choices=WorkspaceMessageTemplateRevision.Kind.choices)
     subject = serializers.CharField()
     body = serializers.CharField()
     revision = serializers.IntegerField()

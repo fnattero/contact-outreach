@@ -69,7 +69,7 @@ class ContactEmailSerializer(serializers.Serializer[dict[str, object]]):
     original_email = serializers.EmailField()
     label = serializers.CharField()  # type: ignore[assignment]
     is_preferred = serializers.BooleanField()
-    validity = serializers.CharField()
+    validity = serializers.ChoiceField(choices=EmailAddress.Validity.choices)
     validated_at = serializers.DateTimeField(allow_null=True)
     invalid_reason = serializers.CharField()
     active_restriction_count = serializers.IntegerField()
@@ -80,7 +80,7 @@ class ContactListSerializer(serializers.Serializer[dict[str, object]]):
     name = serializers.CharField()
     organization_name = serializers.CharField()
     preferred_email = serializers.EmailField(allow_null=True)
-    status = serializers.CharField()
+    status = serializers.ChoiceField(choices=Contact.Status.choices)
     last_interaction_at = serializers.DateTimeField(allow_null=True)
     open_task_count = serializers.IntegerField()
     next_follow_up_at = serializers.DateTimeField(allow_null=True)
@@ -88,8 +88,8 @@ class ContactListSerializer(serializers.Serializer[dict[str, object]]):
 
 class RestrictionSerializer(serializers.Serializer[dict[str, object]]):
     id = serializers.UUIDField()
-    scope = serializers.CharField()
-    kind = serializers.CharField()
+    scope = serializers.ChoiceField(choices=CommunicationRestriction.Scope.choices)
+    kind = serializers.ChoiceField(choices=CommunicationRestriction.Kind.choices)
     evidence = serializers.CharField()
     revoked_at = serializers.DateTimeField(allow_null=True)
     created_at = serializers.DateTimeField()

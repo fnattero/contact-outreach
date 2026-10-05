@@ -38,3 +38,17 @@ def test_integration_status_is_admin_only_and_contains_no_credentials(owner: Use
     assert "refresh_token" not in body
     assert "client_secret" not in body
     assert "FIELD_ENCRYPTION_KEY" not in body
+
+
+@pytest.mark.django_db
+def test_a_workspace_without_a_gmail_connection_reports_the_same_status_as_a_disconnected_one(
+    owner: User,
+) -> None:
+    admin = Client()
+    admin.force_login(owner)
+
+    data = admin.get(reverse("api-integrations-status")).json()["data"]
+
+    assert not GmailConnection.objects.exists()
+    assert data["gmail"]["connection_status"] == GmailConnection.Status.DISCONNECTED
+    assert data["gmail"]["email"] is None

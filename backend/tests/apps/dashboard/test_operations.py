@@ -441,6 +441,44 @@ def test_viewing_jobs_does_not_allow_retrying_a_send(
     assert outbound.state == OutboundMessage.State.SEND_FAILED
 
 
+@pytest.mark.django_db
+def test_outbound_list_and_export_validate_and_apply_their_filters(
+    client: Client, owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    campaign, _, outbound, _ = _operational_data(owner)
+    client.force_login(owner)
+    list_url = reverse("api-outbound-messages")
+    export_url = reverse("api-outbound-message-export")
+
+    def ids(**filters: str) -> list[str]:
+        response = _api(client, "get", list_url, filters)
+        assert response.status_code == 200, response.content
+        return [row["id"] for row in response.json()["data"]]
+
+    assert ids() == [str(outbound.pk)]
+    assert ids(state=outbound.state) == [str(outbound.pk)]
+    assert ids(state=OutboundMessage.State.SENT) == []
+    assert ids(kind=outbound.kind) == [str(outbound.pk)]
+    assert ids(kind=OutboundMessage.Kind.AUTOMATIC_REPLY) == []
+    assert ids(campaign=str(campaign.pk)) == [str(outbound.pk)]
+    assert ids(campaign=str(uuid.uuid4())) == []
+    assert ids(date_from="2999-01-01") == []
+
+    for invalid in (
+        {"state": "NOT_A_STATE"},
+        {"kind": "NOT_A_KIND"},
+        {"campaign": "not-a-uuid"},
+        {"date_from": "yesterday"},
+        {"date_to": "31/12/2026"},
+    ):
+        assert _api(client, "get", list_url, invalid).status_code == 400, invalid
+    # The export is rate limited (5/hour), so only a few representative calls.
+    assert _api(client, "get", export_url, {"state": "NOT_A_STATE"}).status_code == 400
+    assert _api(client, "get", export_url, {"date_from": "yesterday"}).status_code == 400
+    assert _api(client, "get", export_url, {"state": OutboundMessage.State.SENT}).status_code == 200
+
+
 def test_json_logs_redact_secrets_and_include_correlation() -> None:
     formatter = RedactingJsonFormatter()
     record = logging.LogRecord(

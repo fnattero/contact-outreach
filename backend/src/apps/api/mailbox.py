@@ -44,6 +44,22 @@ class MessageQuerySerializer(serializers.Serializer[dict[str, Any]]):
     )
 
 
+class OutboundFilterSerializer(serializers.Serializer[dict[str, Any]]):
+    """Filters shared by the outbound list and its CSV export; invalid values are rejected."""
+
+    q = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    state = serializers.ChoiceField(required=False, choices=OutboundMessage.State.choices)
+    kind = serializers.ChoiceField(required=False, choices=OutboundMessage.Kind.choices)
+    campaign = serializers.UUIDField(required=False)
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+
+
+class OutboundQuerySerializer(OutboundFilterSerializer):
+    page = serializers.IntegerField(required=False, min_value=1, default=1)
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=100, default=25)
+
+
 class ManualReplySerializer(serializers.Serializer[dict[str, Any]]):
     body_text = serializers.CharField(max_length=10_000, trim_whitespace=True)
     idempotency_key = serializers.UUIDField()
@@ -251,7 +267,7 @@ class OutboundMessageListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSentMessagesPermission)
 
     def get(self, request: Request) -> Response:
-        query = MessageQuerySerializer(data=request.query_params)
+        query = OutboundQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         values = query.validated_data
         user = authenticated_user(request)
@@ -277,6 +293,7 @@ class OutboundMessageExportView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ExportDataPermission)
 
     def get(self, request: Request) -> HttpResponse:
+        OutboundFilterSerializer(data=request.query_params).is_valid(raise_exception=True)
         workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
         rows = (
             outbound_queryset(request.query_params)

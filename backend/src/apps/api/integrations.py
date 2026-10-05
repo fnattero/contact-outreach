@@ -49,7 +49,9 @@ def _status_data(request: Request) -> dict[str, object]:
             "oauth_client_id_configured": bool(runtime.gmail_oauth_client_id),
             "credential_source": runtime.gmail_credential_source,
             "credential_configured": runtime.gmail_credential_configured,
-            "connection_status": connection.status if connection else "NOT_CONNECTED",
+            "connection_status": (
+                connection.status if connection else GmailConnection.Status.DISCONNECTED
+            ),
             "email": connection.email if connection else None,
         },
         "revision": runtime.revision,
