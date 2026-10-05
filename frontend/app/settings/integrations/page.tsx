@@ -4,6 +4,7 @@ import { Alert, Button, Card, Dropdown, Flex } from "antd";
 import type { MenuProps } from "antd";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
+import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { ConfigurationForm } from "./configuration-form";
@@ -35,6 +36,7 @@ export default function IntegrationsSettingsPage() {
   const [gmail, setGmail] = useState<GmailConnection | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [gmailBusy, setGmailBusy] = useState(false);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [technicalOpen, setTechnicalOpen] = useState(false);
 
   useEffect(() => {
@@ -80,6 +82,7 @@ export default function IntegrationsSettingsPage() {
     setError(null);
     try {
       setGmail(await disconnectGmail());
+      setDisconnectOpen(false);
     } catch (problem) {
       setError(problem);
     } finally {
@@ -89,7 +92,7 @@ export default function IntegrationsSettingsPage() {
 
   const gmailActions: MenuProps["items"] = [
     { key: "test", label: "Probar conexión", onClick: () => void test() },
-    { key: "disconnect", label: "Desconectar", danger: true, onClick: () => void disconnect() },
+    { key: "disconnect", label: "Desconectar", danger: true, onClick: () => setDisconnectOpen(true) },
   ];
 
   const technicalAction = <Button type="link" onClick={() => setTechnicalOpen(true)}>Ver detalles técnicos</Button>;
@@ -132,6 +135,22 @@ export default function IntegrationsSettingsPage() {
           </div>
         </div>
       </Card>
+      {disconnectOpen ? (
+        <ConfirmDangerModal
+          open
+          title="Desconectar Gmail"
+          consequences={[
+            "Se eliminan las credenciales guardadas de la cuenta de Gmail.",
+            "Los envíos y la lectura de respuestas se detienen hasta que vuelvas a conectar una cuenta.",
+            "Para cambiar las credenciales de OAuth hay que desconectar primero.",
+          ]}
+          confirmationWord="CONFIRMAR"
+          dangerLabel="Desconectar Gmail"
+          confirming={gmailBusy}
+          onCancel={() => setDisconnectOpen(false)}
+          onConfirm={() => void disconnect()}
+        />
+      ) : null}
       <ConfigurationForm />
       <Card title="Confianza de búsqueda">
         <div className="integration-confidence"><strong>{percent(status.extractor.overture_min_confidence)}</strong><span>Confianza mínima</span><p>Define el mínimo de confianza requerido para aceptar resultados de búsqueda.</p></div>
