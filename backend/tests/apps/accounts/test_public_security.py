@@ -131,7 +131,7 @@ assert settings.CSRF_TRUSTED_ORIGINS == ['https://outreach.example']
 assert settings.SESSION_COOKIE_SECURE is True
 assert settings.CSRF_COOKIE_SECURE is True
 assert settings.SECURE_SSL_REDIRECT is True
-assert settings.SECURE_HSTS_SECONDS == 300
+assert settings.SECURE_HSTS_SECONDS == 31536000
 assert settings.SECURE_PROXY_SSL_HEADER == ('HTTP_X_FORWARDED_PROTO', 'https')
 """
 

@@ -97,6 +97,10 @@ class ApplicationSecurityHeadersMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
+        if request.path.startswith("/api/v1/"):
+            # API responses carry conversations, contacts and session data; never let an
+            # intermediary or the browser cache them. Views that set their own policy keep it.
+            response.setdefault("Cache-Control", "private, no-store")
         response.setdefault("Content-Security-Policy", self.CSP)
         response.setdefault(
             "Permissions-Policy",

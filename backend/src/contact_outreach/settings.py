@@ -109,6 +109,10 @@ def _redis_logical_database(redis_url: str, database: int) -> str:
 
 
 APP_ENV = os.getenv("APP_ENV", "development")
+if APP_ENV not in {"development", "test", "production"}:
+    # Every production safeguard keys off APP_ENV == "production"; a typo must not silently
+    # run with development defaults.
+    raise ImproperlyConfigured("APP_ENV must be development, test, or production")
 DEBUG = env_bool("DJANGO_DEBUG", APP_ENV == "development")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "development-only-change-me")
 
@@ -238,6 +242,8 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", redis_url_environment).strip(
 CACHE_REDIS_URL = os.getenv("CACHE_REDIS_URL", "").strip()
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip()
 if not CELERY_BROKER_URL:
+    if APP_ENV == "production":
+        raise ImproperlyConfigured("REDIS_URL is required in production")
     CELERY_BROKER_URL = "redis://redis:6379/0"
 if not CACHE_REDIS_URL:
     CACHE_REDIS_URL = _redis_logical_database(CELERY_BROKER_URL, 1)
@@ -347,6 +353,11 @@ SESSION_COOKIE_NAME = os.getenv(
     "SESSION_COOKIE_NAME",
     "__Host-contact_outreach_session" if APP_ENV == "production" else "contact_outreach_session",
 )
+if APP_ENV == "production":
+    if not SESSION_COOKIE_NAME.startswith("__Host-"):
+        raise ImproperlyConfigured("SESSION_COOKIE_NAME must start with __Host- in production")
+    if not 0 < SESSION_COOKIE_AGE <= 43200:
+        raise ImproperlyConfigured("SESSION_COOKIE_AGE must be at most 12 hours in production")
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_PATH = "/"
@@ -362,7 +373,7 @@ SECURE_SSL_REDIRECT = env_bool("DJANGO_SSL_REDIRECT", APP_ENV == "production")
 # Container and platform health checks reach this private service over plain HTTP.
 SECURE_REDIRECT_EXEMPT = [r"^api/v1/health/(live|ready)/$"]
 SECURE_HSTS_SECONDS = int(
-    os.getenv("DJANGO_HSTS_SECONDS", "300" if APP_ENV == "production" else "0")
+    os.getenv("DJANGO_HSTS_SECONDS", "31536000" if APP_ENV == "production" else "0")
 )
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_HSTS_INCLUDE_SUBDOMAINS", False)
 SECURE_HSTS_PRELOAD = env_bool("DJANGO_HSTS_PRELOAD", False)
