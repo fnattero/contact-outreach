@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
 import {
+  approveKnowledgeContext,
+  approveKnowledgeFact,
   getDashboardSummary,
   getAutomationConfiguration,
   createKnowledgeContext,
@@ -23,8 +25,15 @@ import {
   type DashboardSummary,
   type KnowledgeContextRevision,
   type KnowledgeFactRevision,
+  type KnowledgeRevisionState,
   type Problem,
 } from "@/lib/api";
+
+const revisionStateTag: Record<KnowledgeRevisionState, { color: string; label: string }> = {
+  APPROVED: { color: "green", label: "Aprobada" },
+  DRAFT: { color: "orange", label: "Borrador sin aprobar" },
+  SUPERSEDED: { color: "default", label: "Reemplazada" },
+};
 
 export default function AutomationPage() {
   const { session } = useAuth();
@@ -37,6 +46,7 @@ export default function AutomationPage() {
   const [preview, setPreview] = useState<{ status: string; matches: Array<{ title: string; score: number; selected: boolean }> } | null>(null);
   const [pendingPassword, setPendingPassword] = useState<string | null>(null);
   const [liveConfirmOpen, setLiveConfirmOpen] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<{ kind: "fact" | "context"; id: string; label: string } | null>(null);
 
   useEffect(() => {
     void Promise.all([getAutomationConfiguration(), getKnowledgeFacts(), getKnowledgeContexts(), getDashboardSummary()])
@@ -101,6 +111,21 @@ export default function AutomationPage() {
     catch (problem) { setError(problem); } finally { setSaving(false); }
   }
 
+  async function approveRevision() {
+    if (!pendingApproval) return;
+    setSaving(true); setError(null);
+    try {
+      if (pendingApproval.kind === "fact") {
+        await approveKnowledgeFact(pendingApproval.id);
+        setFacts(await getKnowledgeFacts());
+      } else {
+        await approveKnowledgeContext(pendingApproval.id);
+        setContexts(await getKnowledgeContexts());
+      }
+      setPendingApproval(null);
+    } catch (problem) { setError(problem); } finally { setSaving(false); }
+  }
+
   async function runPreview(values: { query: string }) {
     setSaving(true); setError(null);
     try { setPreview(await previewKnowledge(values.query)); }
@@ -158,21 +183,23 @@ export default function AutomationPage() {
           {configuration.live_enabled_by ? <Tag>Activada por {configuration.live_enabled_by}</Tag> : null}
         </Flex>
       </Card>
-      <Card title="Información aprobada para el agente">
+      <Card title="Información para el agente">
+        <p className="integration-muted">Lo que guardás queda como borrador. El agente sólo usa información aprobada.</p>
         <Form layout="vertical" onFinish={(values) => void saveFact(values as { title: string; category?: string; text: string })}>
           <Form.Item name="title" label="Título" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="category" label="Categoría"><Input /></Form.Item>
           <Form.Item name="text" label="Información verificable" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
-          <Button htmlType="submit" loading={saving}>Guardar información</Button>
+          <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
         </Form>
-        <List style={{ marginTop: 16 }} dataSource={facts} renderItem={(fact) => <List.Item><List.Item.Meta title={`${fact.title} · v${fact.version}`} description={fact.text} /><Tag color="green">Aprobada</Tag></List.Item>} />
+        <List style={{ marginTop: 16 }} dataSource={facts} renderItem={(fact) => <List.Item actions={fact.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ kind: "fact", id: fact.id, label: `${fact.title} · v${fact.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`${fact.title} · v${fact.version}`} description={fact.text} /><Tag color={revisionStateTag[fact.state].color}>{revisionStateTag[fact.state].label}</Tag></List.Item>} />
       </Card>
-      <Card title="Contexto general aprobado">
+      <Card title="Contexto general">
+        <p className="integration-muted">El contexto guardado queda como borrador hasta que lo aprobás.</p>
         <Form layout="vertical" onFinish={(values) => void saveContext(values as { context_text: string })}>
           <Form.Item name="context_text" label="Contexto" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
-          <Button htmlType="submit" loading={saving}>Guardar contexto</Button>
+          <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
         </Form>
-        <List style={{ marginTop: 16 }} dataSource={contexts} renderItem={(context) => <List.Item><List.Item.Meta title={`Revisión ${context.version}`} description={context.context_text} /><Tag color={context.approved ? "green" : "default"}>{context.approved ? "Aprobada" : "Pendiente"}</Tag></List.Item>} />
+        <List style={{ marginTop: 16 }} dataSource={contexts} renderItem={(context) => <List.Item actions={context.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ kind: "context", id: context.id, label: `Revisión ${context.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`Revisión ${context.version}`} description={context.context_text} /><Tag color={revisionStateTag[context.state].color}>{revisionStateTag[context.state].label}</Tag></List.Item>} />
       </Card>
       <Card title="Probar recuperación de información">
         <Form layout="vertical" onFinish={(values) => void runPreview(values as { query: string })}>
@@ -181,6 +208,22 @@ export default function AutomationPage() {
         </Form>
         {preview ? <Alert style={{ marginTop: 16 }} type={preview.status === "SELECTED" ? "success" : "info"} message={`Resultado: ${preview.status}`} description={preview.matches.map((match) => `${match.title} (${match.score.toFixed(2)})`).join(" · ") || "Sin coincidencias."} /> : null}
       </Card>
+      {pendingApproval ? (
+        <ConfirmDangerModal
+          open
+          title={`Aprobar ${pendingApproval.label}`}
+          consequences={[
+            "El agente podrá usar este contenido para responder a los contactos.",
+            "La versión aprobada anterior quedará reemplazada.",
+            "La aprobación queda registrada con tu usuario.",
+          ]}
+          confirmationWord="CONFIRMAR"
+          dangerLabel="Aprobar contenido"
+          confirming={saving}
+          onCancel={() => setPendingApproval(null)}
+          onConfirm={() => void approveRevision()}
+        />
+      ) : null}
       <ConfirmDangerModal
         open={liveConfirmOpen}
         title="Activar Envío real"

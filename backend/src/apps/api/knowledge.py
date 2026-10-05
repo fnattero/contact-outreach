@@ -21,8 +21,8 @@ from apps.automation.retrieval import retrieve_relevant_fact_revisions
 from apps.automation.services import (
     approve_global_knowledge_context_revision,
     approve_knowledge_revision,
-    save_global_knowledge_context,
-    save_knowledge_revision,
+    create_global_knowledge_context_revision,
+    create_knowledge_revision,
 )
 from apps.integrations.contracts import ProviderError
 
@@ -42,6 +42,12 @@ class KnowledgeSearchSerializer(serializers.Serializer[dict[str, Any]]):
     query = serializers.CharField(max_length=2000)
 
 
+def _revision_state(revision: KnowledgeFactRevision | WorkspaceKnowledgeContextRevision) -> str:
+    if revision.approved_at is None:
+        return "DRAFT"
+    return "SUPERSEDED" if revision.superseded_at is not None else "APPROVED"
+
+
 def _fact_data(revision: KnowledgeFactRevision) -> dict[str, object]:
     return {
         "id": str(revision.pk),
@@ -53,6 +59,7 @@ def _fact_data(revision: KnowledgeFactRevision) -> dict[str, object]:
         "source_notes": revision.source_notes,
         "content_hash": revision.content_hash,
         "approved": revision.is_approved,
+        "state": _revision_state(revision),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
     }
 
@@ -65,6 +72,7 @@ def _context_data(revision: WorkspaceKnowledgeContextRevision) -> dict[str, obje
         "source_notes": revision.source_notes,
         "content_hash": revision.content_hash,
         "approved": revision.is_approved,
+        "state": _revision_state(revision),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
     }
 
@@ -85,7 +93,7 @@ class KnowledgeFactListView(SchemaAPIView):
         actor = authenticated_user(request)
         workspace = workspace_for_user(actor, Capability.MANAGE_KNOWLEDGE)
         try:
-            revision = save_knowledge_revision(
+            revision = create_knowledge_revision(
                 workspace=workspace,
                 actor=actor,
                 title=cast(str, serializer.validated_data["title"]),
@@ -128,7 +136,7 @@ class KnowledgeContextRevisionView(SchemaAPIView):
         actor = authenticated_user(request)
         workspace = workspace_for_user(actor, Capability.MANAGE_KNOWLEDGE)
         try:
-            revision = save_global_knowledge_context(
+            revision = create_global_knowledge_context_revision(
                 workspace=workspace,
                 actor=actor,
                 context_text=cast(str, serializer.validated_data["context_text"]),

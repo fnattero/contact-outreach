@@ -399,8 +399,11 @@ export type KnowledgeFactRevision = {
   source_notes: string;
   content_hash: string;
   approved: boolean;
+  state: KnowledgeRevisionState;
   approved_at: string | null;
 };
+
+export type KnowledgeRevisionState = "DRAFT" | "APPROVED" | "SUPERSEDED";
 
 export type KnowledgeContextRevision = {
   id: string;
@@ -409,6 +412,7 @@ export type KnowledgeContextRevision = {
   source_notes: string;
   content_hash: string;
   approved: boolean;
+  state: KnowledgeRevisionState;
   approved_at: string | null;
 };
 
@@ -984,6 +988,13 @@ export function createKnowledgeFact(input: {
   });
 }
 
+export function approveKnowledgeFact(revisionId: string): Promise<KnowledgeFactRevision> {
+  return request<KnowledgeFactRevision>(
+    `/api/v1/knowledge/fact-revisions/${encodeURIComponent(revisionId)}/approve/`,
+    { method: "POST", body: "{}" },
+  );
+}
+
 export function getKnowledgeContexts(): Promise<KnowledgeContextRevision[]> {
   return request<KnowledgeContextRevision[]>("/api/v1/knowledge/global-context-revisions/");
 }
@@ -993,6 +1004,13 @@ export function createKnowledgeContext(contextText: string): Promise<KnowledgeCo
     method: "POST",
     body: JSON.stringify({ context_text: contextText }),
   });
+}
+
+export function approveKnowledgeContext(revisionId: string): Promise<KnowledgeContextRevision> {
+  return request<KnowledgeContextRevision>(
+    `/api/v1/knowledge/global-context-revisions/${encodeURIComponent(revisionId)}/approve/`,
+    { method: "POST", body: "{}" },
+  );
 }
 
 export function previewKnowledge(query: string): Promise<{
