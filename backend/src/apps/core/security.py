@@ -23,6 +23,10 @@ def _trusted_proxy(remote_address: str) -> bool:
     return False
 
 
+# Set only by InternalProxyMiddleware, from the address the authenticated frontend proxy reports.
+CLIENT_IP_META_KEY = "CONTACT_OUTREACH_CLIENT_IP"
+
+
 def internal_proxy_authenticated(request: HttpRequest) -> bool:
     expected = getattr(settings, "INTERNAL_PROXY_TOKEN", "")
     received = request.META.get("HTTP_X_INTERNAL_PROXY_TOKEN", "")

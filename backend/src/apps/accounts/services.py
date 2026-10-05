@@ -25,6 +25,7 @@ from apps.accounts.models import (
 )
 from apps.accounts.permissions import Capability, require_user_capability
 from apps.accounts.signals import get_workspace
+from apps.core.security import CLIENT_IP_META_KEY
 
 OwnerAction = Literal["created", "updated", "unchanged"]
 
@@ -80,6 +81,13 @@ def normalize_login_username(username: object) -> str:
 
 def canonical_client_ip(meta: dict[str, object]) -> str:
     """Return a proxy-safe client address; untrusted forwarding headers are ignored."""
+    reported = str(meta.get(CLIENT_IP_META_KEY, "") or "")
+    if reported:
+        # Written only by InternalProxyMiddleware, after the proxy token was verified.
+        try:
+            return ipaddress.ip_address(reported).compressed
+        except ValueError:
+            pass
     remote_raw = str(meta.get("REMOTE_ADDR", "") or "")
     try:
         remote = ipaddress.ip_address(remote_raw)
