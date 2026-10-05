@@ -81,9 +81,11 @@ class ApiRateThrottle(SimpleRateThrottle):
             identity = f"user:{user.pk}"
         else:
             identity = f"ip:{canonical_client_ip(dict(request.META))}"
+        # Every rate class (read, export, reauthentication...) keeps its own history. Sharing one
+        # history would apply a strict limit such as 5/hour to all of the caller's requests.
         digest = salted_hmac(
             "contact_outreach.api_throttle",
-            identity,
+            f"{identity}|{self.rate}",
             secret=settings.SECRET_KEY,
             algorithm="sha256",
         ).hexdigest()
