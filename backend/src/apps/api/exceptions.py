@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+import logging
+import os
+import traceback
 from collections.abc import Mapping
 from typing import Any
 
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
+
+logger = logging.getLogger(__name__)
+
+
+def _log_unexpected_error(exc: Exception, request: object) -> None:
+    """Record that an unhandled error happened, without its message or arguments.
+
+    Exception messages can carry credentials or personal data, and the JSON log formatter drops
+    tracebacks on purpose, so log only the class and the innermost code location.
+    """
+    frames = traceback.extract_tb(exc.__traceback__)
+    location = (
+        f"{os.path.basename(frames[-1].filename)}:{frames[-1].lineno}" if frames else "unknown"
+    )
+    logger.error(
+        "Error no controlado en la API: %s en %s.",
+        type(exc).__name__,
+        location,
+        extra={
+            "event": "api.unhandled_exception",
+            "method": getattr(request, "method", ""),
+            "path": getattr(request, "path", ""),
+            "error_code": "internal_error",
+        },
+    )
 
 
 def _safe_detail(data: object) -> str:
@@ -23,6 +51,7 @@ def api_exception_handler(exc: Exception, context: dict[str, Any]) -> Response |
     request = context.get("request")
     correlation_id = str(getattr(request, "correlation_id", ""))
     if response is None:
+        _log_unexpected_error(exc, request)
         return Response(
             {
                 "type": "about:blank",
