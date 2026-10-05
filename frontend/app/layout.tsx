@@ -6,6 +6,10 @@ import { AppProviders } from "@/components/app-providers";
 import "antd/dist/reset.css";
 import "./styles.css";
 
+// The nonce in the Content-Security-Policy is generated per request, which needs server rendering;
+// a prerendered page would ship scripts without it and the browser would block them.
+export const dynamic = "force-dynamic";
+
 const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600"],

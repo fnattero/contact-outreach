@@ -34,7 +34,10 @@ function productionConfigurationProblems(): string[] {
   } else {
     try {
       const parsed = new URL(origin);
-      if (parsed.protocol !== "https:" || parsed.origin !== origin.replace(/\/$/, "")) {
+      // HTTPS everywhere except a local stack, which has no certificate.
+      const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+      const schemeAllowed = parsed.protocol === "https:" || (parsed.protocol === "http:" && loopback);
+      if (!schemeAllowed || parsed.origin !== origin.replace(/\/$/, "")) {
         problems.push("PUBLIC_APP_ORIGIN");
       }
     } catch {

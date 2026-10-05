@@ -106,6 +106,15 @@ describe("backend proxy in production", () => {
     },
   );
 
+  it("accepts a plain-HTTP origin only for a local stack", async () => {
+    vi.stubEnv("PUBLIC_APP_ORIGIN", "http://localhost:3000");
+    expect((await call()).status).toBe(200);
+    upstream.mockClear();
+
+    vi.stubEnv("PUBLIC_APP_ORIGIN", "http://app.example.com");
+    expect((await call()).status).toBe(503);
+  });
+
   it("refuses a public origin that is not an exact https origin", async () => {
     vi.stubEnv("PUBLIC_APP_ORIGIN", "http://app.example.com/path");
     expect((await call()).status).toBe(503);
