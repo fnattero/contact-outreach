@@ -14,7 +14,8 @@ def readiness_request() -> urllib.request.Request:
 
     Production ALLOWED_HOSTS only lists the public host, so a bare 127.0.0.1 Host is refused.
     """
-    request = urllib.request.Request("http://127.0.0.1:8000/api/v1/health/ready/")
+    port = os.environ.get("PORT", "8000")
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/v1/health/ready/")
     public_host = urlsplit(os.environ.get("PUBLIC_BASE_URL", "")).netloc
     if public_host:
         request.add_header("Host", public_host)

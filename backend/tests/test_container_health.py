@@ -21,10 +21,18 @@ def test_the_probe_presents_the_public_host_so_production_host_validation_passes
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://app.example.com")
+    monkeypatch.delenv("PORT", raising=False)
     request = _load_script().readiness_request()
 
     assert request.full_url == "http://127.0.0.1:8000/api/v1/health/ready/"
     assert request.get_header("Host") == "app.example.com"
+
+
+def test_the_probe_follows_the_port_the_server_listens_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PORT", "8123")
+    assert _load_script().readiness_request().full_url == (
+        "http://127.0.0.1:8123/api/v1/health/ready/"
+    )
 
 
 def test_the_probe_keeps_the_default_host_when_no_public_url_is_configured(

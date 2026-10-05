@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Bootstrapping rewrites the owner's password on every restart. In production the first
+# administrator is created once, by hand, from a private shell; never from this entrypoint.
+if [ "${APP_ENV:-development}" = "production" ] && [ "${RUN_OWNER_BOOTSTRAP_ON_STARTUP:-false}" = "true" ]; then
+    echo "RUN_OWNER_BOOTSTRAP_ON_STARTUP must not be true in production; run bootstrap_owner once instead" >&2
+    exit 1
+fi
+
 case "${APP_ENV:-development}" in
     production)
         python src/manage.py check --deploy
