@@ -295,8 +295,8 @@ Modos:
   no autoriza Gmail ni ofrece una aprobación posterior desde la configuración.
 - `LIVE`: permite pasar a las políticas de envío automático.
 
-`LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin. El
-mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
+`LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin y
+escribir la palabra de confirmación (`CONFIRMAR`), que la API valida. El mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
 
 ### FR-13 Acciones automáticas, redirección y atención humana
 

@@ -222,5 +222,5 @@ separado; restore prueba descifrado e integridad sin imprimir valores.
 - Gmail scopes/app/refresh token, reconciliación y límites aprobados.
 - PDFs/contenido/firma/cobertura Overture y same-day guard aprobados.
 - SEND/AUTO_REPLY/RELATIONSHIP kill switches probados.
-- Reauth admin para LIVE.
+- Reauth admin y palabra de confirmación escrita (`CONFIRMAR`, validada también por la API) para LIVE.
 - Revisión legal/deliverability registrada externamente.

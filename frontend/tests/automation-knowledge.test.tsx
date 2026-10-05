@@ -6,8 +6,11 @@ import AutomationPage from "@/app/automation/page";
 import {
   approveKnowledgeContext,
   approveKnowledgeFact,
+  getAutomationConfiguration,
   getKnowledgeContexts,
   getKnowledgeFacts,
+  reauthenticate,
+  setAutomationLive,
   type KnowledgeContextRevision,
   type KnowledgeFactRevision,
 } from "@/lib/api";
@@ -43,6 +46,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
     }),
     getKnowledgeContexts: vi.fn(),
     getKnowledgeFacts: vi.fn(),
+    reauthenticate: vi.fn(),
+    setAutomationLive: vi.fn(),
   };
 });
 
@@ -126,5 +131,53 @@ describe("knowledge approval", () => {
     await screen.findByText("Garantía · v2");
     expect(screen.getByText("Reemplazada")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Aprobar" })).not.toBeInTheDocument();
+  });
+});
+
+const shadow = {
+  mode: "SHADOW" as const,
+  mode_label: "Sólo observar",
+  policy_version: "2026-07",
+  live_enabled_at: null,
+  live_enabled_by: null,
+};
+
+describe("LIVE confirmation", () => {
+  beforeEach(() => {
+    vi.mocked(getKnowledgeFacts).mockReset().mockResolvedValue([]);
+    vi.mocked(getKnowledgeContexts).mockReset().mockResolvedValue([]);
+    vi.mocked(getAutomationConfiguration).mockReset().mockResolvedValue(shadow);
+    vi.mocked(reauthenticate).mockReset().mockResolvedValue({ reauthentication_active: true });
+    vi.mocked(setAutomationLive).mockReset();
+  });
+
+  it("sends the typed word with the password check when enabling LIVE", async () => {
+    vi.mocked(setAutomationLive).mockResolvedValue({ ...shadow, mode: "LIVE", mode_label: "Activas" });
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Contraseña actual"), { target: { value: "clave-segura" } });
+    fireEvent.click(screen.getByRole("button", { name: "Revisar y activar LIVE" }));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Escribí CONFIRMAR/), { target: { value: "CONFIRMAR" } });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Activar Envío real" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Activar Envío real" }));
+
+    await waitFor(() => expect(reauthenticate).toHaveBeenCalledWith("clave-segura"));
+    await waitFor(() => expect(setAutomationLive).toHaveBeenCalledWith("enable-live", "CONFIRMAR"));
+  });
+
+  it("asks for confirmation before switching LIVE off", async () => {
+    vi.mocked(getAutomationConfiguration).mockResolvedValue({ ...shadow, mode: "LIVE", mode_label: "Activas" });
+    vi.mocked(setAutomationLive).mockResolvedValue(shadow);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar LIVE" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(setAutomationLive).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText(/Escribí CONFIRMAR/), { target: { value: "CONFIRMAR" } });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Desactivar Envío real" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Desactivar Envío real" }));
+
+    await waitFor(() => expect(setAutomationLive).toHaveBeenCalledWith("disable-live"));
   });
 });

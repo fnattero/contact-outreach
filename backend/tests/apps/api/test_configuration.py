@@ -284,3 +284,37 @@ def test_reading_the_automation_configuration_does_not_create_a_row(owner: User)
     assert response.status_code == 200
     assert response.json()["data"]["mode"] == ReplyAutomationConfiguration.Mode.SHADOW
     assert ReplyAutomationConfiguration.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_enabling_live_replies_needs_the_typed_confirmation_as_well_as_the_password(
+    owner: User,
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf = _csrf(client)
+    assert _post(client, reverse("api-auth-reauthenticate"), {"password": "correct-password"}, csrf)
+    url = reverse("api-automation-action", args=("enable-live",))
+
+    for payload in (
+        {},
+        {"confirmation": ""},
+        {"confirmation": "confirmar"},
+        {"confirmation": "SI"},
+    ):
+        refused = _post(client, url, payload, csrf)
+        assert refused.status_code == 400, payload
+        assert refused.json()["code"] == "validation_error"
+        assert not ReplyAutomationConfiguration.objects.filter(
+            mode=ReplyAutomationConfiguration.Mode.LIVE
+        ).exists()
+
+    enabled = _post(client, url, {"confirmation": "CONFIRMAR"}, csrf)
+    assert enabled.status_code == 200, enabled.content
+    assert enabled.json()["data"]["mode"] == ReplyAutomationConfiguration.Mode.LIVE
+    assert AuditEvent.objects.filter(action__icontains="live").exists()
+
+    # Switching back to observation is the safe direction and needs no typed word.
+    disabled = _post(client, reverse("api-automation-action", args=("disable-live",)), {}, csrf)
+    assert disabled.status_code == 200
+    assert disabled.json()["data"]["mode"] == ReplyAutomationConfiguration.Mode.SHADOW

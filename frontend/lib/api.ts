@@ -1077,10 +1077,13 @@ export function updateAutomationMode(
   });
 }
 
-export function setAutomationLive(action: "enable-live" | "disable-live"): Promise<AutomationConfiguration> {
+export function setAutomationLive(
+  action: "enable-live" | "disable-live",
+  confirmation?: string,
+): Promise<AutomationConfiguration> {
   return request<AutomationConfiguration>(`/api/v1/automation/actions/${action}/`, {
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
   });
 }
 

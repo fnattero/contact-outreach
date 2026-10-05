@@ -29,6 +29,20 @@ class AutomationConfigurationSerializer(serializers.Serializer[dict[str, object]
     live_enabled_by = serializers.CharField(allow_null=True)
 
 
+LIVE_CONFIRMATION_WORD = "CONFIRMAR"
+
+
+class LiveConfirmationSerializer(serializers.Serializer[dict[str, object]]):
+    confirmation = serializers.CharField(max_length=40)
+
+    def validate_confirmation(self, value: str) -> str:
+        if value != LIVE_CONFIRMATION_WORD:
+            raise serializers.ValidationError(
+                f"Escribí {LIVE_CONFIRMATION_WORD} para activar las respuestas automáticas."
+            )
+        return value
+
+
 class WritingInstructionsSerializer(serializers.Serializer[dict[str, object]]):
     automatic_reply_prompt = serializers.CharField(max_length=4000)
 
@@ -96,6 +110,7 @@ class AutomationLiveActionView(SchemaAPIView):
                     raise ApiPermissionDenied(
                         "Volvé a ingresar tu contraseña antes de activar respuestas."
                     )
+                LiveConfirmationSerializer(data=request.data).is_valid(raise_exception=True)
                 configuration = set_live_mode(
                     workspace=workspace,
                     actor=actor,

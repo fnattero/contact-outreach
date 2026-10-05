@@ -29,6 +29,9 @@ import {
   type Problem,
 } from "@/lib/api";
 
+// The API requires this exact word to enable LIVE; the modal asks the admin to type it.
+const CONFIRMATION_WORD = "CONFIRMAR";
+
 const revisionStateTag: Record<KnowledgeRevisionState, { color: string; label: string }> = {
   APPROVED: { color: "green", label: "Aprobada" },
   DRAFT: { color: "orange", label: "Borrador sin aprobar" },
@@ -46,6 +49,7 @@ export default function AutomationPage() {
   const [preview, setPreview] = useState<{ status: string; matches: Array<{ title: string; score: number; selected: boolean }> } | null>(null);
   const [pendingPassword, setPendingPassword] = useState<string | null>(null);
   const [liveConfirmOpen, setLiveConfirmOpen] = useState(false);
+  const [disableConfirmOpen, setDisableConfirmOpen] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<{ kind: "fact" | "context"; id: string; label: string } | null>(null);
 
   useEffect(() => {
@@ -77,7 +81,7 @@ export default function AutomationPage() {
     setError(null);
     try {
       await reauthenticate(password);
-      setConfiguration(await setAutomationLive("enable-live"));
+      setConfiguration(await setAutomationLive("enable-live", CONFIRMATION_WORD));
       setLiveConfirmOpen(false);
       setPendingPassword(null);
     } catch (problem) {
@@ -92,6 +96,7 @@ export default function AutomationPage() {
     setError(null);
     try {
       setConfiguration(await setAutomationLive("disable-live"));
+      setDisableConfirmOpen(false);
     } catch (problem) {
       setError(problem);
     } finally {
@@ -156,7 +161,7 @@ export default function AutomationPage() {
           </Form.Item>
           <Flex gap="small" wrap>
             <Button type="primary" htmlType="submit" loading={saving}>Guardar modo</Button>
-            {configuration.mode === "LIVE" ? <Button danger onClick={() => void disableLive()} loading={saving}>Desactivar LIVE</Button> : null}
+            {configuration.mode === "LIVE" ? <Button danger onClick={() => setDisableConfirmOpen(true)} loading={saving}>Desactivar LIVE</Button> : null}
           </Flex>
         </Form>
       </Card>
@@ -208,6 +213,21 @@ export default function AutomationPage() {
         </Form>
         {preview ? <Alert style={{ marginTop: 16 }} type={preview.status === "SELECTED" ? "success" : "info"} message={`Resultado: ${preview.status}`} description={preview.matches.map((match) => `${match.title} (${match.score.toFixed(2)})`).join(" · ") || "Sin coincidencias."} /> : null}
       </Card>
+      {disableConfirmOpen ? (
+        <ConfirmDangerModal
+          open
+          title="Desactivar Envío real"
+          consequences={[
+            "Las respuestas automáticas vuelven a modo observación y dejan de enviarse desde Gmail.",
+            "Las respuestas ya enviadas no se revierten.",
+          ]}
+          confirmationWord={CONFIRMATION_WORD}
+          dangerLabel="Desactivar Envío real"
+          confirming={saving}
+          onCancel={() => setDisableConfirmOpen(false)}
+          onConfirm={() => void disableLive()}
+        />
+      ) : null}
       {pendingApproval ? (
         <ConfirmDangerModal
           open
@@ -217,7 +237,7 @@ export default function AutomationPage() {
             "La versión aprobada anterior quedará reemplazada.",
             "La aprobación queda registrada con tu usuario.",
           ]}
-          confirmationWord="CONFIRMAR"
+          confirmationWord={CONFIRMATION_WORD}
           dangerLabel="Aprobar contenido"
           confirming={saving}
           onCancel={() => setPendingApproval(null)}
@@ -232,7 +252,7 @@ export default function AutomationPage() {
           "Las respuestas que cumplan todas las condiciones podrán enviarse desde Gmail de verdad.",
           "La reautenticación, Gmail, las restricciones, las tareas humanas y los kill switches se volverán a comprobar antes de cada efecto.",
         ]}
-        confirmationWord="CONFIRMAR"
+        confirmationWord={CONFIRMATION_WORD}
         dangerLabel="Activar Envío real"
         confirming={saving}
         onCancel={() => { setLiveConfirmOpen(false); setPendingPassword(null); }}
