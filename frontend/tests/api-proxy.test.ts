@@ -71,3 +71,44 @@ describe("backend proxy", () => {
     expect(forwarded().get("X-Internal-Client-IP")).toBe("203.0.113.9");
   });
 });
+
+describe("backend proxy in production", () => {
+  beforeEach(() => {
+    upstream.mockReset().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", upstream);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("BACKEND_INTERNAL_URL", "http://backend.internal:8000");
+    vi.stubEnv("PUBLIC_APP_ORIGIN", "https://app.example.com");
+    vi.stubEnv("INTERNAL_PROXY_TOKEN", "t".repeat(40));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("works when fully configured", async () => {
+    expect((await call()).status).toBe(200);
+  });
+
+  it.each(["BACKEND_INTERNAL_URL", "PUBLIC_APP_ORIGIN", "INTERNAL_PROXY_TOKEN"])(
+    "refuses to call the backend when %s is missing",
+    async (name) => {
+      vi.stubEnv(name, "");
+      const response = await call();
+
+      expect(response.status).toBe(503);
+      expect(upstream).not.toHaveBeenCalled();
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      const body = JSON.stringify(await response.json());
+      expect(body).not.toContain(name);
+      expect(body).not.toContain("t".repeat(40));
+    },
+  );
+
+  it("refuses a public origin that is not an exact https origin", async () => {
+    vi.stubEnv("PUBLIC_APP_ORIGIN", "http://app.example.com/path");
+    expect((await call()).status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
