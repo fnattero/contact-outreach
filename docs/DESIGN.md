@@ -196,7 +196,7 @@ Spanish, Rioplatense register, sentence case, active voice. Preserve existing co
 
 **The most important rule in this file:** name things by what the user controls, never by how the system is built. Internal state names, enum values, provider names, and model identifiers must never appear as the primary label in the UI.
 
-Proposed label mapping. **The agent must not change any stored value, API payload, or enum — this is display text only.** Where a mapping is ambiguous, add it to `QUESTIONS.md` rather than guessing:
+Proposed label mapping. **The agent must not change any stored value, API payload, or enum — this is display text only.** Where a mapping is ambiguous, ask the product owner rather than guessing:
 
 | Internal value | Displayed label | Displayed explanation |
 |---|---|---|

@@ -128,7 +128,7 @@ permission/idempotency/provider error.
 - Dependency/image/SBOM/secret scans; CSRF/CORS/cookie/proxy/IDOR/XSS/CSP/SSRF/OAuth/PDF/CSV.
 - Gmail ambiguity/duplicate, Beat/restart/Redis loss, Overture import bajo carga.
 - Fresh/upgrade migrations futuras, backup/restore DB+Bucket+key y Railway staging.
-- Actualizar HARDENING_AUDIT con evidencia nueva.
+- Registrar la evidencia de estas verificaciones (ver `docs/OPERATIONS.md` §9) en el PR de release.
 
 **Terminado:** cero high/critical sin resolver, restore probado, frontend saludable durante import y
 todos los kill switches/rechecks aprobados.
