@@ -359,6 +359,8 @@ X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_SSL_REDIRECT = env_bool("DJANGO_SSL_REDIRECT", APP_ENV == "production")
+# Container and platform health checks reach this private service over plain HTTP.
+SECURE_REDIRECT_EXEMPT = [r"^api/v1/health/(live|ready)/$"]
 SECURE_HSTS_SECONDS = int(
     os.getenv("DJANGO_HSTS_SECONDS", "300" if APP_ENV == "production" else "0")
 )
