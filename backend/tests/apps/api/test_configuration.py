@@ -271,3 +271,16 @@ def test_message_template_rules_reach_the_client_and_sellers_cannot_edit(owner: 
     seller.force_login(vendor)
     denied = _post(seller, url, {"kind": "INITIAL", "subject": "x", "body": "y"}, _csrf(seller))
     assert denied.status_code == 403
+
+
+@pytest.mark.django_db
+def test_reading_the_automation_configuration_does_not_create_a_row(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    assert ReplyAutomationConfiguration.objects.count() == 0
+
+    response = client.get(reverse("api-automation-configuration"))
+
+    assert response.status_code == 200
+    assert response.json()["data"]["mode"] == ReplyAutomationConfiguration.Mode.SHADOW
+    assert ReplyAutomationConfiguration.objects.count() == 0

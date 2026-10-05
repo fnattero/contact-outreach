@@ -52,7 +52,11 @@ class AutomationConfigurationView(SchemaAPIView):
 
     def get(self, request: Request) -> Response:
         workspace = authenticated_user(request).membership.workspace
-        configuration, _ = ReplyAutomationConfiguration.objects.get_or_create(workspace=workspace)
+        # A read must not write: a workspace without a row reports the defaults (SHADOW) and the
+        # row is created by the first mode change.
+        configuration = ReplyAutomationConfiguration.objects.filter(
+            workspace=workspace
+        ).first() or ReplyAutomationConfiguration(workspace=workspace)
         return Response(
             {"data": AutomationConfigurationSerializer(_configuration_data(configuration)).data}
         )
