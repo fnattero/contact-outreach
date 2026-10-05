@@ -30,6 +30,7 @@ from apps.contacts.services import (
     create_manual_contact,
     create_manual_restriction,
     queue_contact_email_validation,
+    rename_contact,
     revoke_manual_restriction,
     set_contact_preferred_email,
 )
@@ -291,8 +292,11 @@ class ContactDetailView(SchemaAPIView):
         contact = _contact(actor, contact_id)
         require_if_match(request, contact)
         if "name" in serializer.validated_data:
-            contact.name = cast(str, serializer.validated_data["name"]).strip()
-            contact.save(update_fields=("name", "updated_at"))
+            rename_contact(
+                actor=actor,
+                contact_id=contact.pk,
+                name=cast(str, serializer.validated_data["name"]),
+            )
         contact.refresh_from_db()
         return add_etag(
             Response({"data": ContactListSerializer(_contact_list_data(contact)).data}), contact

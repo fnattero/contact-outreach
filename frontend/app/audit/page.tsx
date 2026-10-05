@@ -26,6 +26,7 @@ const actionLabels: Record<string, string> = {
   "campaign.legacy_boundaries_refreshed": "Límites anteriores actualizados",
   "campaign.outdated_analyses_regeneration_requested": "Reanálisis solicitado",
   "campaign.transitioned": "Estado de campaña actualizado",
+  "contact.renamed": "Contacto renombrado",
   "extraction.run_created": "Ejecución de extracción creada",
   "extraction.run_failed": "Ejecución de extracción fallida",
   "extraction.run_succeeded": "Ejecución de extracción completada",

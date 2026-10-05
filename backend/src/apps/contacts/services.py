@@ -1520,6 +1520,32 @@ def validate_contact_email_address(
 
 
 @transaction.atomic
+def rename_contact(
+    *,
+    actor: User,
+    contact_id: uuid.UUID | str,
+    name: str,
+) -> Contact:
+    membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
+    contact = Contact.objects.select_for_update().get(pk=contact_id)
+    if contact.workspace_id != membership.workspace_id:
+        raise PermissionDenied
+    new_name = name.strip()
+    if new_name != contact.name:
+        before = {"name": contact.name}
+        contact.name = new_name
+        contact.save(update_fields=("name", "updated_at"))
+        record_event(
+            action="contact.renamed",
+            entity=contact,
+            actor=actor,
+            before=before,
+            after={"name": new_name},
+        )
+    return contact
+
+
+@transaction.atomic
 def set_contact_preferred_email(
     *,
     actor: User,
