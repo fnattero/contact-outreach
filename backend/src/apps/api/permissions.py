@@ -86,6 +86,10 @@ class ViewJobsPermission(CapabilityPermission):
     required_capability = Capability.VIEW_JOBS
 
 
+class RetryJobsPermission(CapabilityPermission):
+    required_capability = Capability.RETRY_JOBS
+
+
 class ViewAuditPermission(CapabilityPermission):
     required_capability = Capability.VIEW_AUDIT
 

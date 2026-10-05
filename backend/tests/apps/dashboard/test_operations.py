@@ -10,13 +10,16 @@ from pathlib import Path
 import pytest
 from django.apps import apps as django_apps
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.accounts import permissions
 from apps.audit.models import AuditEvent, BackgroundJob
 from apps.audit.observability import RedactingJsonFormatter, correlation_id_var
+from apps.campaigns.delivery import retry_failed_message
 from apps.campaigns.models import Campaign, OutboundMessage, SearchQuery, SearchRun
 from apps.catalogs.services import create_catalog
 from apps.mailbox.crypto import encrypt_token
@@ -391,6 +394,51 @@ def test_failed_delivery_retry_is_explicit_same_row_and_audited(
     assert outbound.attempts == 0
     assert job.state == BackgroundJob.State.CANCELLED
     assert AuditEvent.objects.filter(action="message.retry_requested").exists()
+
+
+@pytest.mark.django_db
+def test_viewing_jobs_does_not_allow_retrying_a_send(
+    client: Client,
+    owner: User,
+    private_catalog_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del private_catalog_dir
+    _, _, outbound, _ = _operational_data(owner)
+    job = BackgroundJob.objects.create(
+        task_name="mailbox.deliver_message",
+        idempotency_key=f"deliver:{outbound.pk}",
+        entity_type="OutboundMessage",
+        entity_id=str(outbound.pk),
+        state=BackgroundJob.State.FAILED,
+        error="Proveedor corregible",
+    )
+    seller = User.objects.create_user(username="jobs-viewer", password="viewer-password-1")
+    # Even a role that can read jobs must not be able to resend an email.
+    monkeypatch.setattr(
+        permissions,
+        "VENDEDOR_CAPABILITIES",
+        permissions.VENDEDOR_CAPABILITIES | {permissions.Capability.VIEW_JOBS},
+    )
+    client.force_login(seller)
+
+    listing = _api(client, "get", reverse("api-background-jobs"))
+    assert listing.status_code == 200
+
+    retry = _api(
+        client,
+        "post",
+        reverse("api-background-job-retry", args=(job.pk,)),
+        {"reason": "Se restauró la conexión del proveedor"},
+        **_idempotent(),
+    )
+    assert retry.status_code == 403
+    with pytest.raises(PermissionDenied):
+        retry_failed_message(
+            outbound.pk, actor=seller, reason="Se restauró la conexión del proveedor"
+        )
+    outbound.refresh_from_db()
+    assert outbound.state == OutboundMessage.State.SEND_FAILED
 
 
 def test_json_logs_redact_secrets_and_include_correlation() -> None:

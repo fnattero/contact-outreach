@@ -30,6 +30,7 @@ class Capability(StrEnum):
     DOWNLOAD_PDFS = "download_pdfs"
     EXPORT_DATA = "export_data"
     VIEW_JOBS = "view_jobs"
+    RETRY_JOBS = "retry_jobs"
     VIEW_AUDIT = "view_audit"
 
 

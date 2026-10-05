@@ -18,7 +18,12 @@ from rest_framework.response import Response
 
 from apps.api.mailbox import _outbound_data
 from apps.api.payloads import json_object
-from apps.api.permissions import ViewAuditPermission, ViewJobsPermission, authenticated_user
+from apps.api.permissions import (
+    RetryJobsPermission,
+    ViewAuditPermission,
+    ViewJobsPermission,
+    authenticated_user,
+)
 from apps.api.schema import SchemaAPIView
 from apps.audit.models import ApiIdempotencyRecord, AuditEvent, BackgroundJob
 from apps.campaigns.delivery import retry_failed_message
@@ -157,7 +162,7 @@ class BackgroundJobDetailView(SchemaAPIView):
 class BackgroundJobRetryView(SchemaAPIView):
     """Retry only the existing durable outbound row, never create a new send."""
 
-    permission_classes = (IsAuthenticated, ViewJobsPermission)
+    permission_classes = (IsAuthenticated, RetryJobsPermission)
 
     def post(self, request: Request, job_id: uuid.UUID) -> Response:
         key = request.headers.get("Idempotency-Key", "")
