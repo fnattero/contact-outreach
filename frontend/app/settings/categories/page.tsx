@@ -8,7 +8,7 @@ import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { createSearchCategory, deleteSearchCategory, getSearchCategories, problemMessage, toggleSearchCategory, updateSearchCategoryRules, type Problem, type SearchCategory } from "@/lib/api";
+import { can, createSearchCategory, deleteSearchCategory, getSearchCategories, problemMessage, toggleSearchCategory, updateSearchCategoryRules, type Problem, type SearchCategory } from "@/lib/api";
 
 export default function CategoriesPage() {
   const { session } = useAuth();
@@ -27,7 +27,7 @@ export default function CategoriesPage() {
 
   useEffect(() => { void getSearchCategories(true).then(setCategories).catch(setError).finally(() => setLoading(false)); }, []);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para editar rubros." }} />;
+  if (!can(session, "manage_configuration")) return <AuthError error={{ detail: "No tenés permisos para editar rubros." }} />;
   if (error && !categories.length && !loading) return <AuthError error={error} />;
 
   async function addCategory(values: { name: string }) {

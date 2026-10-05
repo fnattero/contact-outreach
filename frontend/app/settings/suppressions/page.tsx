@@ -7,7 +7,7 @@ import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import {
+import { can,
   createSuppression,
   getSuppressions,
   problemMessage,
@@ -47,7 +47,7 @@ export default function SuppressionsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  const isAdmin = session?.role === "ADMIN";
+  const isAdmin = can(session, "manage_contacts");
 
   // Handlers flag `loading` before changing page/search/reloadKey; the effect only reports results.
   useEffect(() => {

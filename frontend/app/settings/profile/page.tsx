@@ -6,7 +6,7 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { LoadingState } from "@/components/design-system/states";
 import { PageHeader } from "@/components/design-system/page-header";
-import {
+import { can,
   getBusinessProfileVersioned,
   problemMessage,
   updateBusinessProfile,
@@ -68,7 +68,7 @@ export default function ProfileSettingsPage() {
     setCancelOpen(false);
   }
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para editar el perfil comercial." }} />;
+  if (!can(session, "manage_configuration")) return <AuthError error={{ detail: "No tenés permisos para editar el perfil comercial." }} />;
   if (error && !profile && !loading) return <AuthError error={error} />;
   if (loading) return <LoadingState layout="form" />;
 

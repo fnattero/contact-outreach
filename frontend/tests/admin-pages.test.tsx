@@ -8,6 +8,7 @@ import IntegrationsSettingsPage from "@/app/settings/integrations/page";
 import ProfileSettingsPage from "@/app/settings/profile/page";
 import SuppressionsPage from "@/app/settings/suppressions/page";
 import { isForbiddenShellRoute } from "@/components/app-shell";
+import { sessionFor } from "./session";
 import {
   createSuppression,
   deleteSearchCategory,
@@ -27,9 +28,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/auth-provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/auth-provider")>();
+  const { sessionFor } = await import("./session");
   return {
     ...actual,
-    useAuth: () => ({ session: { role: auth.role }, loading: false, refresh: vi.fn(), signOut: vi.fn() }),
+    useAuth: () => ({ session: sessionFor(auth.role), loading: false, refresh: vi.fn(), signOut: vi.fn() }),
   };
 });
 
@@ -217,7 +219,7 @@ describe("direct-route guards", () => {
 
 describe("shell routing for the new administration pages", () => {
   it.each(["/prospects", "/settings/suppressions"])("keeps a seller away from %s", (path) => {
-    expect(isForbiddenShellRoute("VENDEDOR", path)).toBe(true);
-    expect(isForbiddenShellRoute("ADMIN", path)).toBe(false);
+    expect(isForbiddenShellRoute(sessionFor("VENDEDOR"), path)).toBe(true);
+    expect(isForbiddenShellRoute(sessionFor("ADMIN"), path)).toBe(false);
   });
 });

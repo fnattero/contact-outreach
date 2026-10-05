@@ -8,6 +8,35 @@ export type Problem = {
   field_errors?: Record<string, string | string[]>;
 };
 
+// Mirrors the backend's Capability enum (a backend test keeps the two in sync). The backend
+// computes what a user may do; the UI only asks, and never infers it from the role.
+export type Capability =
+  | "view_summary"
+  | "view_campaigns"
+  | "view_sent_messages"
+  | "view_contacts"
+  | "manage_users"
+  | "manage_campaigns"
+  | "approve_campaigns"
+  | "send_replies"
+  | "manage_contacts"
+  | "manage_knowledge"
+  | "manage_automation"
+  | "manage_configuration"
+  | "manage_integrations"
+  | "download_pdfs"
+  | "export_data"
+  | "view_jobs"
+  | "retry_jobs"
+  | "view_audit";
+
+export function can(
+  session: { capabilities?: readonly string[] } | null | undefined,
+  capability: Capability,
+): boolean {
+  return Boolean(session?.capabilities?.includes(capability));
+}
+
 export type UserSession = {
   id: number;
   username: string;
@@ -15,7 +44,7 @@ export type UserSession = {
   role: "ADMIN" | "VENDEDOR";
   workspace_id: string;
   workspace_name: string;
-  capabilities: string[];
+  capabilities: Capability[];
   session_expires_at: string;
   reauthentication_active: boolean;
 };

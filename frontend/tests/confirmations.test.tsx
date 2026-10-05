@@ -24,10 +24,11 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/auth-provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/auth-provider")>();
+  const { sessionFor } = await import("./session");
   return {
     ...actual,
     useAuth: () => ({
-      session: { role: "ADMIN", capabilities: ["send_replies"] },
+      session: sessionFor("ADMIN"),
       loading: false,
       refresh: vi.fn(),
       signOut: vi.fn(),

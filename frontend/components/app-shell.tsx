@@ -29,7 +29,7 @@ import { usePathname } from "next/navigation";
 import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ForbiddenState } from "@/components/design-system/states";
 import { TopBar } from "@/components/top-bar";
-import type { UserSession } from "@/lib/api";
+import { can, type Capability, type UserSession } from "@/lib/api";
 
 const SIDEBAR_STORAGE_KEY = "contact-outreach:sidebar-collapsed";
 const SIDEBAR_CHANGE_EVENT = "contact-outreach:sidebar-change";
@@ -38,6 +38,8 @@ type NavigationItem = {
   key: string;
   label: string;
   icon: ReactNode;
+  // What the user must be allowed to do for this section; absent for sections open to every role.
+  capability?: Capability;
 };
 
 const operationItems: readonly NavigationItem[] = [
@@ -50,23 +52,29 @@ const operationItems: readonly NavigationItem[] = [
 ];
 
 const administrationItems: readonly NavigationItem[] = [
-  { key: "/prospects", label: "Audiencia", icon: <ContactsOutlined /> },
-  { key: "/catalogs", label: "Catálogos", icon: <BookOutlined /> },
-  { key: "/settings/profile", label: "Perfil comercial", icon: <ShopOutlined /> },
-  { key: "/settings/message-templates", label: "Mensajes de campaña", icon: <MailOutlined /> },
-  { key: "/settings/prompts", label: "Instrucciones", icon: <EditOutlined /> },
-  { key: "/settings/categories", label: "Rubros", icon: <TagsOutlined /> },
-  { key: "/automation", label: "Automatización", icon: <RobotOutlined /> },
-  { key: "/settings/integrations", label: "Integraciones", icon: <ApiOutlined /> },
-  { key: "/settings/overture", label: "Datos de búsqueda", icon: <SearchOutlined /> },
-  { key: "/settings/suppressions", label: "Supresiones", icon: <StopOutlined /> },
-  { key: "/settings/users", label: "Usuarios", icon: <UserOutlined /> },
-  { key: "/audit", label: "Auditoría", icon: <AuditOutlined /> },
-  { key: "/jobs", label: "Tareas", icon: <ClockCircleOutlined /> },
+  { key: "/prospects", label: "Audiencia", icon: <ContactsOutlined />, capability: "manage_campaigns" },
+  { key: "/catalogs", label: "Catálogos", icon: <BookOutlined />, capability: "manage_configuration" },
+  { key: "/settings/profile", label: "Perfil comercial", icon: <ShopOutlined />, capability: "manage_configuration" },
+  { key: "/settings/message-templates", label: "Mensajes de campaña", icon: <MailOutlined />, capability: "manage_configuration" },
+  { key: "/settings/prompts", label: "Instrucciones", icon: <EditOutlined />, capability: "manage_configuration" },
+  { key: "/settings/categories", label: "Rubros", icon: <TagsOutlined />, capability: "manage_configuration" },
+  { key: "/automation", label: "Automatización", icon: <RobotOutlined />, capability: "manage_automation" },
+  { key: "/settings/integrations", label: "Integraciones", icon: <ApiOutlined />, capability: "manage_integrations" },
+  { key: "/settings/overture", label: "Datos de búsqueda", icon: <SearchOutlined />, capability: "manage_integrations" },
+  { key: "/settings/suppressions", label: "Supresiones", icon: <StopOutlined />, capability: "manage_contacts" },
+  { key: "/settings/users", label: "Usuarios", icon: <UserOutlined />, capability: "manage_users" },
+  { key: "/audit", label: "Auditoría", icon: <AuditOutlined />, capability: "view_audit" },
+  { key: "/jobs", label: "Tareas", icon: <ClockCircleOutlined />, capability: "view_jobs" },
 ];
 
-const administrationRoutePrefixes = administrationItems.map(({ key }) => key);
-const adminOnlyCreateRoutes = ["/campaigns/new", "/contacts/new"];
+// Every route that needs a capability, including the create pages that have no menu entry.
+const restrictedRoutes: readonly { route: string; capability: Capability }[] = [
+  ...administrationItems.flatMap(({ key, capability }) => (capability ? [{ route: key, capability }] : [])),
+  { route: "/campaigns/new", capability: "manage_campaigns" },
+  { route: "/contacts/new", capability: "manage_contacts" },
+];
+
+type SessionLike = { capabilities?: readonly string[] } | null | undefined;
 
 function useMobileShell(): boolean {
   return useSyncExternalStore(
@@ -119,11 +127,11 @@ function toMenuItems(items: readonly NavigationItem[], activeKey: string, onNavi
 type SidebarNavigationProps = {
   activeKey: string;
   collapsed: boolean;
-  isAdmin: boolean;
+  session: SessionLike;
   onNavigate?: () => void;
 };
 
-function SidebarNavigation({ activeKey, collapsed, isAdmin, onNavigate }: SidebarNavigationProps) {
+function SidebarNavigation({ activeKey, collapsed, session, onNavigate }: SidebarNavigationProps) {
   return (
     <nav className="sidebar-nav" aria-label="Navegación principal">
       <div className={`nav-group${collapsed ? " nav-group--collapsed" : ""}`}>
@@ -135,14 +143,14 @@ function SidebarNavigation({ activeKey, collapsed, isAdmin, onNavigate }: Sideba
           items={toMenuItems(operationItems, activeKey, onNavigate)}
         />
       </div>
-      {isAdmin ? (
+      {canSeeAdministration(session) ? (
         <div className={`nav-group${collapsed ? " nav-group--collapsed" : ""}`}>
           <div className="nav-group__label"><span>Administración</span></div>
           <Menu
             mode="inline"
             inlineCollapsed={collapsed}
             selectedKeys={[activeKey]}
-            items={toMenuItems(administrationItems, activeKey, onNavigate)}
+            items={toMenuItems(visibleAdministrationItems(session), activeKey, onNavigate)}
           />
         </div>
       ) : null}
@@ -150,18 +158,18 @@ function SidebarNavigation({ activeKey, collapsed, isAdmin, onNavigate }: Sideba
   );
 }
 
-function sellerCannotReach(pathname: string): boolean {
-  return [...administrationRoutePrefixes, ...adminOnlyCreateRoutes].some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
+export function visibleAdministrationItems(session: SessionLike): readonly NavigationItem[] {
+  return administrationItems.filter((item) => !item.capability || can(session, item.capability));
+}
+
+export function canSeeAdministration(session: SessionLike): boolean {
+  return visibleAdministrationItems(session).length > 0;
+}
+
+export function isForbiddenShellRoute(session: SessionLike, pathname: string): boolean {
+  return restrictedRoutes.some(
+    ({ route, capability }) => (pathname === route || pathname.startsWith(`${route}/`)) && !can(session, capability),
   );
-}
-
-export function canSeeAdministration(role: UserSession["role"]): boolean {
-  return role === "ADMIN";
-}
-
-export function isForbiddenShellRoute(role: UserSession["role"], pathname: string): boolean {
-  return role === "VENDEDOR" && sellerCannotReach(pathname);
 }
 
 export type AppShellProps = {
@@ -176,7 +184,6 @@ export function AppShell({ session, onSignOut, children }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const collapsed = useCollapsedSidebar();
   const activeKey = useMemo(() => activeNavigationKey(pathname), [pathname]);
-  const isAdmin = canSeeAdministration(session.role);
 
   const toggleCollapsed = () => {
     window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(!collapsed));
@@ -191,7 +198,7 @@ export function AppShell({ session, onSignOut, children }: AppShellProps) {
       <SidebarNavigation
         activeKey={activeKey}
         collapsed={collapsed && !mobile}
-        isAdmin={isAdmin}
+        session={session}
         onNavigate={mobile ? () => setDrawerOpen(false) : undefined}
       />
       {!mobile ? (
@@ -210,7 +217,7 @@ export function AppShell({ session, onSignOut, children }: AppShellProps) {
     </div>
   );
 
-  const page = isForbiddenShellRoute(session.role, pathname)
+  const page = isForbiddenShellRoute(session, pathname)
     ? <ForbiddenState resource="esta sección de administración" />
     : children;
 

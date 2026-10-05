@@ -14,7 +14,7 @@ import {
   type SemanticLevel,
 } from "@/components/design-system";
 import { useAuth } from "@/components/auth-provider";
-import {
+import { can,
   getAttention,
   getDashboardSummary,
   getInboundMessages,
@@ -126,7 +126,7 @@ export default function DashboardPage() {
 
   const mode = summary.safety.send_mode === "dry-run" || summary.safety.send_mode === "live" ? displayValueMap[summary.safety.send_mode] : null;
   const isSimulation = summary.safety.send_mode === "dry-run";
-  const isAdmin = session?.role === "ADMIN";
+  const isAdmin = can(session, "manage_campaigns");
   const activeCampaigns = summary.campaigns.filter((campaign) => activeCampaignStates.has(campaign.state));
   const campaignOptions = summary.campaigns.map((campaign) => ({ label: campaign.name, value: campaign.id }));
 
@@ -154,12 +154,12 @@ export default function DashboardPage() {
 
       <section className="dashboard-section" aria-labelledby="attention-heading">
         <div className="dashboard-section__heading"><div><p className="type-micro">Prioridad operativa</p><h2 className="type-title" id="attention-heading">¿Qué necesita mi atención?</h2></div><span className="section-count data-text">{attentionItems.length}</span></div>
-        {attentionItems.length ? <ul className="attention-list">{attentionItems.map((item) => <li className="attention-list__item" key={`${item.kind}-${item.id}`}><div className="attention-list__main"><span className="type-micro">{item.kind === "task" ? "Revisión humana" : "Respuesta nueva"}</span><strong>{item.title}</strong><span className="attention-list__reason">{item.reason}</span><span className="attention-list__contact">{item.contactId ? <Link href={`/contacts/${item.contactId}`}>{item.contact}</Link> : item.contact}</span></div><Link className="attention-list__link" href={item.href}>Abrir <ArrowRightOutlined aria-hidden /></Link></li>)}</ul> : <EmptyState headingId="attention-empty-heading" headline="No hay nada pendiente" explanation="Las revisiones y respuestas nuevas aparecerán acá cuando requieran una decisión." actionLabel={session?.role === "ADMIN" ? "Configurar primera campaña" : "Ver contactos"} actionHref={session?.role === "ADMIN" ? "/campaigns/new" : "/contacts"} />}
+        {attentionItems.length ? <ul className="attention-list">{attentionItems.map((item) => <li className="attention-list__item" key={`${item.kind}-${item.id}`}><div className="attention-list__main"><span className="type-micro">{item.kind === "task" ? "Revisión humana" : "Respuesta nueva"}</span><strong>{item.title}</strong><span className="attention-list__reason">{item.reason}</span><span className="attention-list__contact">{item.contactId ? <Link href={`/contacts/${item.contactId}`}>{item.contact}</Link> : item.contact}</span></div><Link className="attention-list__link" href={item.href}>Abrir <ArrowRightOutlined aria-hidden /></Link></li>)}</ul> : <EmptyState headingId="attention-empty-heading" headline="No hay nada pendiente" explanation="Las revisiones y respuestas nuevas aparecerán acá cuando requieran una decisión." actionLabel={isAdmin ? "Configurar primera campaña" : "Ver contactos"} actionHref={isAdmin ? "/campaigns/new" : "/contacts"} />}
       </section>
 
       <section className="dashboard-section" aria-labelledby="campaigns-heading">
         <div className="dashboard-section__heading"><div><p className="type-micro">Seguimiento</p><h2 className="type-title" id="campaigns-heading">¿Cómo van las campañas?</h2></div></div>
-        {activeCampaigns.length ? <Table<DashboardCampaign> rowKey="id" dataSource={activeCampaigns} pagination={false} scroll={{ x: 680 }} columns={[{ title: "Campaña", dataIndex: "name", render: (name: string, campaign) => <Link href={`/campaigns/${campaign.id}`}>{name}</Link> }, { title: "Estado", dataIndex: "state_label", render: (label: string, campaign) => <StatusBadge label={label} level={campaignLevel(campaign.state)} /> }, { title: "Progreso", dataIndex: "discovery_state_label", render: (label: string) => <span>{label || "Sin datos de búsqueda"}</span> }, { title: "Próxima acción", dataIndex: "state", render: (state: string) => <span>{nextCampaignAction(state, isAdmin)}</span> }]} /> : <EmptyState headingId="campaigns-empty-heading" headline="Todavía no hay campañas activas" explanation="Creá una campaña para definir la audiencia y revisar el siguiente paso operativo." actionLabel={session?.role === "ADMIN" ? "Crear campaña" : "Ver campañas"} actionHref={session?.role === "ADMIN" ? "/campaigns/new" : "/campaigns"} />}
+        {activeCampaigns.length ? <Table<DashboardCampaign> rowKey="id" dataSource={activeCampaigns} pagination={false} scroll={{ x: 680 }} columns={[{ title: "Campaña", dataIndex: "name", render: (name: string, campaign) => <Link href={`/campaigns/${campaign.id}`}>{name}</Link> }, { title: "Estado", dataIndex: "state_label", render: (label: string, campaign) => <StatusBadge label={label} level={campaignLevel(campaign.state)} /> }, { title: "Progreso", dataIndex: "discovery_state_label", render: (label: string) => <span>{label || "Sin datos de búsqueda"}</span> }, { title: "Próxima acción", dataIndex: "state", render: (state: string) => <span>{nextCampaignAction(state, isAdmin)}</span> }]} /> : <EmptyState headingId="campaigns-empty-heading" headline="Todavía no hay campañas activas" explanation="Creá una campaña para definir la audiencia y revisar el siguiente paso operativo." actionLabel={isAdmin ? "Crear campaña" : "Ver campañas"} actionHref={isAdmin ? "/campaigns/new" : "/campaigns"} />}
       </section>
 
       <section className="dashboard-section dashboard-performance" aria-labelledby="performance-heading">

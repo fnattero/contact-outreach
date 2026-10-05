@@ -4,7 +4,7 @@ import { Alert, Button, Card, Descriptions, Flex, Form, Input, Popconfirm, Skele
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthError } from "@/components/auth-provider";
-import { authorizeOutboundMessage, getOutboundMessage, problemMessage, updateOutboundDraft, type OutboundMessage, type Problem } from "@/lib/api";
+import { can, authorizeOutboundMessage, getOutboundMessage, problemMessage, updateOutboundDraft, type OutboundMessage, type Problem } from "@/lib/api";
 import { useAuth } from "@/components/auth-provider";
 
 export default function OutboundDetailPage() {
@@ -59,7 +59,7 @@ export default function OutboundDetailPage() {
       <Card title="Contenido">
         <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>{message.body_text}</Typography.Paragraph>
       </Card>
-      {session?.role === "ADMIN" && ["PREPARED", "REVIEW_READY"].includes(message.state) ? (
+      {can(session, "manage_campaigns") && ["PREPARED", "REVIEW_READY"].includes(message.state) ? (
         <Card title="Revisión administrativa">
           <Form layout="vertical" initialValues={{ subject: message.subject, body_text: message.body_text }} onFinish={(values) => void saveDraft(values as { subject: string; body_text: string })}>
             <Form.Item name="subject" label="Asunto" rules={[{ required: true }]}><Input /></Form.Item>

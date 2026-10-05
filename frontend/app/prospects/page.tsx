@@ -7,7 +7,7 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import {
+import { can,
   getCampaigns,
   getProspects,
   problemMessage,
@@ -44,7 +44,7 @@ export default function ProspectsPage() {
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
 
-  const isAdmin = session?.role === "ADMIN";
+  const isAdmin = can(session, "manage_campaigns");
 
   useEffect(() => {
     if (!isAdmin) return;

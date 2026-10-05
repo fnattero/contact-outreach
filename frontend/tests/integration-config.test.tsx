@@ -8,7 +8,8 @@ import { getIntegrationConfiguration, reauthenticate, saveIntegrationConfigurati
 
 vi.mock("@/components/auth-provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/auth-provider")>();
-  return { ...actual, useAuth: () => ({ session: { role: "ADMIN" }, loading: false, refresh: vi.fn(), signOut: vi.fn() }) };
+  const { sessionFor } = await import("./session");
+  return { ...actual, useAuth: () => ({ session: sessionFor("ADMIN"), loading: false, refresh: vi.fn(), signOut: vi.fn() }) };
 });
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();

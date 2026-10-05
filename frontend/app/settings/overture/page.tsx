@@ -6,7 +6,7 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { getOvertureStatus, problemMessage, type OvertureStatus, type Problem } from "@/lib/api";
+import { can, getOvertureStatus, problemMessage, type OvertureStatus, type Problem } from "@/lib/api";
 
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "America/Argentina/Buenos_Aires" });
 
@@ -19,7 +19,7 @@ export default function OvertureSettingsPage() {
   function refresh() { setLoading(true); setError(null); void getOvertureStatus().then(setStatus).catch(setError).finally(() => setLoading(false)); }
   useEffect(() => { void getOvertureStatus().then(setStatus).catch(setError).finally(() => setLoading(false)); }, []);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para ver Overture." }} />;
+  if (!can(session, "manage_integrations")) return <AuthError error={{ detail: "No tenés permisos para ver Overture." }} />;
   if (loading) return <LoadingState layout="detail" />;
   if (error && !status) return <AuthError error={error} />;
   if (!status) return null;

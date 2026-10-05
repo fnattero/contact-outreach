@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/design-system/states";
-import { getAuditEvents, problemMessage, type AuditEvent, type Problem } from "@/lib/api";
+import { can, getAuditEvents, problemMessage, type AuditEvent, type Problem } from "@/lib/api";
 
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Argentina/Buenos_Aires" });
 const actionLabels: Record<string, string> = {
@@ -83,7 +83,7 @@ export default function AuditPage() {
     return (!actorFilter || (event.actor ?? "Sistema").toLowerCase().includes(actorFilter.toLowerCase())) && (!actionFilter || event.action === actionFilter) && (!targetFilter || event.entity_type === targetFilter) && (!dateRange || (date >= dateRange[0] && date <= dateRange[1]));
   }), [events, actorFilter, actionFilter, targetFilter, dateRange]);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para ver auditoría." }} />;
+  if (!can(session, "view_audit")) return <AuthError error={{ detail: "No tenés permisos para ver auditoría." }} />;
   if (loading) return <LoadingState layout="list" />;
   if (error) return <ErrorState failed="No se pudo cargar la auditoría" instruction={problemMessage(error as Problem)} onRetry={() => { setLoading(true); setError(null); void getAuditEvents().then((response) => setEvents(response.data)).catch(setError).finally(() => setLoading(false)); }} />;
 

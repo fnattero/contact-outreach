@@ -7,7 +7,7 @@ import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-mo
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import {
+import { can,
   approveKnowledgeContext,
   approveKnowledgeFact,
   getDashboardSummary,
@@ -60,7 +60,7 @@ export default function AutomationPage() {
       .catch(setError);
   }, []);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para configurar automatización." }} />;
+  if (!can(session, "manage_automation")) return <AuthError error={{ detail: "No tenés permisos para configurar automatización." }} />;
   if (error && !configuration) return <AuthError error={error} />;
   if (!configuration) return <LoadingState layout="form" />;
 

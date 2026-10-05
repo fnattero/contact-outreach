@@ -7,7 +7,7 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { getCatalogs, problemMessage, uploadCatalog, type Catalog, type Problem } from "@/lib/api";
+import { can, getCatalogs, problemMessage, uploadCatalog, type Catalog, type Problem } from "@/lib/api";
 
 const sizeFormatter = new Intl.NumberFormat("es-AR");
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "America/Argentina/Buenos_Aires" });
@@ -42,7 +42,7 @@ export default function CatalogsPage() {
     } catch (problem) { setError(problem); } finally { setUploading(false); }
   }
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para administrar catálogos." }} />;
+  if (!can(session, "manage_configuration")) return <AuthError error={{ detail: "No tenés permisos para administrar catálogos." }} />;
   if (error && !catalogs.length && !loading) return <AuthError error={error} />;
 
   return (

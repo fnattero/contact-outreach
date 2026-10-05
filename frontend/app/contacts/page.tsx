@@ -4,7 +4,7 @@ import { Alert, Button, Card, Empty, Flex, List, Skeleton, Tag, Typography } fro
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
-import { getContacts, type Contact } from "@/lib/api";
+import { can, getContacts, type Contact } from "@/lib/api";
 
 const dateFormatter = new Intl.DateTimeFormat("es-AR", {
   dateStyle: "medium",
@@ -51,7 +51,7 @@ export default function ContactsPage() {
             Personas y organizaciones con historial de comunicación.
           </Typography.Paragraph>
         </div>
-        {session?.role === "ADMIN" ? (
+        {can(session, "manage_contacts") ? (
           <Link href="/contacts/new">
             <Button type="primary">Nuevo contacto</Button>
           </Link>

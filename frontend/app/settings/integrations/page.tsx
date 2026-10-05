@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { ConfigurationForm } from "./configuration-form";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import {
+import { can,
   disconnectGmail,
   getGmailConnection,
   getIntegrationStatus,
@@ -48,7 +48,7 @@ export default function IntegrationsSettingsPage() {
       .catch(setError);
   }, []);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para ver integraciones." }} />;
+  if (!can(session, "manage_integrations")) return <AuthError error={{ detail: "No tenés permisos para ver integraciones." }} />;
   if (error && !status) return <AuthError error={error} />;
   if (!status) return <LoadingState layout="list" />;
 

@@ -15,7 +15,7 @@ import {
   LoadingState,
   PageHeader,
 } from "@/components/design-system";
-import {
+import { can,
   createCampaign,
   getCatalogs,
   getMessageTemplates,
@@ -140,7 +140,7 @@ export default function NewCampaignPage() {
     return null;
   }, [categories.length, provinces.length, zones.length]);
 
-  if (session?.role !== "ADMIN") return <ForbiddenState resource="la creación de campañas" />;
+  if (!can(session, "manage_campaigns")) return <ForbiddenState resource="la creación de campañas" />;
   if (loading) return <LoadingState layout="form" label="Cargando opciones de la campaña" />;
   if (error && !categories.length) return (
     <ErrorState
