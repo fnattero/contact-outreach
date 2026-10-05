@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.campaigns import services as campaign_services
@@ -22,6 +23,7 @@ from apps.campaigns.services import (
     InvalidCampaignTransition,
     create_campaign,
     finish_discovery,
+    resume_campaign,
     transition_campaign,
 )
 from apps.catalogs.models import Catalog
@@ -230,7 +232,7 @@ def test_campaign_selection_snapshots_are_immutable_after_start(
 
     transition_campaign(
         campaign_id=campaign.pk,
-        target_state=Campaign.State.RUNNING,
+        target_state=Campaign.State.DISCOVERING,
         actor=owner,
     )
 
@@ -295,7 +297,7 @@ def test_overture_campaign_requires_a_ready_coverage_snapshot(
     with pytest.raises(ValidationError) as error:
         transition_campaign(
             campaign_id=campaign.pk,
-            target_state=Campaign.State.RUNNING,
+            target_state=Campaign.State.DISCOVERING,
             actor=owner,
         )
     assert str(error.value) == (
@@ -409,9 +411,9 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     category.save()
 
     started = transition_campaign(
-        campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
     )
-    assert started.state == Campaign.State.RUNNING
+    assert started.state == Campaign.State.DISCOVERING
     assert started.discovery_state == Campaign.DiscoveryState.RUNNING
     assert started.settings_snapshot["objective"] == 300
     assert started.settings_snapshot["website_fetcher"] == "fake"
@@ -461,7 +463,7 @@ def test_start_does_not_collide_with_a_preserved_legacy_query_label(
 
     transition_campaign(
         campaign_id=campaign.pk,
-        target_state=Campaign.State.RUNNING,
+        target_state=Campaign.State.DISCOVERING,
         actor=owner,
     )
 
@@ -495,7 +497,7 @@ def test_start_refreshes_and_freezes_the_latest_active_category_rules(
 
     transition_campaign(
         campaign_id=campaign.pk,
-        target_state=Campaign.State.RUNNING,
+        target_state=Campaign.State.DISCOVERING,
         actor=owner,
     )
 
@@ -536,7 +538,7 @@ def test_start_rejects_a_category_that_became_inactive(
     with pytest.raises(ValidationError, match="ya no está activo"):
         transition_campaign(
             campaign_id=campaign.pk,
-            target_state=Campaign.State.RUNNING,
+            target_state=Campaign.State.DISCOVERING,
             actor=owner,
         )
 
@@ -553,7 +555,7 @@ def test_start_rejects_a_category_without_active_rules(
     with pytest.raises(ValidationError, match="reglas Overture activas"):
         transition_campaign(
             campaign_id=campaign.pk,
-            target_state=Campaign.State.RUNNING,
+            target_state=Campaign.State.DISCOVERING,
             actor=owner,
         )
 
@@ -576,7 +578,7 @@ def test_start_backfills_only_a_missing_pre_overture_draft_boundary(
 
     transition_campaign(
         campaign_id=campaign.pk,
-        target_state=Campaign.State.RUNNING,
+        target_state=Campaign.State.DISCOVERING,
         actor=owner,
     )
 
@@ -597,15 +599,21 @@ def test_campaign_pause_resume_discovery_finish_and_complete(
     del private_catalog_dir
     save_business_profile(owner=owner, values=profile_values())
     campaign = make_campaign(owner, make_catalog(owner))
-    transition_campaign(campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner)
+    transition_campaign(
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
+    )
     paused = transition_campaign(
         campaign_id=campaign.pk, target_state=Campaign.State.PAUSED, actor=owner, reason="Revisión"
     )
     assert paused.status_reason == "Revisión"
     resumed = transition_campaign(
-        campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
     )
-    assert resumed.state == Campaign.State.RUNNING
+    assert resumed.state == Campaign.State.DISCOVERING
+    # Delivery can only start once the audience and content are approved.
+    Campaign.objects.filter(pk=campaign.pk).update(
+        state=Campaign.State.RUNNING, approved_at=timezone.now(), approved_by=owner
+    )
     finished = finish_discovery(
         campaign_id=campaign.pk,
         target_state=Campaign.DiscoveryState.EXHAUSTED_RAW_LIMIT,
@@ -617,6 +625,69 @@ def test_campaign_pause_resume_discovery_finish_and_complete(
         campaign_id=campaign.pk, target_state=Campaign.State.COMPLETED, actor=None
     )
     assert completed.finished_at is not None
+
+
+@pytest.mark.django_db
+def test_a_draft_cannot_skip_discovery_and_approval(owner: User, private_catalog_dir: Path) -> None:
+    del private_catalog_dir
+    save_business_profile(owner=owner, values=profile_values())
+    campaign = make_campaign(owner, make_catalog(owner))
+    with pytest.raises(InvalidCampaignTransition, match="Transición inválida"):
+        transition_campaign(
+            campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        )
+    with pytest.raises(InvalidCampaignTransition):
+        resume_campaign(campaign_id=campaign.pk, actor=owner)
+    campaign.refresh_from_db()
+    assert campaign.state == Campaign.State.DRAFT
+    assert campaign.started_at is None
+
+
+@pytest.mark.django_db
+def test_resuming_an_unapproved_paused_campaign_returns_to_discovery(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    save_business_profile(owner=owner, values=profile_values())
+    campaign = make_campaign(owner, make_catalog(owner))
+    transition_campaign(
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
+    )
+    transition_campaign(campaign_id=campaign.pk, target_state=Campaign.State.PAUSED, actor=owner)
+    resumed = resume_campaign(campaign_id=campaign.pk, actor=owner)
+    assert resumed.state == Campaign.State.DISCOVERING
+    assert resumed.approved_at is None
+    with pytest.raises(InvalidCampaignTransition, match="Transición inválida"):
+        transition_campaign(
+            campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        )
+
+
+@pytest.mark.django_db
+def test_resuming_an_approved_paused_campaign_returns_to_running(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    save_business_profile(owner=owner, values=profile_values())
+    campaign = make_campaign(owner, make_catalog(owner))
+    Campaign.objects.filter(pk=campaign.pk).update(
+        state=Campaign.State.RUNNING, approved_at=timezone.now(), approved_by=owner
+    )
+    transition_campaign(campaign_id=campaign.pk, target_state=Campaign.State.PAUSED, actor=owner)
+    resumed = resume_campaign(campaign_id=campaign.pk, actor=owner)
+    assert resumed.state == Campaign.State.RUNNING
+
+
+@pytest.mark.django_db
+def test_resume_is_only_valid_from_paused(owner: User, private_catalog_dir: Path) -> None:
+    del private_catalog_dir
+    save_business_profile(owner=owner, values=profile_values())
+    campaign = make_campaign(owner, make_catalog(owner))
+    transition_campaign(
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
+    )
+    with pytest.raises(InvalidCampaignTransition):
+        resume_campaign(campaign_id=campaign.pk, actor=owner)
 
 
 @pytest.mark.django_db
@@ -642,7 +713,7 @@ def test_invalid_campaign_and_discovery_transitions_are_rejected(
     assert cancelled.state == Campaign.State.CANCELLED
     with pytest.raises(InvalidCampaignTransition):
         transition_campaign(
-            campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+            campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
         )
 
 
@@ -654,7 +725,7 @@ def test_start_rejects_missing_profile_and_live_safety_barriers(
     campaign = make_campaign(owner, make_catalog(owner))
     with pytest.raises(ValidationError, match="perfil comercial"):
         transition_campaign(
-            campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+            campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
         )
     save_business_profile(owner=owner, values=profile_values())
     campaign.delivery_mode = Campaign.DeliveryMode.LIVE
@@ -662,12 +733,12 @@ def test_start_rejects_missing_profile_and_live_safety_barriers(
     with override_settings(SEND_MODE="live", SEND_KILL_SWITCH=True):
         with pytest.raises(ValidationError, match="bloqueado"):
             transition_campaign(
-                campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+                campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
             )
     with override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False):
         with pytest.raises(ValidationError, match="conexión Gmail"):
             transition_campaign(
-                campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+                campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
             )
     campaign.refresh_from_db()
     assert campaign.state == Campaign.State.DRAFT
@@ -688,11 +759,11 @@ def test_review_only_starts_with_global_sending_blocked_and_without_gmail(
     with override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False):
         started = transition_campaign(
             campaign_id=campaign.pk,
-            target_state=Campaign.State.RUNNING,
+            target_state=Campaign.State.DISCOVERING,
             actor=owner,
         )
 
-    assert started.state == Campaign.State.RUNNING
+    assert started.state == Campaign.State.DISCOVERING
     assert started.settings_snapshot["delivery_mode"] == Campaign.DeliveryMode.REVIEW_ONLY
 
 
@@ -705,7 +776,7 @@ def test_start_rejects_tampered_catalog(owner: User, private_catalog_dir: Path) 
         handle.write(b"tampered")
     with pytest.raises(ValidationError, match="integridad"):
         transition_campaign(
-            campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+            campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
         )
 
 
@@ -721,3 +792,22 @@ def test_referenced_category_is_archived_instead_of_deleted(
     assert result == "archived"
     assert category.archived_at is not None
     assert not category.active
+
+
+@pytest.mark.django_db
+def test_a_paused_unapproved_campaign_cannot_be_forced_into_running(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    save_business_profile(owner=owner, values=profile_values())
+    campaign = make_campaign(owner, make_catalog(owner))
+    transition_campaign(
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
+    )
+    transition_campaign(campaign_id=campaign.pk, target_state=Campaign.State.PAUSED, actor=owner)
+    with pytest.raises(InvalidCampaignTransition, match="Aprobá"):
+        transition_campaign(
+            campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        )
+    campaign.refresh_from_db()
+    assert campaign.state == Campaign.State.PAUSED

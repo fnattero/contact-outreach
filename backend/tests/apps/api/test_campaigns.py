@@ -177,3 +177,40 @@ def test_campaign_action_replays_the_persisted_result_for_the_same_key(
     assert second.json() == first.json()
     assert Campaign.objects.get(pk=campaign.pk).state == Campaign.State.CANCELLED
     assert AuditEvent.objects.filter(action="campaign.transitioned").count() == 1
+
+
+@pytest.mark.django_db
+def test_resume_cannot_start_a_draft_without_discovery_and_approval(
+    owner: User,
+    private_catalog_dir,
+) -> None:
+    catalog = create_catalog(
+        name="General",
+        upload=SimpleUploadedFile(
+            "catalog.pdf",
+            b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF",
+            content_type="application/pdf",
+        ),
+        actor=owner,
+    )
+    campaign = Campaign.objects.create(
+        workspace=owner.membership.workspace,
+        name="Campaña sin aprobar",
+        catalog=catalog,
+        created_by=owner,
+    )
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("api-campaign-action", args=(campaign.pk, "resume")),
+        data="{}",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=_csrf(client),
+        HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+    )
+
+    assert response.status_code == 400
+    campaign.refresh_from_db()
+    assert campaign.state == Campaign.State.DRAFT
+    assert campaign.started_at is None

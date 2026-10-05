@@ -33,7 +33,7 @@ from apps.api.schema import SchemaAPIView
 from apps.audit.models import ApiIdempotencyRecord
 from apps.campaigns.approval import approve_campaign, start_per_message_campaign
 from apps.campaigns.models import Campaign, OutboundMessage
-from apps.campaigns.services import create_campaign, transition_campaign
+from apps.campaigns.services import create_campaign, resume_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
 from apps.catalogs.models import Catalog
 from apps.configuration.integrations import runtime_integration_configuration
@@ -483,11 +483,20 @@ class CampaignActionView(SchemaAPIView):
                         transaction.on_commit(lambda: _prepare_review_messages(queued_ids))
                 elif action == "start-approved":
                     campaign = start_per_message_campaign(campaign_id, actor=locked_user)
+                elif action == "resume":
+                    campaign = resume_campaign(
+                        campaign_id=campaign_id,
+                        actor=locked_user,
+                        reason=str(json_object(request).get("reason", "")),
+                    )
+                    if campaign.state == Campaign.State.DISCOVERING:
+                        transaction.on_commit(
+                            lambda: orchestrate_extraction.delay(str(campaign.pk))
+                        )
                 else:
                     targets = {
                         "start-discovery": Campaign.State.DISCOVERING,
                         "pause": Campaign.State.PAUSED,
-                        "resume": Campaign.State.RUNNING,
                         "cancel": Campaign.State.CANCELLED,
                     }
                     campaign = transition_campaign(

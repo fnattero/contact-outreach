@@ -126,7 +126,7 @@ def _campaign(
         zone_ids=[zone.pk],
     )
     return transition_campaign(
-        campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
     )
 
 
@@ -382,7 +382,7 @@ def test_pause_and_cancel_prevent_provider_effects_and_keep_runs_recoverable(
 
     transition_campaign(
         campaign_id=campaign.pk,
-        target_state=Campaign.State.RUNNING,
+        target_state=Campaign.State.DISCOVERING,
         actor=owner,
     )
     completed = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())
