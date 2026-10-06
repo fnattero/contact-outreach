@@ -7,7 +7,6 @@ from django.core.exceptions import ValidationError
 from apps.audit.models import AuditEvent
 from apps.configuration.models import (
     DEFAULT_AUTOMATIC_REPLY_PROMPT,
-    DEFAULT_AUTOMATIC_REPLY_PROMPT,
     DEFAULT_RELEVANCE_CRITERIA,
     BusinessProfile,
     PromptConfiguration,
@@ -16,7 +15,6 @@ from apps.configuration.models import (
     SearchZone,
 )
 from apps.configuration.services import (
-    MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
     MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
     runtime_prompt_configuration,
     save_automatic_reply_prompt,

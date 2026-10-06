@@ -19,6 +19,8 @@ from apps.integrations.contracts import (
     FactRevisionRef,
     JSONResponse,
     JSONTransport,
+    ProspectScreening,
+    ProspectScreeningRequest,
     RateLimitError,
     ReplyClassification,
     ReplyClassificationRequest,
@@ -30,8 +32,11 @@ from apps.integrations.contracts import (
     ValidationProviderError,
 )
 from apps.integrations.llm_inputs import (
+    MAX_SCREENING_REASON_LENGTH,
+    ensure_prospect_screening_input_within_limit,
     ensure_reply_decision_input_within_limit,
     ensure_scheduled_contact_input_within_limit,
+    prospect_screening_messages,
     reply_decision_messages,
     scheduled_contact_messages,
 )
@@ -308,6 +313,43 @@ def parse_analysis_output(
     )
 
 
+PROSPECT_SCREENING_VERDICTS = ("FIT", "UNCLEAR", "UNFIT")
+
+
+class StructuredProspectScreening(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    verdict: str = Field(pattern=f"^({'|'.join(PROSPECT_SCREENING_VERDICTS)})$")
+    reason: str = Field(min_length=1, max_length=MAX_SCREENING_REASON_LENGTH)
+
+
+def prospect_screening_json_schema() -> dict[str, Any]:
+    schema = StructuredProspectScreening.model_json_schema()
+    # `pattern` and `maxLength` are stripped for OpenAI strict mode, so the verdict becomes an
+    # explicit enum and the reason length is enforced only by local validation.
+    schema["properties"]["verdict"] = {
+        "type": "string",
+        "enum": list(PROSPECT_SCREENING_VERDICTS),
+    }
+    return _openai_strict_object_schema(schema)
+
+
+def parse_prospect_screening(value: str | dict[str, Any]) -> ProspectScreening:
+    try:
+        raw = json.loads(value) if isinstance(value, str) else value
+        output = StructuredProspectScreening.model_validate(raw)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise ValidationProviderError(
+            "La evaluación IA del prospecto no cumple el esquema."
+        ) from exc
+    if "\x00" in output.reason:
+        raise ValidationProviderError("La evaluación IA contiene un carácter no permitido.")
+    reason = " ".join(output.reason.split())
+    if not reason:
+        raise ValidationProviderError("La evaluación IA no explica el motivo.")
+    return ProspectScreening(verdict=output.verdict, reason=reason)
+
+
 def reply_classification_json_schema() -> dict[str, Any]:
     schema = StructuredReplyClassification.model_json_schema()
     schema["properties"]["classification"] = {
@@ -561,8 +603,16 @@ def _fake_usable_fact(
 class MockLLMProvider:
     """Deterministic provider with programmable raw outputs for retry tests."""
 
-    def __init__(self, outputs: Sequence[str | dict[str, Any] | Exception] | None = None) -> None:
+    def __init__(
+        self,
+        outputs: Sequence[str | dict[str, Any] | Exception] | None = None,
+        *,
+        screening_outputs: Sequence[str | dict[str, Any] | Exception] | None = None,
+    ) -> None:
         self.outputs = tuple(outputs or ())
+        self.screening_outputs = tuple(screening_outputs or ())
+        self.screening_call_count = 0
+        self.screening_requests: list[ProspectScreeningRequest] = []
         self.call_count = 0
         self.requests: list[AnalysisRequest] = []
         self.decision_requests: list[ReplyDecisionRequest] = []
@@ -602,6 +652,36 @@ class MockLLMProvider:
                 ),
             },
             allowed_evidence_ids=tuple(fact.fact_id for fact in request.facts),
+        )
+
+    def screen_prospect(self, request: ProspectScreeningRequest) -> ProspectScreening:
+        ensure_prospect_screening_input_within_limit(request)
+        self.screening_requests.append(request)
+        current = self.screening_call_count
+        self.screening_call_count += 1
+        if current < len(self.screening_outputs):
+            configured = self.screening_outputs[current]
+            if isinstance(configured, Exception):
+                raise configured
+            return parse_prospect_screening(configured)
+        text = "".join(
+            character
+            for character in unicodedata.normalize(
+                "NFKD", " ".join(fact.value for fact in request.facts).casefold()
+            )
+            if not unicodedata.combining(character)
+        )
+        if "inmobiliaria" in text or "no corresponde" in text:
+            return ProspectScreening(
+                verdict="UNFIT", reason="El rubro declarado no tiene relación con motores."
+            )
+        if not any(fact.fact_id == "web.page.1" for fact in request.facts):
+            return ProspectScreening(
+                verdict="UNCLEAR", reason="Sólo hay nombre y rubro para evaluar."
+            )
+        return ProspectScreening(
+            verdict="FIT",
+            reason="La actividad declarada incluye reparación de equipos con motor.",
         )
 
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification:
@@ -726,6 +806,9 @@ class _StructuredHTTPProvider:
             {"role": "user", "content": request.user_prompt},
         ]
 
+    def screen_prospect(self, request: ProspectScreeningRequest) -> ProspectScreening:
+        raise NotImplementedError
+
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification:
         raise NotImplementedError
 
@@ -736,6 +819,11 @@ class _StructuredHTTPProvider:
         self, request: ScheduledContactDraftRequest
     ) -> ScheduledContactDraftResult:
         raise NotImplementedError
+
+    @staticmethod
+    def _screening_messages(request: ProspectScreeningRequest) -> list[dict[str, str]]:
+        ensure_prospect_screening_input_within_limit(request)
+        return prospect_screening_messages(request)
 
     @staticmethod
     def _classification_messages(request: ReplyClassificationRequest) -> list[dict[str, str]]:
@@ -797,6 +885,24 @@ class OllamaProvider(_StructuredHTTPProvider):
             message["content"],
             allowed_evidence_ids=tuple(fact.fact_id for fact in request.facts),
         )
+
+    def screen_prospect(self, request: ProspectScreeningRequest) -> ProspectScreening:
+        response = self.transport.post_json(
+            url=f"{self.base_url}/api/chat",
+            payload={
+                "model": self.model,
+                "messages": self._screening_messages(request),
+                "stream": False,
+                "format": prospect_screening_json_schema(),
+                "options": {"temperature": 0},
+            },
+            headers={},
+            timeout_seconds=request.timeout_seconds,
+        )
+        message = response.payload.get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise ValidationProviderError("Ollama no devolvió la evaluación del prospecto.")
+        return parse_prospect_screening(message["content"])
 
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification:
         response = self.transport.post_json(
@@ -908,6 +1014,40 @@ class OpenAICompatibleProvider(_StructuredHTTPProvider):
             message["content"],
             allowed_evidence_ids=tuple(fact.fact_id for fact in request.facts),
         )
+
+    def screen_prospect(self, request: ProspectScreeningRequest) -> ProspectScreening:
+        endpoint = (
+            f"{self.base_url}/chat/completions"
+            if self.base_url.endswith("/v1")
+            else f"{self.base_url}/v1/chat/completions"
+        )
+        response = self.transport.post_json(
+            url=endpoint,
+            payload={
+                "model": self.model,
+                "messages": self._screening_messages(request),
+                "temperature": 0,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "prospect_screening",
+                        "strict": True,
+                        "schema": prospect_screening_json_schema(),
+                    },
+                },
+            },
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout_seconds=request.timeout_seconds,
+        )
+        choices = response.payload.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise ValidationProviderError("El proveedor compatible no devolvió choices.")
+        message = choices[0].get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise ValidationProviderError(
+                "El proveedor compatible no devolvió la evaluación del prospecto."
+            )
+        return parse_prospect_screening(message["content"])
 
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification:
         endpoint = (

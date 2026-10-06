@@ -364,7 +364,7 @@ def _relevance_filter_data(*, mode: str, criteria: str, revision: int) -> dict[s
             "criteria_limit": MAX_RELEVANCE_CRITERIA_LENGTH,
             "revision": revision,
         }
-    ).data  # type: ignore[return-value]
+    ).data
 
 
 class RelevanceFilterView(SchemaAPIView):
