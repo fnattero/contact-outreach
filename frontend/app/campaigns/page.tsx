@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge, type SemanticLevel } from "@/components/design-system";
 import { useAuth } from "@/components/auth-provider";
-import { getCampaigns, problemMessage, type DashboardCampaign, type Problem } from "@/lib/api";
+import { can, getCampaigns, problemMessage, type DashboardCampaign, type Problem } from "@/lib/api";
 
 const lifecycle = [
   { value: "DRAFT", label: "Borradores" },
@@ -75,7 +75,7 @@ export default function CampaignsPage() {
       <PageHeader
         title="Campañas"
         description="Audiencias, aprobaciones y entregas de la empresa."
-        primaryAction={session?.role === "ADMIN" ? <Link href="/campaigns/new"><Button type="primary">Nueva campaña</Button></Link> : undefined}
+        primaryAction={can(session, "manage_campaigns") ? <Link href="/campaigns/new"><Button type="primary">Nueva campaña</Button></Link> : undefined}
         filters={(
           <div className="campaign-state-filter">
             <Segmented
@@ -101,13 +101,13 @@ export default function CampaignsPage() {
               { title: "Estado", dataIndex: "state_label", render: (label: string, campaign) => <StatusBadge label={label} level={campaignLevel(campaign.state)} /> },
               { title: "Audiencia", dataIndex: "metrics", render: (metrics: DashboardCampaign["metrics"]) => <span className={metrics ? "data-text" : "campaign-table__restricted"}>{metrics ? metrics.enrollments : "Solo administración"}</span> },
               { title: "Progreso", dataIndex: "discovery_state_label", render: (_label: string, campaign) => <span>{progress(campaign)}</span> },
-              { title: "Próxima acción", dataIndex: "state", render: (state: string) => <span>{nextAction(state, session?.role === "ADMIN")}</span> },
+              { title: "Próxima acción", dataIndex: "state", render: (state: string) => <span>{nextAction(state, can(session, "manage_campaigns"))}</span> },
               { title: "", key: "detail", render: (_value: unknown, campaign) => <Link href={`/campaigns/${campaign.id}`}>Ver detalle</Link> },
             ]}
           />
         </section>
       ) : (
-        <EmptyState headline="Todavía no hay campañas" explanation="Creá la primera campaña para definir audiencia, contenido y calendario." actionLabel={session?.role === "ADMIN" ? "Crear campaña" : "Volver al resumen"} actionHref={session?.role === "ADMIN" ? "/campaigns/new" : "/dashboard"} />
+        <EmptyState headline="Todavía no hay campañas" explanation="Creá la primera campaña para definir audiencia, contenido y calendario." actionLabel={can(session, "manage_campaigns") ? "Crear campaña" : "Volver al resumen"} actionHref={can(session, "manage_campaigns") ? "/campaigns/new" : "/dashboard"} />
       )}
     </>
   );

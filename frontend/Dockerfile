@@ -4,6 +4,15 @@ RUN npm install --global pnpm@11.24.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
+# Quality-gate stage: dependencies plus sources, without running the production build, so
+# `make frontend-check` runs lint, typecheck, tests and the build as explicit, separately
+# reported gates. Sources are COPYd rather than bind-mounted so writes land in the container's
+# own layer; a bind mount of the host checkout is not writable under `cap_drop: ALL`.
+FROM dependencies AS checks
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    CI=true
+COPY . .
+
 FROM dependencies AS builder
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -8,6 +8,7 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Membership
+from apps.audit.models import AuditEvent
 from apps.contacts.models import CommunicationRestriction
 
 
@@ -129,3 +130,50 @@ def test_contact_detail_and_manual_restriction_are_scoped_and_auditable(owner: U
     )
     assert revoked.status_code == 200
     assert revoked.json()["data"]["revoked_at"] is not None
+
+
+def _patch(client: Client, url: str, payload: dict[str, object], csrf: str, etag: str | None):
+    extra = {"HTTP_IF_MATCH": etag} if etag else {}
+    return client.patch(
+        url,
+        data=json.dumps(payload),
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+        **extra,
+    )
+
+
+@pytest.mark.django_db
+def test_renaming_a_contact_is_audited_and_respects_etag_and_capability(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf_token = _csrf(client)
+    created = _post(
+        client,
+        reverse("api-contacts"),
+        {"email": "rename@example.invalid", "organization_name": "Rename Org"},
+        csrf_token,
+    )
+    contact_id = created.json()["data"]["id"]
+    url = reverse("api-contact-detail", args=(contact_id,))
+    etag = client.get(url)["ETag"]
+
+    assert _patch(client, url, {"name": "Nuevo"}, csrf_token, None).status_code == 428
+    assert _patch(client, url, {"name": "Nuevo"}, csrf_token, '"stale"').status_code == 412
+
+    renamed = _patch(client, url, {"name": "  Ana Pérez  "}, csrf_token, etag)
+    assert renamed.status_code == 200, renamed.content
+    assert renamed.json()["data"]["name"] == "Ana Pérez"
+    event = AuditEvent.objects.get(action="contact.renamed")
+    assert event.entity_id == contact_id
+    assert event.actor == owner
+    assert event.before == {"name": ""}
+    assert event.after == {"name": "Ana Pérez"}
+
+    vendor = User.objects.create_user(username="rename-vendor", password="vendor-password-1234")
+    vendor_client = Client(enforce_csrf_checks=True)
+    vendor_client.force_login(vendor)
+    seller_etag = vendor_client.get(url)["ETag"]
+    denied = _patch(vendor_client, url, {"name": "Intruso"}, _csrf(vendor_client), seller_etag)
+    assert denied.status_code == 403
+    assert AuditEvent.objects.filter(action="contact.renamed").count() == 1

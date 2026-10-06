@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 from hashlib import sha256
-from typing import Any, cast
+from typing import Any
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -19,6 +20,9 @@ from rest_framework.response import Response
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.concurrency import add_etag
+from apps.api.errors import raise_domain_error
+from apps.api.pagination import PageQuerySerializer, page_slice
+from apps.api.payloads import json_object
 from apps.api.permissions import (
     ExportDataPermission,
     ManageCampaignsPermission,
@@ -28,13 +32,16 @@ from apps.api.permissions import (
 from apps.api.schema import SchemaAPIView
 from apps.audit.models import ApiIdempotencyRecord
 from apps.campaigns.approval import approve_campaign, start_per_message_campaign
-from apps.campaigns.forms import CampaignForm
 from apps.campaigns.models import Campaign, OutboundMessage
-from apps.campaigns.services import create_campaign, transition_campaign
+from apps.campaigns.services import create_campaign, resume_campaign, transition_campaign
 from apps.campaigns.tasks import orchestrate_extraction
+from apps.catalogs.models import Catalog
 from apps.configuration.integrations import runtime_integration_configuration
+from apps.configuration.models import SearchCategory, SearchZone
 from apps.contacts.models import CampaignEnrollment
 from apps.dashboard.csv_export import csv_download
+from apps.dashboard.queries import prospect_queryset
+from apps.mailbox.tasks import deliver_message_task
 from apps.prospects.models import Prospect
 
 
@@ -45,17 +52,146 @@ class CampaignListQuerySerializer(serializers.Serializer[dict[str, Any]]):
     page_size = serializers.IntegerField(required=False, min_value=1, max_value=100, default=25)
 
 
-def _initial_values(owner_id: int, workspace_id: uuid.UUID | str) -> dict[str, object]:
-    runtime = runtime_integration_configuration(owner_id)
-    initial: dict[str, object] = {
-        "extractor_provider": runtime.extractor_provider,
-        "overture_min_confidence": runtime.overture_min_confidence,
-        "website_fetcher": runtime.website_fetcher,
-        "llm_provider": runtime.llm_provider,
-        "llm_model": runtime.llm_model,
-        "llm_base_url": runtime.llm_base_url(),
-    }
-    return initial
+WEEKDAY_CHOICES = (
+    (0, "Lunes"),
+    (1, "Martes"),
+    (2, "Miércoles"),
+    (3, "Jueves"),
+    (4, "Viernes"),
+    (5, "Sábado"),
+    (6, "Domingo"),
+)
+MAX_CATALOG_BYTES = 15 * 1024 * 1024
+MAX_COMBINED_CATALOG_BYTES = 17 * 1024 * 1024
+
+
+def _selected[ModelT: Any](queryset: QuerySet[ModelT], ids: list[uuid.UUID]) -> list[ModelT] | None:
+    """Return the rows for ``ids`` in queryset order, or None when any id is out of scope."""
+    wanted = set(ids)
+    rows = list(queryset.filter(pk__in=wanted))
+    return rows if len(rows) == len(wanted) else None
+
+
+class CampaignCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    """Validate a campaign draft; the caller's workspace arrives in ``context["workspace"]``.
+
+    Every selectable object is resolved inside that workspace only, so an id belonging to another
+    workspace is indistinguishable from one that does not exist. Provider fields are deliberately
+    absent: they always come from the workspace's integration configuration, never the client.
+    """
+
+    name = serializers.CharField(max_length=200)
+    delivery_mode = serializers.ChoiceField(choices=Campaign.DeliveryMode.choices)
+    approval_mode = serializers.ChoiceField(choices=Campaign.ApprovalMode.choices)
+    confirm_live = serializers.BooleanField(default=False)
+    reminder_enabled = serializers.BooleanField(default=False)
+    reminder_delay_days = serializers.IntegerField(min_value=1, max_value=32767)
+    location_text = serializers.CharField(max_length=300)
+    objective = serializers.IntegerField(min_value=1)
+    max_raw_records = serializers.IntegerField(min_value=1)
+    overture_min_confidence = serializers.DecimalField(
+        max_digits=4, decimal_places=3, min_value=Decimal(0), max_value=Decimal(1)
+    )
+    daily_limit = serializers.IntegerField(min_value=1)
+    message_interval_minutes = serializers.IntegerField(min_value=1)
+    weekdays = serializers.ListField(
+        child=serializers.ChoiceField(choices=WEEKDAY_CHOICES), allow_empty=False
+    )
+    window_start = serializers.TimeField()
+    window_end = serializers.TimeField()
+    timezone_name = serializers.CharField(max_length=64)
+    categories = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
+    zones = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
+    provinces = serializers.ListField(child=serializers.UUIDField(), required=False, default=list)
+    catalogs = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        workspace = self.context["workspace"]
+        errors: dict[str, list[str]] = {}
+
+        def fail(field: str, message: str) -> None:
+            errors.setdefault(field, []).append(message)
+
+        categories = _selected(
+            SearchCategory.objects.filter(
+                workspace=workspace, active=True, archived_at__isnull=True
+            ).order_by("sort_order", "name"),
+            attrs["categories"],
+        )
+        if categories is None:
+            fail("categories", "Alguno de los rubros seleccionados no está disponible.")
+        zones = _selected(
+            SearchZone.objects.filter(
+                workspace=workspace,
+                active=True,
+                selectable=True,
+                level__in=(SearchZone.Level.DISTRICT, SearchZone.Level.NEIGHBORHOOD),
+                archived_at__isnull=True,
+            )
+            .select_related("parent")
+            .order_by("province_name", "sort_order", "name"),
+            attrs["zones"],
+        )
+        if zones is None:
+            fail("zones", "Alguno de los distritos seleccionados no está disponible.")
+        provinces = _selected(
+            SearchZone.objects.filter(
+                workspace=workspace,
+                level=SearchZone.Level.PROVINCE,
+                active=True,
+                archived_at__isnull=True,
+            ).order_by("name"),
+            attrs["provinces"],
+        )
+        if provinces is None:
+            fail("provinces", "Alguna de las provincias seleccionadas no está disponible.")
+        catalogs = _selected(
+            Catalog.objects.filter(workspace=workspace, active=True, missing=False).order_by(
+                "name", "-version"
+            ),
+            attrs["catalogs"],
+        )
+        if catalogs is None:
+            fail("catalogs", "Alguno de los PDF seleccionados no está disponible.")
+        else:
+            if any(item.byte_size > MAX_CATALOG_BYTES for item in catalogs):
+                fail("catalogs", "Cada PDF debe pesar como máximo 15 MiB.")
+            if sum(item.byte_size for item in catalogs) > MAX_COMBINED_CATALOG_BYTES:
+                fail("catalogs", "Los PDFs seleccionados superan el límite combinado de 17 MiB.")
+
+        if zones is not None and provinces is not None:
+            if any(zone.parent_id is not None for zone in zones) and not provinces:
+                fail("provinces", "Elegí la provincia de los distritos seleccionados.")
+            if provinces:
+                province_ids = {province.pk for province in provinces}
+                if any(
+                    zone.parent_id is not None and zone.parent_id not in province_ids
+                    for zone in zones
+                ):
+                    fail(
+                        "zones",
+                        "Hay distritos elegidos dentro de una provincia que no está seleccionada.",
+                    )
+                if any(
+                    not any(zone.parent_id == province.pk for zone in zones)
+                    for province in provinces
+                ):
+                    fail("zones", "Elegí al menos un distrito en cada provincia seleccionada.")
+        if attrs["delivery_mode"] == Campaign.DeliveryMode.LIVE and not attrs["confirm_live"]:
+            fail("confirm_live", "Confirmá explícitamente antes de habilitar el modo en vivo.")
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        assert categories is not None and zones is not None and catalogs is not None
+        attrs.update(
+            weekdays=[int(day) for day in attrs["weekdays"]],
+            categories=categories,
+            zones=zones,
+            provinces=provinces,
+            catalogs=catalogs,
+            catalog=catalogs[0],
+        )
+        return attrs
 
 
 def _page(
@@ -205,22 +341,10 @@ class CampaignListView(SchemaAPIView):
             raise PermissionDenied
         user = authenticated_user(request)
         workspace = workspace_for_user(user, Capability.MANAGE_CAMPAIGNS)
-        form = CampaignForm(
-            data=request.data,
-            initial=_initial_values(user.pk, workspace.pk),
-            workspace=workspace,
-        )
-        for field_name in (
-            "extractor_provider",
-            "website_fetcher",
-            "llm_provider",
-            "llm_model",
-            "llm_base_url",
-        ):
-            form.fields[field_name].disabled = True
-        if not form.is_valid():
-            raise serializers.ValidationError(form.errors.get_json_data())
-        cleaned = form.cleaned_data
+        serializer = CampaignCreateSerializer(data=request.data, context={"workspace": workspace})
+        serializer.is_valid(raise_exception=True)
+        cleaned = serializer.validated_data
+        runtime = runtime_integration_configuration(user.pk)
         values = {
             field: cleaned[field]
             for field in (
@@ -239,14 +363,16 @@ class CampaignListView(SchemaAPIView):
                 "window_start",
                 "window_end",
                 "timezone_name",
-                "extractor_provider",
-                "website_fetcher",
-                "llm_provider",
-                "llm_base_url",
-                "llm_model",
                 "catalog",
             )
         }
+        values.update(
+            extractor_provider=runtime.extractor_provider,
+            website_fetcher=runtime.website_fetcher,
+            llm_provider=runtime.llm_provider,
+            llm_base_url=runtime.llm_base_url(),
+            llm_model=runtime.llm_model,
+        )
         try:
             campaign = create_campaign(
                 actor=user,
@@ -256,7 +382,7 @@ class CampaignListView(SchemaAPIView):
                 catalog_ids=[item.pk for item in cleaned["catalogs"]],
             )
         except ValidationError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+            raise_domain_error(exc)
         return Response(
             {"data": _campaign_data(campaign, include_admin=True)},
             status=status.HTTP_201_CREATED,
@@ -291,8 +417,15 @@ class CampaignDetailView(SchemaAPIView):
         )
 
 
+def _prepare_review_messages(message_ids: list[str]) -> None:
+    for message_id in message_ids:
+        deliver_message_task.delay(message_id)
+
+
 class CampaignActionView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    # Approval is additionally gated by APPROVE_CAMPAIGNS inside post(); both capabilities are
+    # held by ADMIN only today.
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
 
     allowed_actions = frozenset(
         {"start-discovery", "approve", "start-approved", "pause", "resume", "cancel"}
@@ -337,27 +470,49 @@ class CampaignActionView(SchemaAPIView):
             try:
                 if action == "approve":
                     campaign = approve_campaign(campaign_id, actor=locked_user)
+                    if campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY:
+                        # Review-only messages are prepared (never sent) by the delivery task, so
+                        # without this they would sit in QUEUED and never become reviewable.
+                        queued_ids = [
+                            str(pk)
+                            for pk in campaign.messages.filter(
+                                kind=OutboundMessage.Kind.INITIAL,
+                                state=OutboundMessage.State.QUEUED,
+                            ).values_list("pk", flat=True)
+                        ]
+                        transaction.on_commit(lambda: _prepare_review_messages(queued_ids))
                 elif action == "start-approved":
                     campaign = start_per_message_campaign(campaign_id, actor=locked_user)
+                elif action == "resume":
+                    campaign = resume_campaign(
+                        campaign_id=campaign_id,
+                        actor=locked_user,
+                        reason=str(json_object(request).get("reason", "")),
+                    )
+                    if campaign.state == Campaign.State.DISCOVERING:
+                        transaction.on_commit(
+                            lambda: orchestrate_extraction.delay(str(campaign.pk))
+                        )
                 else:
                     targets = {
                         "start-discovery": Campaign.State.DISCOVERING,
                         "pause": Campaign.State.PAUSED,
-                        "resume": Campaign.State.RUNNING,
                         "cancel": Campaign.State.CANCELLED,
                     }
                     campaign = transition_campaign(
                         campaign_id=campaign_id,
                         target_state=targets[action],
                         actor=locked_user,
-                        reason=str(cast(dict[str, Any], request.data).get("reason", "")),
+                        reason=str(json_object(request).get("reason", "")),
                     )
                     if action == "start-discovery":
                         transaction.on_commit(
                             lambda: orchestrate_extraction.delay(str(campaign.pk))
                         )
-            except (Campaign.DoesNotExist, ValidationError) as exc:
-                raise serializers.ValidationError(str(exc)) from exc
+            except Campaign.DoesNotExist as exc:
+                raise serializers.ValidationError({"campaign_id": "La campaña no existe."}) from exc
+            except ValidationError as exc:
+                raise_domain_error(exc)
             body = {"data": _campaign_data(campaign, include_admin=True)}
             ApiIdempotencyRecord.objects.create(
                 user=locked_user,
@@ -512,16 +667,112 @@ class CampaignProspectListView(SchemaAPIView):
         )
 
 
+def _mapping(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _provenance_data(prospect: Prospect) -> dict[str, object] | None:
+    """Where this record came from, plus the attribution and licences its data carries.
+
+    Returns None for records that carry no Overture provenance (fake or older campaigns).
+    """
+    data = _mapping(prospect.provider_data)
+    campaign_snapshot = prospect.campaign.overture_snapshot
+    dataset = _mapping(data.get("snapshot"))
+    zone = _mapping(data.get("zone"))
+    provenance = _mapping(data.get("provenance"))
+    if campaign_snapshot is None and not dataset and not data.get("overture_id"):
+        return None
+    licenses = provenance.get("source_licenses") or dataset.get("source_licenses") or []
+    attribution = list(
+        dict.fromkeys(
+            str(value) for value in (dataset.get("attribution"), zone.get("attribution")) if value
+        )
+    )
+    rule = _mapping(data.get("matched_rule"))
+    email = next((item for item in prospect.emails.all() if item.is_primary), None)
+    return {
+        "release_id": (
+            campaign_snapshot.release_id if campaign_snapshot else dataset.get("release_id")
+        ),
+        "overture_id": data.get("overture_id") or None,
+        "confidence": data.get("confidence") or None,
+        "matched_rule": (
+            {
+                "taxonomy_code": str(rule.get("taxonomy_code") or ""),
+                "name_terms": [str(term) for term in rule.get("name_terms") or []],
+            }
+            if rule
+            else None
+        ),
+        "contact_source": (
+            {
+                "email": email.normalized_email,
+                "source": email.source,
+                "source_url": email.source_url or None,
+            }
+            if email
+            else None
+        ),
+        "attribution": attribution,
+        "licenses": [str(item) for item in licenses] if isinstance(licenses, list) else [],
+    }
+
+
+class ProspectListQuerySerializer(PageQuerySerializer):
+    campaign = serializers.UUIDField(required=False)
+    state = serializers.ChoiceField(required=False, choices=Prospect.PipelineState.choices)
+    category = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    neighborhood = serializers.CharField(required=False, allow_blank=True, max_length=150)
+
+
+class ProspectListView(SchemaAPIView):
+    """Prospects across every campaign, with the same filters the export honours."""
+
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
+
+    def get(self, request: Request) -> Response:
+        query = ProspectListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        values = query.validated_data
+        workspace = workspace_for_user(authenticated_user(request), Capability.MANAGE_CAMPAIGNS)
+        prospects = prospect_queryset(request.query_params).filter(campaign__workspace=workspace)
+        rows, meta = page_slice(prospects, page=values["page"], page_size=values["page_size"])
+        return Response(
+            {
+                "data": [
+                    {
+                        "id": str(item.pk),
+                        "name": item.name,
+                        "address": item.address,
+                        "neighborhood": item.neighborhood,
+                        "category": item.category,
+                        "website": item.website,
+                        "pipeline_state": item.pipeline_state,
+                        "pipeline_state_label": item.get_pipeline_state_display(),
+                        "primary_email": getattr(item, "primary_email", None),
+                        # Only campaigns that predate fixed-message outreach carry a score.
+                        "historical_score": getattr(item, "latest_score", None),
+                        "campaign": {"id": str(item.campaign_id), "name": item.campaign.name},
+                        "provenance": _provenance_data(item),
+                        "created_at": item.created_at,
+                    }
+                    for item in rows
+                ],
+                "meta": meta,
+            }
+        )
+
+
 class ProspectExportView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ExportDataPermission)
 
     def get(self, request: Request) -> HttpResponse:
         workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
-        prospects = (
-            Prospect.objects.filter(campaign__workspace=workspace)
-            .select_related("campaign")
-            .prefetch_related("emails")
-        )
+        # The same filters as the list view, so "export" downloads what the screen is showing.
+        query = ProspectListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        prospects = prospect_queryset(request.query_params).filter(campaign__workspace=workspace)
         return csv_download(
             filename="prospectos.csv",
             headers=("campaña", "prospecto", "email", "rubro", "barrio", "estado"),

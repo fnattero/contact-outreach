@@ -29,6 +29,20 @@ class AutomationConfigurationSerializer(serializers.Serializer[dict[str, object]
     live_enabled_by = serializers.CharField(allow_null=True)
 
 
+LIVE_CONFIRMATION_WORD = "CONFIRMAR"
+
+
+class LiveConfirmationSerializer(serializers.Serializer[dict[str, object]]):
+    confirmation = serializers.CharField(max_length=40)
+
+    def validate_confirmation(self, value: str) -> str:
+        if value != LIVE_CONFIRMATION_WORD:
+            raise serializers.ValidationError(
+                f"Escribí {LIVE_CONFIRMATION_WORD} para activar las respuestas automáticas."
+            )
+        return value
+
+
 class WritingInstructionsSerializer(serializers.Serializer[dict[str, object]]):
     automatic_reply_prompt = serializers.CharField(max_length=4000)
 
@@ -52,7 +66,11 @@ class AutomationConfigurationView(SchemaAPIView):
 
     def get(self, request: Request) -> Response:
         workspace = authenticated_user(request).membership.workspace
-        configuration, _ = ReplyAutomationConfiguration.objects.get_or_create(workspace=workspace)
+        # A read must not write: a workspace without a row reports the defaults (SHADOW) and the
+        # row is created by the first mode change.
+        configuration = ReplyAutomationConfiguration.objects.filter(
+            workspace=workspace
+        ).first() or ReplyAutomationConfiguration(workspace=workspace)
         return Response(
             {"data": AutomationConfigurationSerializer(_configuration_data(configuration)).data}
         )
@@ -79,7 +97,7 @@ class AutomationConfigurationView(SchemaAPIView):
 
 
 class AutomationLiveActionView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ManageAutomationPermission)
 
     def post(self, request: Request, action: str) -> Response:
         actor = authenticated_user(request)
@@ -92,6 +110,7 @@ class AutomationLiveActionView(SchemaAPIView):
                     raise ApiPermissionDenied(
                         "Volvé a ingresar tu contraseña antes de activar respuestas."
                     )
+                LiveConfirmationSerializer(data=request.data).is_valid(raise_exception=True)
                 configuration = set_live_mode(
                     workspace=workspace,
                     actor=actor,
@@ -112,7 +131,9 @@ class AutomationLiveActionView(SchemaAPIView):
 
 
 class WritingInstructionsView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    # The approved automatic-reply prompt is administrative configuration: reading it needs the
+    # same capability as editing it. Without this, any authenticated seller could read it.
+    permission_classes = (IsAuthenticated, ManageAutomationPermission)
 
     def get(self, request: Request) -> Response:
         runtime = runtime_prompt_configuration(authenticated_user(request).pk)

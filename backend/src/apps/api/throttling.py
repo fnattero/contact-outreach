@@ -58,6 +58,9 @@ class ApiRateThrottle(SimpleRateThrottle):
             return str(getattr(settings, "API_PUBLIC_THROTTLE_RATE", "30/h"))
         if path.endswith("/auth/login/"):
             return str(getattr(settings, "API_SENSITIVE_THROTTLE_RATE", "10/h"))
+        if path.endswith("/auth/reauthenticate/"):
+            # Password confirmation guards credential changes, so guessing must stay expensive.
+            return str(getattr(settings, "API_REAUTH_THROTTLE_RATE", "5/5m"))
         if path.endswith(".csv") or path.endswith("/export.csv"):
             return str(getattr(settings, "API_EXPORT_THROTTLE_RATE", "5/h"))
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
@@ -78,9 +81,11 @@ class ApiRateThrottle(SimpleRateThrottle):
             identity = f"user:{user.pk}"
         else:
             identity = f"ip:{canonical_client_ip(dict(request.META))}"
+        # Every rate class (read, export, reauthentication...) keeps its own history. Sharing one
+        # history would apply a strict limit such as 5/hour to all of the caller's requests.
         digest = salted_hmac(
             "contact_outreach.api_throttle",
-            identity,
+            f"{identity}|{self.rate}",
             secret=settings.SECRET_KEY,
             algorithm="sha256",
         ).hexdigest()

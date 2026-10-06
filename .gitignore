@@ -64,6 +64,7 @@ dist/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.test-private/
 .hypothesis/
 .tox/
 .nox/

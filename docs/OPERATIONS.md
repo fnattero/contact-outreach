@@ -127,3 +127,20 @@ nuevas fallan el preflight hasta tener una partición READY que cubra esa provin
 4. Confirmar/subir límites GeoJSON y sincronizar la última versión Overture desde el dashboard.
 5. Revisar cobertura/hashes, conteos, contactos, fuentes, licencias, notices, atribución y health.
 6. Ejecutar una campaña pequeña `REVIEW_ONLY` e inspeccionar todos los emails antes de ampliar uso.
+
+## 9. Verificación antes de habilitar envío real
+
+Antes de pasar `SEND_MODE` a `live` o de habilitar respuestas automáticas, correr y revisar:
+
+```bash
+make check
+make test-e2e
+make security-check
+git diff --check
+rg -n --hidden -g '!.git/**' -g '!.env' '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[0-9A-Za-z]{20,}|sk-[0-9A-Za-z]{20,})' .
+rg -n 'FR-[0-9]+|DM-[0-9]+|SEC|OPS|QA' docs/
+```
+
+Revisar además `git status --short`, `.env.example`, los logs y el backup cifrado. Los placeholders de
+documentación no son credenciales. Con todos los kill switches activos, ejecutar un backup y un
+restore completos y confirmar que `verify_restore` descifra los secretos.

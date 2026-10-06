@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import ManageIntegrationsPermission, authenticated_user
 from apps.api.schema import SchemaAPIView
 from apps.integrations.contracts import ProviderError
@@ -53,6 +54,9 @@ def _connection_data(connection: GmailConnection | None) -> dict[str, object]:
         else None,
         "error": connection.error or None,
     }
+
+
+_NOT_CONNECTED = "Todavía no hay una cuenta de Gmail conectada."
 
 
 def _redirect_uri(request: Request) -> str:
@@ -141,7 +145,12 @@ class GmailTestView(SchemaAPIView):
         owner = cast(User, request.user)
         try:
             connection = test_gmail_connection(owner=owner)
-        except (GmailConnection.DoesNotExist, ValidationError, ProviderError) as exc:
+        except GmailConnection.DoesNotExist as exc:
+            raise serializers.ValidationError({"detail": _NOT_CONNECTED}) from exc
+        except ValidationError as exc:
+            raise_domain_error(exc)
+        except ProviderError as exc:
+            # Provider errors stay generic: they can carry details that are not meant for the UI.
             raise serializers.ValidationError(str(exc)) from exc
         return Response(
             {"data": {"status": "tested", "email": connection.email}},
@@ -155,6 +164,8 @@ class GmailDisconnectView(SchemaAPIView):
     def post(self, request: Request) -> Response:
         try:
             connection = disconnect_gmail(owner=authenticated_user(request))
-        except (GmailConnection.DoesNotExist, ValidationError) as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except GmailConnection.DoesNotExist as exc:
+            raise serializers.ValidationError({"detail": _NOT_CONNECTED}) from exc
+        except ValidationError as exc:
+            raise_domain_error(exc)
         return Response({"data": _connection_data(connection)})

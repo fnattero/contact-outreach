@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/design-system/states";
-import { getAuditEvents, problemMessage, type AuditEvent, type Problem } from "@/lib/api";
+import { can, getAuditEvents, problemMessage, type AuditEvent, type Problem } from "@/lib/api";
 
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Argentina/Buenos_Aires" });
 const actionLabels: Record<string, string> = {
@@ -20,8 +20,47 @@ const actionLabels: Record<string, string> = {
   "gmail.disconnected": "Desconectó Gmail",
   "message.approved_for_delivery": "Aprobó un mensaje",
   "message.sent": "Envió un mensaje",
+  "campaign.checked": "Campaña verificada",
+  "campaign.created": "Campaña creada",
+  "campaign.discovery_finished": "Descubrimiento finalizado",
+  "campaign.legacy_boundaries_refreshed": "Límites anteriores actualizados",
+  "campaign.outdated_analyses_regeneration_requested": "Reanálisis solicitado",
+  "campaign.transitioned": "Estado de campaña actualizado",
+  "contact.renamed": "Contacto renombrado",
+  "extraction.run_created": "Ejecución de extracción creada",
+  "extraction.run_failed": "Ejecución de extracción fallida",
+  "extraction.run_succeeded": "Ejecución de extracción completada",
+  "gmail.manual_reply_authorized": "Respuesta manual autorizada",
+  "gmail.reply_imported": "Respuesta de Gmail importada",
+  "gmail.sync_baseline_initialized": "Punto inicial de Gmail registrado",
+  "gmail.sync_failed": "Sincronización de Gmail fallida",
+  "gmail.synced": "Gmail sincronizado",
+  "gmail.test_sent": "Prueba de Gmail enviada",
+  "integration_configuration.saved": "Integraciones guardadas",
+  "message.draft_edited": "Borrador de correo editado",
+  "message.dry_run_completed": "Simulación de correo completada",
+  "message.retry_requested": "Reintento de correo solicitado",
+  "message.review_ready": "Correo listo para revisar",
+  "overture.sync_queued": "Sincronización de Overture encolada",
+  "prospect.analysis_failed": "Análisis de prospecto fallido",
+  "prospect.analysis_retry_deferred": "Reintento de análisis programado",
+  "prospect.analyzed": "Prospecto analizado",
+  "prospect.email_found": "Correo del prospecto encontrado",
+  "prospect.enriched": "Prospecto enriquecido",
+  "prospect.regeneration_requested": "Regeneración de prospecto solicitada",
+  "prospect.website_snapshotted": "Lectura del sitio guardada",
+  "suppression.created": "Supresión creada",
+  "suppression.upgraded": "Supresión actualizada",
+  "searchcategory.archived": "Rubro archivado",
+  "searchcategory.deleted": "Rubro eliminado",
+  "searchcategory.saved": "Rubro guardado",
+  "searchcategory.toggled": "Estado del rubro actualizado",
+  "searchzone.archived": "Zona archivada",
+  "searchzone.deleted": "Zona eliminada",
+  "searchzone.saved": "Zona guardada",
+  "searchzone.toggled": "Estado de la zona actualizado",
 };
-const entityLabels: Record<string, string> = { User: "Usuario", Campaign: "Campaña", Catalog: "Catálogo", OutboundMessage: "Mensaje", Workspace: "Espacio de trabajo" };
+const entityLabels: Record<string, string> = { User: "Usuario", Campaign: "Campaña", Catalog: "Catálogo", OutboundMessage: "Mensaje", Workspace: "Espacio de trabajo", "GmailConnection": "Conexión de Gmail", "OvertureRelease": "Versión de Overture", "Prospect": "Prospecto", "SearchCategory": "Rubro", "SearchRun": "Ejecución de extracción", "SearchZone": "Zona", "SuppressionEntry": "Supresión" };
 
 function actionLabel(action: string): string { return actionLabels[action] ?? "Registró una acción"; }
 function entityLabel(entity: string): string { return entityLabels[entity] ?? "Recurso"; }
@@ -44,7 +83,7 @@ export default function AuditPage() {
     return (!actorFilter || (event.actor ?? "Sistema").toLowerCase().includes(actorFilter.toLowerCase())) && (!actionFilter || event.action === actionFilter) && (!targetFilter || event.entity_type === targetFilter) && (!dateRange || (date >= dateRange[0] && date <= dateRange[1]));
   }), [events, actorFilter, actionFilter, targetFilter, dateRange]);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para ver auditoría." }} />;
+  if (!can(session, "view_audit")) return <AuthError error={{ detail: "No tenés permisos para ver auditoría." }} />;
   if (loading) return <LoadingState layout="list" />;
   if (error) return <ErrorState failed="No se pudo cargar la auditoría" instruction={problemMessage(error as Problem)} onRetry={() => { setLoading(true); setError(null); void getAuditEvents().then((response) => setEvents(response.data)).catch(setError).finally(() => setLoading(false)); }} />;
 

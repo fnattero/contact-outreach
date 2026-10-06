@@ -146,40 +146,13 @@ def test_tampered_or_missing_catalog_download_returns_controlled_unavailable_res
     with open(catalog.file.path, "ab") as handle:
         handle.write(b"tampered")
 
-    tampered = client.get(reverse("catalog-download", args=(catalog.pk,)))
+    tampered = client.get(reverse("api-catalog-download", args=(catalog.pk,)))
 
+    # A catalog whose bytes no longer match the stored hash is never served.
     assert tampered.status_code == 404
-    assert "no disponible" in tampered.content.decode()
+    assert tampered.json()["code"] == "not_found"
+    assert b"%PDF" not in tampered.content
 
     Path(catalog.file.path).unlink()
-    missing = client.get(reverse("catalog-download", args=(catalog.pk,)))
+    missing = client.get(reverse("api-catalog-download", args=(catalog.pk,)))
     assert missing.status_code == 404
-
-
-@pytest.mark.django_db
-def test_catalog_upload_and_authenticated_download_views(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    assert client.get(reverse("catalogs")).status_code == 302
-    client.force_login(owner)
-    response = client.post(reverse("catalogs"), {"name": "Web", "file": pdf_upload(name="web.pdf")})
-    assert response.status_code == 302
-    catalog = Catalog.objects.get(name="Web")
-    download = client.get(reverse("catalog-download", args=(catalog.pk,)))
-    assert download.status_code == 200
-    assert download["Content-Type"] == "application/pdf"
-    assert b"".join(download.streaming_content).startswith(b"%PDF-")
-
-
-@pytest.mark.django_db
-def test_catalog_view_shows_validation_error(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    client.force_login(owner)
-    response = client.post(
-        reverse("catalogs"), {"name": "Falso", "file": pdf_upload(content=b"fake")}
-    )
-    assert response.status_code == 200
-    assert "tipo de archivo detectado" in response.content.decode()

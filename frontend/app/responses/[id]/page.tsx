@@ -4,6 +4,7 @@ import { Alert, Button, Card, Empty, Flex, Form, Input, Skeleton, Tag, Typograph
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
+import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
 import { getInboundThread, problemMessage, sendManualReply, type InboundThread, type Problem } from "@/lib/api";
 
 export default function ResponseThreadPage() {
@@ -12,6 +13,7 @@ export default function ResponseThreadPage() {
   const [thread, setThread] = useState<InboundThread | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [replyBusy, setReplyBusy] = useState(false);
+  const [pendingReply, setPendingReply] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,11 +34,12 @@ export default function ResponseThreadPage() {
 
   const canReply = session?.capabilities.includes("send_replies") ?? false;
 
-  async function submitReply(values: { body_text: string }) {
+  async function submitReply(bodyText: string) {
     setReplyBusy(true);
     try {
-      await sendManualReply(params.id, values.body_text, crypto.randomUUID());
+      await sendManualReply(params.id, bodyText, crypto.randomUUID());
       message.success("Respuesta autorizada y encolada para Gmail.");
+      setPendingReply(null);
       setThread(await getInboundThread(params.id));
     } catch (replyError) {
       message.error(problemMessage((replyError as Problem) ?? {}));
@@ -66,7 +69,7 @@ export default function ResponseThreadPage() {
             description="El backend volverá a comprobar la conversación, las restricciones y los bloqueos antes de encolar el envío."
             style={{ marginBottom: 16 }}
           />
-          <Form layout="vertical" onFinish={(values) => void submitReply(values)}>
+          <Form layout="vertical" onFinish={(values: { body_text: string }) => setPendingReply(values.body_text)}>
             <Form.Item
               name="body_text"
               label="Texto de la respuesta"
@@ -75,10 +78,25 @@ export default function ResponseThreadPage() {
               <Input.TextArea rows={6} showCount maxLength={10000} />
             </Form.Item>
             <Button type="primary" htmlType="submit" loading={replyBusy}>
-              Autorizar respuesta
+              Revisar y autorizar
             </Button>
           </Form>
         </Card>
+      ) : null}
+      {pendingReply !== null ? (
+        <ConfirmDangerModal
+          open
+          title="Autorizar respuesta"
+          consequences={[
+            "El mensaje se enviará desde Gmail al contacto y no se puede retirar.",
+            "Antes de enviar se vuelven a comprobar las restricciones, la conversación y las tareas abiertas.",
+          ]}
+          confirmationWord="CONFIRMAR"
+          dangerLabel="Autorizar y enviar"
+          confirming={replyBusy}
+          onCancel={() => setPendingReply(null)}
+          onConfirm={() => void submitReply(pendingReply)}
+        />
       ) : null}
     </Flex>
   );

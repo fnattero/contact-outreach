@@ -5,17 +5,12 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import timedelta
 
-from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
-from django.db import models, transaction
-from django.db.models import OuterRef, QuerySet, Subquery
+from django.db import transaction
 from django.utils import timezone
 
-from apps.accounts.permissions import Capability, require_user_capability
 from apps.campaigns.models import Campaign, SearchRun
-from apps.campaigns.services import PROMPT_VERSION, SCHEMA_VERSION
 from apps.prospects.exceptions import ProspectPipelineInactive, StaleProspectAnalysis
-from apps.prospects.models import AIAnalysis, Prospect
+from apps.prospects.models import Prospect
 
 RESERVATION_TTL = timedelta(minutes=5)
 
@@ -35,34 +30,6 @@ def _campaign_allows_work(campaign: Campaign, *, manual: bool) -> bool:
             and campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY
         )
     return campaign.state in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}
-
-
-def outdated_analysis_candidates(campaign: Campaign) -> QuerySet[Prospect]:
-    latest = AIAnalysis.objects.filter(prospect=OuterRef("pk")).order_by("-analyzed_at")
-    return (
-        Prospect.objects.filter(
-            campaign=campaign,
-            pipeline_state__in=(
-                Prospect.PipelineState.ERROR,
-                Prospect.PipelineState.SKIPPED_IRRELEVANT,
-            ),
-        )
-        .annotate(
-            latest_analysis_status=Subquery(latest.values("status")[:1]),
-            latest_analysis_score=Subquery(latest.values("relevance_score")[:1]),
-            latest_prompt_version=Subquery(latest.values("prompt_version")[:1]),
-            latest_schema_version=Subquery(latest.values("schema_version")[:1]),
-        )
-        .filter(
-            models.Q(latest_analysis_status=AIAnalysis.Status.ERROR)
-            | models.Q(latest_analysis_score__gt=0, latest_analysis_score__lt=10)
-        )
-        .filter(
-            ~models.Q(latest_prompt_version__startswith=PROMPT_VERSION)
-            | ~models.Q(latest_schema_version=SCHEMA_VERSION)
-        )
-        .order_by("created_at")
-    )
 
 
 @transaction.atomic
@@ -199,43 +166,3 @@ def defer_prospect_pipeline(
         )
     )
     return next_token
-
-
-@transaction.atomic
-def request_manual_regeneration(
-    *,
-    prospect_id: uuid.UUID | str,
-    actor: User,
-) -> PipelineReservation:
-    prospect = (
-        Prospect.objects.select_for_update()
-        .select_related("campaign", "campaign__workspace")
-        .get(pk=prospect_id)
-    )
-    require_user_capability(
-        actor,
-        Capability.MANAGE_CAMPAIGNS,
-        workspace_id=prospect.campaign.workspace_id,
-    )
-    raise ValidationError(
-        "Los análisis anteriores se conservan como historial de solo lectura. "
-        "Las campañas nuevas usan el mensaje fijo y no regeneran contenido con IA."
-    )
-
-
-@transaction.atomic
-def request_outdated_analysis_regenerations(
-    *,
-    campaign_id: uuid.UUID | str,
-    actor: User,
-) -> tuple[PipelineReservation, ...]:
-    campaign = Campaign.objects.select_for_update().select_related("workspace").get(pk=campaign_id)
-    require_user_capability(
-        actor,
-        Capability.MANAGE_CAMPAIGNS,
-        workspace_id=campaign.workspace_id,
-    )
-    raise ValidationError(
-        "Los análisis anteriores se conservan como historial de solo lectura. "
-        "No se vuelven a analizar ni a enviar."
-    )

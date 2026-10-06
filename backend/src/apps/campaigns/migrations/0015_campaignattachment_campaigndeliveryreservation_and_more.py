@@ -138,7 +138,7 @@ class Migration(migrations.Migration):
             model_name="campaign",
             name="initial_body_snapshot",
             field=models.TextField(
-                default="Buen día:\n\nNos ponemos en contacto para acercarle nuestra propuesta de carbones para motores y compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para motores y herramientas eléctricas. Si le resulta de interés, puede responder este correo y con gusto ampliaremos la información.\n\nSaludos."
+                default="Buen día:\n\nNos ponemos en contacto para acercarle nuestra propuesta de componentes industriales y compartir nuestros catálogos. Trabajamos con distintas medidas y aplicaciones para equipos y herramientas eléctricas. Si le resulta de interés, puede responder este correo y con gusto ampliaremos la información.\n\nSaludos."
             ),
         ),
         migrations.AddField(

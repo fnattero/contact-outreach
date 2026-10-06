@@ -17,7 +17,13 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.api.mailbox import _outbound_data
-from apps.api.permissions import ViewAuditPermission, ViewJobsPermission, authenticated_user
+from apps.api.payloads import json_object
+from apps.api.permissions import (
+    RetryJobsPermission,
+    ViewAuditPermission,
+    ViewJobsPermission,
+    authenticated_user,
+)
 from apps.api.schema import SchemaAPIView
 from apps.audit.models import ApiIdempotencyRecord, AuditEvent, BackgroundJob
 from apps.campaigns.delivery import retry_failed_message
@@ -156,7 +162,7 @@ class BackgroundJobDetailView(SchemaAPIView):
 class BackgroundJobRetryView(SchemaAPIView):
     """Retry only the existing durable outbound row, never create a new send."""
 
-    permission_classes = (IsAuthenticated, ViewJobsPermission)
+    permission_classes = (IsAuthenticated, RetryJobsPermission)
 
     def post(self, request: Request, job_id: uuid.UUID) -> Response:
         key = request.headers.get("Idempotency-Key", "")
@@ -166,7 +172,7 @@ class BackgroundJobRetryView(SchemaAPIView):
             raise serializers.ValidationError(
                 {"Idempotency-Key": "Enviá una clave UUID para esta acción."}
             ) from exc
-        reason = str(request.data.get("reason", ""))
+        reason = str(json_object(request).get("reason", ""))
         actor = authenticated_user(request)
         try:
             job = BackgroundJob.objects.get(pk=job_id)

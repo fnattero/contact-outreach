@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from email import policy
@@ -249,14 +250,16 @@ def test_incremental_sync_imports_only_campaign_threads_and_is_idempotent(
     assert "Tenemos interés" in first.body_text
 
     client.force_login(owner)
-    dashboard = client.get(reverse("dashboard"))
-    responses = client.get(reverse("responses"))
-    assert "2 mensajes recibidos" in dashboard.content.decode()
-    assert root.prospect.name in responses.content.decode()
-    assert "Mensaje ajeno" not in responses.content.decode()
+    listed = client.get(reverse("api-inbound-messages"))
+    assert listed.status_code == 200
+    assert listed.json()["meta"]["total"] == 2
+    assert "Mensaje ajeno" not in listed.content.decode()
     rfc_linked = InboundMessage.objects.get(gmail_thread_id="different-gmail-thread")
-    rfc_thread = client.get(reverse("response-thread", args=(rfc_linked.pk,)))
-    assert "Mensaje inicial con catálogo" in rfc_thread.content.decode()
+    rfc_thread = client.get(reverse("api-inbound-message-thread", args=(rfc_linked.pk,)))
+    assert rfc_thread.status_code == 200
+    # A reply linked by RFC headers shares the thread of the campaign message it answers.
+    directions = [item["direction"] for item in rfc_thread.json()["data"]["timeline"]]
+    assert "outbound" in directions
 
 
 @pytest.mark.django_db
@@ -302,16 +305,15 @@ def test_incremental_sync_imports_direct_email_from_existing_contact(
     assert inbound.reply_decision.state == ReplyDecision.State.SHADOW_RECORDED
 
     client.force_login(owner)
-    responses = client.get(reverse("responses"))
-    thread = client.get(reverse("response-thread", args=(inbound.pk,)))
-    export = client.get(reverse("responses-export"))
-    assert responses.status_code == thread.status_code == export.status_code == 200
-    assert "Cliente preexistente" in responses.content.decode()
-    assert "Sin campaña" in responses.content.decode()
-    assert "Contacto directo" not in responses.content.decode()
+    listed = client.get(reverse("api-inbound-messages"))
+    thread = client.get(reverse("api-inbound-message-thread", args=(inbound.pk,)))
+    export = client.get(reverse("api-inbound-message-export"))
+    assert listed.status_code == thread.status_code == export.status_code == 200
+    rows = {row["id"]: row for row in listed.json()["data"]}
+    assert rows[str(inbound.pk)]["campaign_id"] is None
+    assert "Contacto directo" not in listed.content.decode()
     assert "Consulta directa" in thread.content.decode()
-    assert "Sin campaña" in thread.content.decode()
-    assert "Sin campaña" in export.content.decode()
+    assert "Consulta directa" in export.content.decode()
 
 
 @pytest.mark.django_db
@@ -897,20 +899,31 @@ def test_manual_reply_is_explicit_idempotent_and_stays_in_thread(
         opened_at=timezone.now(),
     )
     request_key = uuid.uuid4()
-    client.force_login(owner)
+    url = reverse("api-inbound-message-manual-reply", args=(inbound.pk,))
+    payload = {"body_text": "Perfecto, te llamo mañana.", "idempotency_key": str(request_key)}
 
-    assert client.get(reverse("manual-reply", args=(inbound.pk,))).status_code == 405
-    payload = {"body_text": "Perfecto, te llamo mañana.", "idempotency_key": request_key}
-    anonymous = Client()
-    assert anonymous.post(reverse("manual-reply", args=(inbound.pk,)), payload).status_code == 302
-    csrf_client = Client(enforce_csrf_checks=True)
-    csrf_client.force_login(owner)
-    assert csrf_client.post(reverse("manual-reply", args=(inbound.pk,)), payload).status_code == 403
+    secure = Client(enforce_csrf_checks=True)
+    secure.force_login(owner)
+    csrf = str(secure.get(reverse("api-auth-csrf")).json()["data"]["csrf_token"])
+
+    def post(caller: Client, token: str | None = None):
+        extra = {"HTTP_X_CSRFTOKEN": token} if token else {}
+        return caller.post(url, data=json.dumps(payload), content_type="application/json", **extra)
+
+    assert secure.get(url).status_code == 405
+    assert post(Client()).status_code == 401
+    assert post(secure).status_code == 403  # a session without the CSRF token is refused
     delay = Mock()
     monkeypatch.setattr(deliver_manual_reply_task, "delay", delay)
-    first = client.post(reverse("manual-reply", args=(inbound.pk,)), payload)
-    second = client.post(reverse("manual-reply", args=(inbound.pk,)), payload)
-    assert first.status_code == second.status_code == 302
+    with django_capture_on_commit_callbacks(execute=True):
+        first = post(secure, csrf)
+        second = post(secure, csrf)
+    assert first.status_code == 202
+    assert first.json()["data"]["created"] is True
+    # The same idempotency key replays the stored result instead of creating a second reply.
+    assert second.status_code == 200
+    assert second.json()["data"]["created"] is False
+    client.force_login(owner)
 
     manual = OutboundMessage.objects.get(kind=OutboundMessage.Kind.MANUAL_REPLY)
     assert manual.state == OutboundMessage.State.QUEUED
@@ -952,10 +965,11 @@ def test_manual_reply_is_explicit_idempotent_and_stays_in_thread(
     assert parsed.get_content().strip() == "Perfecto, te llamo mañana."
     assert parsed.is_multipart() is False
 
-    thread = client.get(reverse("response-thread", args=(inbound.pk,)))
-    page = thread.content.decode()
-    assert page.index("Mensaje inicial con catálogo") < page.index("Me interesa")
-    assert page.index("Me interesa") < page.index("Perfecto, te llamo")
+    thread = client.get(reverse("api-inbound-message-thread", args=(inbound.pk,)))
+    timeline = thread.json()["data"]["timeline"]
+    assert [item["direction"] for item in timeline] == ["outbound", "inbound", "outbound"]
+    assert "Me interesa" in timeline[1]["body_text"]
+    assert "Perfecto, te llamo" in timeline[2]["body_text"]
 
 
 @pytest.mark.django_db
@@ -1096,15 +1110,17 @@ def test_contact_only_thread_can_authorize_and_deliver_a_manual_reply(
     )
 
     client.force_login(owner)
-    thread_page = client.get(reverse("response-thread", args=(inbound.pk,)))
-    outbound_page = client.get(reverse("outbound-detail", args=(root.pk,)))
-    outbound_export = client.get(reverse("outbound-export"))
-    response_export = client.get(reverse("responses-export"))
-    assert thread_page.status_code == outbound_page.status_code == 200
-    assert "¿Cómo resultó el producto?" in thread_page.content.decode()
-    assert "Cliente actual" in outbound_page.content.decode()
-    assert "Sin campaña" in outbound_export.content.decode()
-    assert "Sin campaña" in response_export.content.decode()
+    thread = client.get(reverse("api-inbound-message-thread", args=(inbound.pk,)))
+    outbound = client.get(reverse("api-outbound-message-detail", args=(root.pk,)))
+    assert thread.status_code == outbound.status_code == 200
+    assert "¿Cómo resultó el producto?" in thread.content.decode()
+    assert outbound.json()["data"]["campaign_id"] is None
+    assert (
+        "cliente@example.com" in client.get(reverse("api-outbound-message-export")).content.decode()
+    )
+    assert (
+        "cliente@example.com" in client.get(reverse("api-inbound-message-export")).content.decode()
+    )
 
     manual, created = authorize_manual_reply(
         actor=owner,
@@ -1125,7 +1141,7 @@ def test_contact_only_thread_can_authorize_and_deliver_a_manual_reply(
 
 
 @pytest.mark.django_db
-def test_response_thread_explains_why_automatic_reply_needs_review(
+def test_attention_queue_explains_why_automatic_reply_needs_review(
     client: Client,
     owner: User,
 ) -> None:
@@ -1189,13 +1205,14 @@ def test_response_thread_explains_why_automatic_reply_needs_review(
     )
 
     client.force_login(owner)
-    thread = client.get(reverse("response-thread", args=(inbound.pk,)))
+    attention = client.get(reverse("api-attention"))
 
-    page = thread.content.decode()
-    assert thread.status_code == 200
-    assert "Ya hay una revisión abierta para este contacto" in page
-    assert "Hay una revisión humana pendiente para este contacto." in page
-    assert "Resolvé la tarea pendiente" in page
+    assert attention.status_code == 200
+    item = attention.json()["data"][0]
+    assert item["reason"] == "HUMAN_TASK_OPEN"
+    assert item["title"] == "Ya hay una revisión abierta para este contacto"
+    assert item["summary"] == "Hay una revisión humana pendiente para este contacto."
+    assert "Resolvé la tarea pendiente" in item["next_step"]
 
 
 @pytest.mark.django_db

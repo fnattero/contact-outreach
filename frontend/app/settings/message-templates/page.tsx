@@ -7,7 +7,7 @@ import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import {
+import { can,
   createMessageTemplate,
   getMessageTemplates,
   problemMessage,
@@ -78,7 +78,7 @@ export default function MessageTemplatesPage() {
     setFeedback({ state: "idle" });
   }
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para editar mensajes." }} />;
+  if (!can(session, "manage_configuration")) return <AuthError error={{ detail: "No tenés permisos para editar mensajes." }} />;
   if (loading) return <LoadingState layout="list" />;
   if (error && !templates.length) return <AuthError error={error} />;
 

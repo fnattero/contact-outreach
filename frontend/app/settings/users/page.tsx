@@ -9,7 +9,7 @@ import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { createUser, getUsers, problemMessage, updateUserRole, updateUserStatus, type CreatedUser, type ManagedUser, type Problem } from "@/lib/api";
+import { can, createUser, getUsers, problemMessage, updateUserRole, updateUserStatus, type CreatedUser, type ManagedUser, type Problem } from "@/lib/api";
 
 type UserForm = { username: string; email: string; role: ManagedUser["role"] };
 
@@ -35,7 +35,7 @@ export default function UsersSettingsPage() {
 
   useEffect(() => { void getUsers().then((next) => { setUsers(next); setRoleDrafts(Object.fromEntries(next.map((user) => [user.id, user.role]))); }).catch(setError).finally(() => setLoading(false)); }, []);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para administrar usuarios." }} />;
+  if (!can(session, "manage_users")) return <AuthError error={{ detail: "No tenés permisos para administrar usuarios." }} />;
   if (error && !users.length && !loading) return <AuthError error={error} />;
 
   async function submit(values: UserForm) {
@@ -78,7 +78,7 @@ export default function UsersSettingsPage() {
           { title: "Rol", dataIndex: "role", render: (_: ManagedUser["role"], user) => <Flex align="center" gap="small"><Select value={roleDrafts[user.id] ?? user.role} onChange={(role: ManagedUser["role"]) => setRoleDrafts((current) => ({ ...current, [user.id]: role }))} options={[{ value: "VENDEDOR", label: "Vendedor/a" }, { value: "ADMIN", label: "Administrador/a" }]} aria-label={`Rol de ${user.username}`} /><DisabledReason disabled={(roleDrafts[user.id] ?? user.role) === user.role || roleSaving === user.id} reason={roleSaving === user.id ? "El cambio de rol se está guardando." : "Elegí un rol diferente para guardar."}><Button onClick={() => void saveRole(user)} loading={roleSaving === user.id}>Guardar rol</Button></DisabledReason></Flex> },
           { title: "Estado", dataIndex: "is_active", render: (value: boolean) => <StatusBadge label={value ? "Activo" : "Inactivo"} level={value ? "success" : "inactive"} /> },
           { title: "Última actividad", render: () => <span className="catalog-reference-unavailable">No disponible por la API</span> },
-          { title: "Acción", render: (_: unknown, user) => <DisabledReason disabled={user.id === session.id} reason="No podés desactivar tu propio usuario."><Button danger={user.is_active} onClick={() => setDeactivateTarget(user)}>{user.is_active ? "Desactivar" : "Activar"}</Button></DisabledReason> },
+          { title: "Acción", render: (_: unknown, user) => <DisabledReason disabled={user.id === session?.id} reason="No podés desactivar tu propio usuario."><Button danger={user.is_active} onClick={() => setDeactivateTarget(user)}>{user.is_active ? "Desactivar" : "Activar"}</Button></DisabledReason> },
         ]} />
       </Card>
       <Drawer title="Crear usuario" open={drawerOpen} onClose={closeCreate} width={520}>

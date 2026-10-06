@@ -12,6 +12,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.accounts.permissions import Capability, workspace_for_user
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import (
     ManageAutomationPermission,
     ManageContactsPermission,
@@ -33,21 +34,23 @@ from apps.mailbox.tasks import deliver_message_task
 class FollowUpTopicInputSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(max_length=160)
     objective = serializers.CharField(max_length=1000)
-    instructions = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    # The service takes these as required keyword arguments, so omitted values need a default
+    # here or the call fails with a TypeError (a 500) instead of using "none".
+    instructions = serializers.CharField(max_length=2000, allow_blank=True, default="")
     cadence_days = serializers.IntegerField(min_value=7, max_value=365)
     mode = serializers.ChoiceField(choices=FollowUpTopic.Mode.choices)
-    next_due_at = serializers.DateTimeField(required=False, allow_null=True)
+    next_due_at = serializers.DateTimeField(allow_null=True, default=None)
     active = serializers.BooleanField(default=True)
 
 
 class PlanInputSerializer(serializers.Serializer[dict[str, Any]]):
     preferred_email_id = serializers.UUIDField()
     purpose = serializers.ChoiceField(choices=ContactCommunicationPlan.Purpose.choices)
-    goal_text = serializers.CharField(max_length=1000, required=False, allow_blank=True)
+    goal_text = serializers.CharField(max_length=1000, allow_blank=True, default="")
     cadence_days = serializers.IntegerField(min_value=7, max_value=365)
     mode = serializers.ChoiceField(choices=FollowUpTopic.Mode.choices)
     enabled = serializers.BooleanField(default=True)
-    next_due_at = serializers.DateTimeField(required=False, allow_null=True)
+    next_due_at = serializers.DateTimeField(allow_null=True, default=None)
 
 
 class PlanStateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -182,35 +185,47 @@ class ContactPlanStateView(SchemaAPIView):
             pk=plan_id, contact_id=contact_id, contact__workspace_id=actor.membership.workspace_id
         ).exists():
             raise NotFound
-        if action == "snooze":
-            serializer = SnoozeSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            function = snooze_contact_communication_plan
-            kwargs = {
-                "actor": actor,
-                "plan_id": plan_id,
-                "until": serializer.validated_data["until"],
-            }
-        else:
-            serializer = PlanStateSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            function = set_contact_communication_plan_state
-            kwargs = {
-                "actor": actor,
-                "plan_id": plan_id,
-                "state": serializer.validated_data["state"],
-            }
         try:
-            plan = function(**kwargs)
+            if action == "snooze":
+                snooze = SnoozeSerializer(data=request.data)
+                snooze.is_valid(raise_exception=True)
+                plan = snooze_contact_communication_plan(
+                    actor=actor,
+                    plan_id=plan_id,
+                    until=snooze.validated_data["until"],
+                )
+            else:
+                change = PlanStateSerializer(data=request.data)
+                change.is_valid(raise_exception=True)
+                plan = set_contact_communication_plan_state(
+                    actor=actor,
+                    plan_id=plan_id,
+                    state=change.validated_data["state"],
+                )
         except (ValidationError, PermissionDenied, ContactCommunicationPlan.DoesNotExist) as exc:
             raise serializers.ValidationError(str(exc)) from exc
         return Response({"data": _plan_data(plan)})
 
 
-class ScheduledAttemptActionView(SchemaAPIView):
+def _require_attempt_in_contact(request: Request, contact_id: UUID, attempt_id: UUID) -> None:
+    """Answer 404 unless the attempt belongs to this contact inside the caller's workspace.
+
+    The services key on ``attempt_id`` alone, so without this a valid attempt could be reached
+    through any contact id in the URL.
+    """
+    if not ScheduledContactAttempt.objects.filter(
+        pk=attempt_id,
+        plan__contact_id=contact_id,
+        plan__contact__workspace_id=authenticated_user(request).membership.workspace_id,
+    ).exists():
+        raise NotFound
+
+
+class ScheduledAttemptDraftView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageContactsPermission)
 
-    def patch(self, request: Request, attempt_id: UUID) -> Response:
+    def patch(self, request: Request, contact_id: UUID, attempt_id: UUID) -> Response:
+        _require_attempt_in_contact(request, contact_id, attempt_id)
         serializer = DraftSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -219,19 +234,22 @@ class ScheduledAttemptActionView(SchemaAPIView):
                 attempt_id=attempt_id,
                 **serializer.validated_data,
             )
-        except (ValidationError, PermissionDenied, ScheduledContactAttempt.DoesNotExist) as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         return Response({"data": _attempt_data(attempt)})
 
-    def post(self, request: Request, attempt_id: UUID, action: str) -> Response:
-        if action != "authorize":
-            raise serializers.ValidationError({"action": "La acción no existe."})
+
+class ScheduledAttemptAuthorizeView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageContactsPermission)
+
+    def post(self, request: Request, contact_id: UUID, attempt_id: UUID) -> Response:
+        _require_attempt_in_contact(request, contact_id, attempt_id)
         try:
             attempt = authorize_scheduled_contact_attempt(
                 actor=authenticated_user(request), attempt_id=attempt_id
             )
-        except (ValidationError, PermissionDenied, ScheduledContactAttempt.DoesNotExist) as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         if attempt.outbound_message_id:
             from django.db import transaction
 

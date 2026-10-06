@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { canSeeAdministration, isForbiddenShellRoute } from "@/components/app-shell";
+import { sessionFor } from "./session";
 import { DisabledReason } from "@/components/design-system/disabled-reason";
 import { StatusBadge, displayValueMap } from "@/components/design-system/status-badge";
 
@@ -41,14 +42,14 @@ describe("DisabledReason", () => {
 
 describe("AppShell role visibility", () => {
   it("removes administration for VENDEDOR and blocks direct admin URLs", () => {
-    expect(canSeeAdministration("VENDEDOR")).toBe(false);
-    expect(isForbiddenShellRoute("VENDEDOR", "/audit")).toBe(true);
-    expect(isForbiddenShellRoute("VENDEDOR", "/campaigns/new")).toBe(true);
-    expect(isForbiddenShellRoute("VENDEDOR", "/campaigns")).toBe(false);
+    expect(canSeeAdministration(sessionFor("VENDEDOR"))).toBe(false);
+    expect(isForbiddenShellRoute(sessionFor("VENDEDOR"), "/audit")).toBe(true);
+    expect(isForbiddenShellRoute(sessionFor("VENDEDOR"), "/campaigns/new")).toBe(true);
+    expect(isForbiddenShellRoute(sessionFor("VENDEDOR"), "/campaigns")).toBe(false);
   });
 
   it("keeps administration available to ADMIN", () => {
-    expect(canSeeAdministration("ADMIN")).toBe(true);
-    expect(isForbiddenShellRoute("ADMIN", "/audit")).toBe(false);
+    expect(canSeeAdministration(sessionFor("ADMIN"))).toBe(true);
+    expect(isForbiddenShellRoute(sessionFor("ADMIN"), "/audit")).toBe(false);
   });
 });

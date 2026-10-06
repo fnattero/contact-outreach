@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
-import { createContact, problemMessage, type Problem } from "@/lib/api";
+import { can, createContact, problemMessage, type Problem } from "@/lib/api";
 
 type ContactForm = {
   email: string;
@@ -19,7 +19,7 @@ export default function NewContactPage() {
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
 
-  if (session?.role !== "ADMIN") {
+  if (!can(session, "manage_contacts")) {
     return <AuthError error={{ detail: "No tenés permisos para crear contactos." }} />;
   }
 

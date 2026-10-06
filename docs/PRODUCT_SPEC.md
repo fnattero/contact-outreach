@@ -247,12 +247,12 @@ envío manual de la aplicación falla o queda en reconciliación, la tarea perma
 
 El admin gestiona dos tipos de información desde “Información para responder consultas”:
 
-- contexto general de la empresa, editable en el mismo lugar por administradores; el último texto
-  guardado queda activo y conserva el usuario que lo guardó;
-- datos puntuales/FAQ activos, que se guardan con título e información y se usan para responder
-  consultas concretas sin aprobación manual adicional.
+- contexto general de la empresa, editable en el mismo lugar por administradores; lo guardado queda
+  como borrador y sólo se usa después de que un administrador lo aprueba;
+- datos puntuales/FAQ, que se guardan con título e información y se usan para responder consultas
+  concretas únicamente después de la aprobación explícita de un administrador.
 
-Sólo una tarjeta puntual guardada por un administrador puede fundamentar una respuesta concreta; no
+Sólo una tarjeta puntual aprobada por un administrador puede fundamentar una respuesta concreta; no
 se extraen hechos de PDFs automáticamente.
 
 En “Respuesta automática” el admin también puede editar instrucciones de redacción para el agente.
@@ -295,8 +295,8 @@ Modos:
   no autoriza Gmail ni ofrece una aprobación posterior desde la configuración.
 - `LIVE`: permite pasar a las políticas de envío automático.
 
-`LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin. El
-mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
+`LIVE` se habilita por decisión explícita de un administrador y exige reautenticación admin y
+escribir la palabra de confirmación (`CONFIRMAR`), que la API valida. El mínimo de confianza es 0,90, pero nunca reemplaza una regla de política.
 
 ### FR-13 Acciones automáticas, redirección y atención humana
 

@@ -7,8 +7,9 @@ proxy streaming hacia el backend privado, elimina headers forwarded/control sumi
 cliente y agrega un token interno server-side. No hay CORS, JWT browser ni acceso directo a
 PostgreSQL, Redis, S3, Gmail o proveedores.
 
-API keys, Google client secret, Redis/DB/S3 y root keys provienen del entorno del backend. La API
-sólo expone `configured|not_configured` y metadatos no sensibles. El refresh token Gmail es la única
+Redis/DB/S3 y root keys provienen del entorno del backend. API keys y Google client secret pueden
+proveer el entorno o guardarse cifradas desde el dashboard (`PATCH /api/v1/integrations/configuration/`,
+con reautenticación). La API sólo expone `configured|not_configured`, el origen y metadatos no sensibles. El refresh token Gmail es la única
 credencial producida en runtime: se cifra por propósito en PostgreSQL. Workers pertenecen al mismo
 backend release y llaman servicios/ORM directamente; nunca endpoints HTTP internos.
 

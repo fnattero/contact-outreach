@@ -4,9 +4,7 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.urls import reverse
 from django.utils import timezone
 
 from apps.campaigns.models import Campaign, OutboundMessage, SearchQuery, SearchRun
@@ -28,17 +26,15 @@ from apps.prospects.enrichment import enrich_prospect
 from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail, WebsiteSnapshot
 from apps.prospects.pipeline import (
     claim_prospect_pipeline,
-    outdated_analysis_candidates,
-    request_manual_regeneration,
     reserve_run_prospects,
 )
 from apps.prospects.tasks import process_prospect_pipeline, recover_prospect_pipeline
 
 PROFILE = {
     "company_name": "Componentes Delta SA",
-    "salesperson_name": "Fran",
+    "salesperson_name": "Vendedor",
     "address": "CABA",
-    "signature": "Fran · Componentes Delta SA",
+    "signature": "Vendedor · Componentes Delta SA",
     "description": "Proveedor de componentes industriales",
     "products": "Componentes industriales para equipos eléctricos",
     "differentiators": "Atención técnica",
@@ -230,7 +226,7 @@ def test_validate_operator_message_accepts_grounded_operator_copy() -> None:
         (lambda body: body.replace("Buen día.", "Buen día 🙂."), "emojis"),
         (lambda body: body.replace("Buen día.", "Buen día, garantizamos el stock."), "prohibido"),
         (lambda body: body.replace("Buen día.", "Sabemos que ustedes compran."), "no permitido"),
-        (lambda body: body.replace(signature_block(PROFILE), "Fran"), "firma"),
+        (lambda body: body.replace(signature_block(PROFILE), "Vendedor"), "firma"),
     ],
 )
 def test_validate_operator_message_rejects_unsafe_copy(mutate: object, match: str) -> None:
@@ -296,69 +292,6 @@ def test_periodic_recovery_ignores_prospects_of_a_running_campaign(
 
 
 # --- Historical analyses stay readable and cannot be regenerated (A-054) ----------------------
-
-
-@pytest.mark.django_db
-def test_historical_analysis_is_readable_and_cannot_be_regenerated(
-    owner: User, private_catalog_dir: Path, client: object
-) -> None:
-    del private_catalog_dir
-    prospect = _prospect(
-        owner,
-        state=Campaign.State.COMPLETED,
-        delivery_mode=Campaign.DeliveryMode.REVIEW_ONLY,
-    )
-    historical = AIAnalysis.objects.create(
-        prospect=prospect,
-        status=AIAnalysis.Status.VALID,
-        provider="fake",
-        model="fake-deterministic",
-        prompt_version="prospect-analysis-v1-legacy",
-        schema_version="prospect-analysis-schema-v1",
-        analyzed_at=timezone.now(),
-        relevance_score=8,
-        confidence="0.900",
-        relevance_reason="Relación directa con la actividad declarada.",
-        evidence=["prospect.category"],
-        prompt_text="prompt histórico",
-        input_hash="b" * 64,
-        generation=prospect.analysis_generation,
-    )
-
-    Prospect.objects.filter(pk=prospect.pk).update(
-        pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT
-    )
-    prospect.refresh_from_db()
-
-    assert outdated_analysis_candidates(prospect.campaign).count() == 1
-    with pytest.raises(ValidationError, match="solo lectura"):
-        request_manual_regeneration(prospect_id=prospect.pk, actor=owner)
-
-    assert hasattr(client, "force_login")
-    client.force_login(owner)  # type: ignore[attr-defined]
-    response = client.post(  # type: ignore[attr-defined]
-        reverse(
-            "prospect-regenerate",
-            kwargs={"campaign_id": prospect.campaign_id, "prospect_id": prospect.pk},
-        )
-    )
-
-    assert response.status_code == 302
-    assert list(prospect.analyses.values_list("pk", flat=True)) == [historical.pk]
-    assert not OutboundMessage.objects.filter(prospect=prospect).exists()
-
-
-@pytest.mark.django_db
-def test_completed_delivery_campaign_cannot_use_review_only_repair_exception(
-    owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    prospect = _prospect(owner, delivery_mode=Campaign.DeliveryMode.DRY_RUN)
-    enrich_prospect(prospect.pk, fetcher=InjectionWebsiteFetcher())
-    Campaign.objects.filter(pk=prospect.campaign_id).update(state=Campaign.State.COMPLETED)
-
-    with pytest.raises(ValidationError, match="solo lectura"):
-        request_manual_regeneration(prospect_id=prospect.pk, actor=owner)
 
 
 @pytest.mark.django_db

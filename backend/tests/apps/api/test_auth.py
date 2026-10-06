@@ -319,3 +319,22 @@ def test_business_profile_is_admin_only_and_uses_explicit_fields(owner: User) ->
         "additional_instructions",
         "profile_version",
     }
+
+
+@pytest.mark.django_db
+def test_password_reauthentication_is_throttled_against_guessing(owner: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(owner)
+    csrf_token = _csrf_token(client)
+    url = reverse("api-auth-reauthenticate")
+
+    statuses = [
+        _json_post(client, url, {"password": f"guess-{attempt}"}, csrf_token).status_code
+        for attempt in range(6)
+    ]
+
+    assert statuses == [401, 401, 401, 401, 401, 429]
+    # A locked-out caller cannot succeed even with the right password until the window passes.
+    blocked = _json_post(client, url, {"password": "correct-password"}, csrf_token)
+    assert blocked.status_code == 429
+    assert blocked.json()["code"] == "rate_limited"

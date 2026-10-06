@@ -58,6 +58,10 @@ class ManageCampaignsPermission(CapabilityPermission):
     required_capability = Capability.MANAGE_CAMPAIGNS
 
 
+class ApproveCampaignsPermission(CapabilityPermission):
+    required_capability = Capability.APPROVE_CAMPAIGNS
+
+
 class ViewSentMessagesPermission(CapabilityPermission):
     required_capability = Capability.VIEW_SENT_MESSAGES
 
@@ -80,6 +84,10 @@ class DownloadPdfsPermission(CapabilityPermission):
 
 class ViewJobsPermission(CapabilityPermission):
     required_capability = Capability.VIEW_JOBS
+
+
+class RetryJobsPermission(CapabilityPermission):
+    required_capability = Capability.RETRY_JOBS
 
 
 class ViewAuditPermission(CapabilityPermission):

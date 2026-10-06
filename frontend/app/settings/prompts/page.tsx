@@ -6,7 +6,7 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
-import {
+import { can,
   getPromptConfiguration,
   problemMessage,
   updateAutomaticReplyPrompt,
@@ -86,7 +86,7 @@ export default function PromptsSettingsPage() {
     setCancelOpen(null);
   }
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para editar instrucciones." }} />;
+  if (!can(session, "manage_configuration")) return <AuthError error={{ detail: "No tenés permisos para editar instrucciones." }} />;
   if (error && !configuration) return <AuthError error={error} />;
   if (!configuration) return <LoadingState layout="form" />;
 

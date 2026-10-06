@@ -1446,7 +1446,7 @@ def retry_failed_message(
         raise ValidationError("El mensaje no pertenece a una campaña.")
     require_user_capability(
         actor,
-        Capability.VIEW_JOBS,
+        Capability.RETRY_JOBS,
         workspace_id=campaign.workspace_id,
     )
     if message.state != OutboundMessage.State.SEND_FAILED:

@@ -73,15 +73,16 @@ edita; otra fila la reemplaza para campañas futuras.
 ### KnowledgeFact y KnowledgeFactRevision
 
 Fact agrupa una pregunta/hecho con título, categoría interna opcional y estado; la UI sólo pide
-título e información y activa la revisión al guardar. Revision contiene texto confirmado, fuentes
-humanas, version, hash, `approved_at/by` interno, superseded flag y timestamps. Sólo revisiones
-activas entran al contexto. PDFs no se parsean automáticamente.
+título e información y guarda la revisión como borrador. Revision contiene texto confirmado, fuentes
+humanas, version, hash, `approved_at/by`, superseded flag y timestamps. Un administrador aprueba el
+borrador de forma explícita; la aprobación reemplaza la revisión aprobada anterior. Sólo
+revisiones aprobadas entran al contexto. PDFs no se parsean automáticamente.
 
 ### WorkspaceKnowledgeContextRevision
 
 Contexto global del Workspace: texto breve de background, version, hash, `approved_at/by` y
-superseded flag. La UI lo guarda y activa en un solo paso para administradores; `approved_by`
-registra internamente qué usuario lo guardó. Una versión activa no se edita; guardar otra fila
+superseded flag. La UI lo guarda como borrador y un administrador lo aprueba en un paso aparte;
+`approved_by` registra qué usuario lo aprobó. Una versión aprobada no se edita; aprobar otra fila
 reemplaza la anterior para solicitudes futuras. Se inyecta siempre como orientación, pero no
 alcanza por sí sola para fundamentar respuestas que requieran un dato puntual.
 

@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal, ErrorState, LoadingState, PageHeader, StatusBadge, type SemanticLevel } from "@/components/design-system";
-import { getCampaign, problemMessage, runCampaignAction, type CampaignAction, type CampaignDetail, type Problem } from "@/lib/api";
+import { can, getCampaign, problemMessage, runCampaignAction, type CampaignAction, type CampaignDetail, type Problem } from "@/lib/api";
 
 const stages = [
   { state: "DRAFT", label: "Borrador" },
@@ -94,7 +94,7 @@ export default function CampaignDetailPage() {
   if (!campaign) return <LoadingState layout="detail" label="Cargando detalle de campaña" />;
 
   const currentCampaign = campaign;
-  const isAdmin = session?.role === "ADMIN";
+  const isAdmin = can(session, "manage_campaigns");
   const attachments = campaign.attachments?.length ? campaign.attachments : campaign.catalog ? [{ catalog_id: campaign.catalog.id, name: campaign.catalog.name, version: campaign.catalog.version, position: 0 }] : [];
 
   async function performAction() {

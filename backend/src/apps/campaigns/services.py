@@ -60,7 +60,6 @@ TERMINAL_DISCOVERY_STATES = {
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     Campaign.State.DRAFT: {
         Campaign.State.DISCOVERING,
-        Campaign.State.RUNNING,
         Campaign.State.CANCELLED,
     },
     Campaign.State.DISCOVERING: {
@@ -79,7 +78,11 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
         Campaign.State.COMPLETED,
         Campaign.State.STOPPED_ERROR,
     },
-    Campaign.State.PAUSED: {Campaign.State.RUNNING, Campaign.State.CANCELLED},
+    Campaign.State.PAUSED: {
+        Campaign.State.DISCOVERING,
+        Campaign.State.RUNNING,
+        Campaign.State.CANCELLED,
+    },
     Campaign.State.CANCELLED: set(),
     Campaign.State.COMPLETED: set(),
     Campaign.State.STOPPED_ERROR: set(),
@@ -644,6 +647,13 @@ def transition_campaign(
             workspace_id=campaign.workspace_id,
         )
 
+    if target_state == Campaign.State.RUNNING and campaign.approved_at is None:
+        # Delivery may only start from an approved audience and content, whichever state the
+        # campaign is leaving.
+        raise InvalidCampaignTransition(
+            "Aprobá la audiencia y el contenido antes de iniciar los envíos."
+        )
+
     before = {"state": campaign.state, "discovery_state": campaign.discovery_state}
     if target_state in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         if campaign.state == Campaign.State.DRAFT:
@@ -657,10 +667,6 @@ def transition_campaign(
             _freeze_draft(campaign, profile, overture_snapshot, coverages)
             campaign.discovery_state = Campaign.DiscoveryState.RUNNING
             campaign.started_at = timezone.now()
-        elif campaign.state == Campaign.State.AWAITING_APPROVAL and campaign.approved_at is None:
-            raise InvalidCampaignTransition(
-                "Aprobá la audiencia y el contenido antes de iniciar los envíos."
-            )
         campaign.status_reason = ""
     elif target_state == Campaign.State.PAUSED:
         campaign.status_reason = reason or "Pausada por el usuario."
@@ -734,6 +740,28 @@ def transition_campaign(
         },
     )
     return campaign
+
+
+@transaction.atomic
+def resume_campaign(
+    *,
+    campaign_id: uuid.UUID | str,
+    actor: User | None,
+    reason: str = "",
+) -> Campaign:
+    """Resume a paused campaign without ever skipping approval.
+
+    An approved campaign returns to RUNNING; one paused during discovery goes back to DISCOVERING.
+    """
+    campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
+    if campaign.state != Campaign.State.PAUSED:
+        raise InvalidCampaignTransition("Sólo se puede reanudar una campaña pausada.")
+    target = (
+        Campaign.State.RUNNING if campaign.approved_at is not None else Campaign.State.DISCOVERING
+    )
+    return transition_campaign(
+        campaign_id=campaign_id, target_state=target, actor=actor, reason=reason
+    )
 
 
 @transaction.atomic

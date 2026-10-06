@@ -6,7 +6,7 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { getOvertureStatus, problemMessage, type OvertureStatus, type Problem } from "@/lib/api";
+import { can, getOvertureStatus, problemMessage, type OvertureStatus, type Problem } from "@/lib/api";
 
 const dateFormatter = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "America/Argentina/Buenos_Aires" });
 
@@ -19,7 +19,7 @@ export default function OvertureSettingsPage() {
   function refresh() { setLoading(true); setError(null); void getOvertureStatus().then(setStatus).catch(setError).finally(() => setLoading(false)); }
   useEffect(() => { void getOvertureStatus().then(setStatus).catch(setError).finally(() => setLoading(false)); }, []);
 
-  if (session?.role !== "ADMIN") return <AuthError error={{ detail: "No tenés permisos para ver Overture." }} />;
+  if (!can(session, "manage_integrations")) return <AuthError error={{ detail: "No tenés permisos para ver Overture." }} />;
   if (loading) return <LoadingState layout="detail" />;
   if (error && !status) return <AuthError error={error} />;
   if (!status) return null;
@@ -33,6 +33,16 @@ export default function OvertureSettingsPage() {
       <StatusBadge label={status.active_snapshot_id ? "Disponible" : "Pendiente"} level={status.active_snapshot_id ? "success" : "warning"} />
       <p>Un snapshot es una versión verificada de los datos geográficos que el sistema usa para buscar lugares. Mientras no haya uno activo, las búsquedas no tienen cobertura confirmada.</p>
     </section>
+    <Card title="Atribución y licencias">
+      {status.attribution ? (
+        <>
+          <p>{status.attribution.attribution}</p>
+          <p className="muted">Versión {status.attribution.release_id}</p>
+          {status.attribution.licenses.length ? <ul>{status.attribution.licenses.map((license) => <li key={license}>{license}</li>)}</ul> : null}
+          {status.attribution.notices.length ? <ul>{status.attribution.notices.map((notice) => <li key={notice}>{notice}</li>)}</ul> : null}
+        </>
+      ) : <p className="muted">La atribución aparecerá acá cuando haya un snapshot activo.</p>}
+    </Card>
     <Card title="Particiones importadas">
       {status.partitions.length ? <Table rowKey="id" dataSource={status.partitions} pagination={{ pageSize: 10, responsive: true }} columns={[
         { title: "Provincia", dataIndex: "province_name" },

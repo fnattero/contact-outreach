@@ -4,7 +4,7 @@ import { Button, Form, Input } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal, DisabledReason, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/design-system";
-import {
+import { can,
   getAttention,
   getAutomationConfiguration,
   getCampaigns,
@@ -52,9 +52,11 @@ export default function ResponsesPage() {
   const [confirmReply, setConfirmReply] = useState(false);
   const [replyBusy, setReplyBusy] = useState(false);
 
+  const canSeeAutomation = can(session, "manage_automation");
+
   useEffect(() => {
     let cancelled = false;
-    const automationRequest = session?.role === "ADMIN" ? getAutomationConfiguration() : Promise.resolve(null);
+    const automationRequest = canSeeAutomation ? getAutomationConfiguration() : Promise.resolve(null);
     void Promise.all([getInboundMessages(), getAttention(), getDashboardSummary(), automationRequest, getCampaigns()])
       .then(([inbound, attention, nextSummary, nextAutomation, campaignPage]) => {
         if (cancelled) return;
@@ -68,7 +70,7 @@ export default function ResponsesPage() {
       .catch((problem) => { if (!cancelled) setError(problem); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [session?.role]);
+  }, [canSeeAutomation]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -116,7 +118,7 @@ export default function ResponsesPage() {
       <section className="responses-inbox__conversation" aria-label="Conversación seleccionada">
         {!thread ? <LoadingState layout="detail" label="Cargando conversación" /> : <><header className="conversation-header"><div><p className="type-micro">{selectedMessage?.sender}</p><h2 className="type-title">{selectedMessage?.subject || "Conversación"}</h2></div><div className="conversation-header__markers">{selectedMessage?.classification_label ? <StatusBadge label={selectedMessage.classification_label} level="info" /> : null}{reviewPending ? <StatusBadge label="Revisión pendiente" level="warning" /> : null}</div></header><Conversation thread={thread} />{selectedMessage?.is_human && session?.capabilities.includes("send_replies") ? <div className="reply-panel"><div className="reply-panel__heading"><h3 className="type-title">Responder</h3><p>{automationReplyText(automation, summary)}</p></div><Form layout="vertical" onFinish={() => setConfirmReply(true)}><Form.Item label="Texto de la respuesta" required><Input.TextArea rows={5} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} maxLength={10000} showCount /></Form.Item><DisabledReason disabled={!canReply || !replyBody.trim()} reason={replyBlocker}><Button type="primary" htmlType="submit" disabled={!canReply || !replyBody.trim()}>Revisar y autorizar</Button></DisabledReason></Form></div> : null}</>}
       </section>
-    </div> : <EmptyState headline="Todavía no hay respuestas" explanation="Las conversaciones entrantes aparecerán acá cuando Gmail las sincronice." actionLabel={session?.role === "ADMIN" ? "Configurar Gmail" : "Volver al resumen"} actionHref={session?.role === "ADMIN" ? "/settings/integrations" : "/dashboard"} />}
+    </div> : <EmptyState headline="Todavía no hay respuestas" explanation="Las conversaciones entrantes aparecerán acá cuando Gmail las sincronice." actionLabel={can(session, "manage_automation") ? "Configurar Gmail" : "Volver al resumen"} actionHref={can(session, "manage_automation") ? "/settings/integrations" : "/dashboard"} />}
     {confirmReply ? <ConfirmDangerModal open title="Autorizar respuesta" consequences={["La respuesta se enviará al contacto de esta conversación si todas las comprobaciones siguen siendo válidas.", "El backend volverá a comprobar el modo de envío, Gmail, restricciones y el contexto del hilo."]} confirmationWord="CONFIRMAR" dangerLabel="Autorizar y enviar" confirming={replyBusy} onCancel={() => setConfirmReply(false)} onConfirm={() => void submitReply()} /> : null}
   </>;
 }

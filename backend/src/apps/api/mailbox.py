@@ -5,7 +5,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
@@ -15,7 +15,9 @@ from rest_framework.response import Response
 
 from apps.accounts.permissions import Capability, has_capability, workspace_for_user
 from apps.api.permissions import (
+    ApproveCampaignsPermission,
     ExportDataPermission,
+    ManageCampaignsPermission,
     SendRepliesPermission,
     ViewContactsPermission,
     ViewSentMessagesPermission,
@@ -40,6 +42,22 @@ class MessageQuerySerializer(serializers.Serializer[dict[str, Any]]):
         required=False,
         choices=InboundMessage.Classification.choices,
     )
+
+
+class OutboundFilterSerializer(serializers.Serializer[dict[str, Any]]):
+    """Filters shared by the outbound list and its CSV export; invalid values are rejected."""
+
+    q = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    state = serializers.ChoiceField(required=False, choices=OutboundMessage.State.choices)
+    kind = serializers.ChoiceField(required=False, choices=OutboundMessage.Kind.choices)
+    campaign = serializers.UUIDField(required=False)
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+
+
+class OutboundQuerySerializer(OutboundFilterSerializer):
+    page = serializers.IntegerField(required=False, min_value=1, default=1)
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=100, default=25)
 
 
 class ManualReplySerializer(serializers.Serializer[dict[str, Any]]):
@@ -176,11 +194,11 @@ class InboundMessageThreadView(SchemaAPIView):
             connection=inbound.connection,
             gmail_thread_id=inbound.gmail_thread_id,
         ).order_by("external_at", "created_at")
+        # A reply linked by RFC headers can carry a different Gmail thread id than the message it
+        # answers, so the originating outbound is included explicitly rather than by thread alone.
         outbound_items = (
-            OutboundMessage.objects.filter(
-                outbound_workspace_filter(workspace.pk),
-                gmail_thread_id=inbound.gmail_thread_id,
-            )
+            OutboundMessage.objects.filter(outbound_workspace_filter(workspace.pk))
+            .filter(Q(gmail_thread_id=inbound.gmail_thread_id) | Q(pk=inbound.related_outbound_id))
             .distinct()
             .order_by("sent_at", "created_at")
         )
@@ -249,7 +267,7 @@ class OutboundMessageListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSentMessagesPermission)
 
     def get(self, request: Request) -> Response:
-        query = MessageQuerySerializer(data=request.query_params)
+        query = OutboundQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         values = query.validated_data
         user = authenticated_user(request)
@@ -275,6 +293,7 @@ class OutboundMessageExportView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ExportDataPermission)
 
     def get(self, request: Request) -> HttpResponse:
+        OutboundFilterSerializer(data=request.query_params).is_valid(raise_exception=True)
         workspace = workspace_for_user(authenticated_user(request), Capability.EXPORT_DATA)
         rows = (
             outbound_queryset(request.query_params)
@@ -318,15 +337,11 @@ class OutboundMessageDetailView(SchemaAPIView):
 
 
 class OutboundMessageDraftView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
 
     def patch(self, request: Request, message_id: uuid.UUID) -> Response:
         serializer = OutboundDraftSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not has_capability(authenticated_user(request), Capability.MANAGE_CAMPAIGNS):
-            from rest_framework.exceptions import PermissionDenied
-
-            raise PermissionDenied
         try:
             message = edit_message_draft(
                 message_id,
@@ -340,14 +355,10 @@ class OutboundMessageDraftView(SchemaAPIView):
 
 
 class OutboundMessageAuthorizeView(SchemaAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, ApproveCampaignsPermission)
 
     def post(self, request: Request, message_id: uuid.UUID) -> Response:
         actor = authenticated_user(request)
-        if not has_capability(actor, Capability.APPROVE_CAMPAIGNS):
-            from rest_framework.exceptions import PermissionDenied
-
-            raise PermissionDenied
         key = request.headers.get("Idempotency-Key", "")
         try:
             uuid.UUID(key)
@@ -357,6 +368,7 @@ class OutboundMessageAuthorizeView(SchemaAPIView):
             message = approve_message_for_delivery(message_id, actor=actor)
         except ValidationError as exc:
             raise serializers.ValidationError(str(exc)) from exc
-        if message.campaign_id and message.campaign.state == message.campaign.State.RUNNING:
+        campaign = message.campaign
+        if campaign is not None and campaign.state == campaign.State.RUNNING:
             transaction.on_commit(lambda: deliver_message_task.delay(str(message.pk)))
         return Response({"data": _outbound_data(message, include_admin=True)})

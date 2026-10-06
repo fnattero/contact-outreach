@@ -30,7 +30,7 @@ from apps.contacts.models import CampaignEnrollment, EmailAddress, Organization
 
 LEGACY_PROFILE = {
     "signature": "Equipo Ventas",
-    "company_name": "Fran",
+    "company_name": "Vendedor",
     "address": "Buenos Aires",
 }
 LEGACY_OPERATOR_BODY = (
@@ -41,7 +41,7 @@ LEGACY_OPERATOR_BODY = (
     "para revisar necesidades, aplicaciones frecuentes y disponibilidad de productos. "
     "¿Qué día conviene que pase el vendedor?\n\n"
     "Equipo Ventas\n"
-    "Fran · Buenos Aires"
+    "Vendedor · Buenos Aires"
 )
 
 

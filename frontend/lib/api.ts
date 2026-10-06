@@ -8,6 +8,35 @@ export type Problem = {
   field_errors?: Record<string, string | string[]>;
 };
 
+// Mirrors the backend's Capability enum (a backend test keeps the two in sync). The backend
+// computes what a user may do; the UI only asks, and never infers it from the role.
+export type Capability =
+  | "view_summary"
+  | "view_campaigns"
+  | "view_sent_messages"
+  | "view_contacts"
+  | "manage_users"
+  | "manage_campaigns"
+  | "approve_campaigns"
+  | "send_replies"
+  | "manage_contacts"
+  | "manage_knowledge"
+  | "manage_automation"
+  | "manage_configuration"
+  | "manage_integrations"
+  | "download_pdfs"
+  | "export_data"
+  | "view_jobs"
+  | "retry_jobs"
+  | "view_audit";
+
+export function can(
+  session: { capabilities?: readonly string[] } | null | undefined,
+  capability: Capability,
+): boolean {
+  return Boolean(session?.capabilities?.includes(capability));
+}
+
 export type UserSession = {
   id: number;
   username: string;
@@ -15,7 +44,7 @@ export type UserSession = {
   role: "ADMIN" | "VENDEDOR";
   workspace_id: string;
   workspace_name: string;
-  capabilities: string[];
+  capabilities: Capability[];
   session_expires_at: string;
   reauthentication_active: boolean;
 };
@@ -225,6 +254,35 @@ export type CreatedUser = {
   expires_at: string;
 };
 
+export type IntegrationConfiguration = {
+  extractor_provider: string;
+  overture_min_confidence: string;
+  website_fetcher: string;
+  llm_provider: string;
+  llm_model: string;
+  ollama_base_url: string;
+  openai_compatible_base_url: string;
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimensions: number;
+  gmail_provider: string;
+  gmail_oauth_client_id: string;
+  /** Credentials are only ever reported as state; their values cannot be read back. */
+  llm_credential: { configured: boolean; source: string };
+  gmail_credential: { configured: boolean; source: string };
+  revision: number;
+};
+
+export type IntegrationConfigurationPatch = Partial<
+  Omit<IntegrationConfiguration, "llm_credential" | "gmail_credential" | "revision" | "embedding_dimensions">
+> & {
+  embedding_dimensions?: number;
+  llm_api_key?: string;
+  remove_llm_api_key?: boolean;
+  gmail_oauth_client_secret?: string;
+  remove_gmail_oauth_client_secret?: boolean;
+};
+
 export type IntegrationStatus = {
   extractor: { provider: string; overture_min_confidence: string };
   website_fetcher: { provider: string };
@@ -244,6 +302,7 @@ export type IntegrationStatus = {
 export type SearchCategory = {
   id: string;
   name: string;
+  active: boolean;
   sort_order: number;
   rules_revision: number;
   rules: Array<{
@@ -253,6 +312,54 @@ export type SearchCategory = {
     active: boolean;
     sort_order: number;
   }>;
+};
+
+export type SuppressionReason = "UNSUBSCRIBE" | "BOUNCE" | "MANUAL";
+
+export type Suppression = {
+  id: string;
+  email: string;
+  reason: SuppressionReason;
+  reason_label: string;
+  source: string;
+  evidence: string;
+  created_at: string;
+};
+
+export type Prospect = {
+  id: string;
+  name: string;
+  address: string;
+  neighborhood: string;
+  category: string;
+  website: string;
+  pipeline_state: string;
+  pipeline_state_label: string;
+  primary_email: string | null;
+  historical_score: number | null;
+  campaign: { id: string; name: string };
+  provenance: Provenance | null;
+  created_at: string;
+};
+
+export type Provenance = {
+  release_id: string | null;
+  overture_id: string | null;
+  confidence: string | null;
+  matched_rule: { taxonomy_code: string; name_terms: string[] } | null;
+  contact_source: { email: string; source: string; source_url: string | null } | null;
+  attribution: string[];
+  licenses: string[];
+};
+
+export type ProspectFilters = {
+  q?: string;
+  campaign?: string;
+  state?: string;
+  category?: string;
+  neighborhood?: string;
+  page?: number;
+  page_size?: number;
 };
 
 export type SearchZone = {
@@ -321,8 +428,11 @@ export type KnowledgeFactRevision = {
   source_notes: string;
   content_hash: string;
   approved: boolean;
+  state: KnowledgeRevisionState;
   approved_at: string | null;
 };
+
+export type KnowledgeRevisionState = "DRAFT" | "APPROVED" | "SUPERSEDED";
 
 export type KnowledgeContextRevision = {
   id: string;
@@ -331,6 +441,7 @@ export type KnowledgeContextRevision = {
   source_notes: string;
   content_hash: string;
   approved: boolean;
+  state: KnowledgeRevisionState;
   approved_at: string | null;
 };
 
@@ -347,9 +458,18 @@ export type AttentionTask = {
   opened_at: string;
 };
 
+export type OvertureAttribution = {
+  release_id: string;
+  attribution: string;
+  licenses: string[];
+  notices: string[];
+};
+
 export type OvertureStatus = {
   latest_snapshot_id: string | null;
   active_snapshot_id: string | null;
+  /** Overture's terms require this to stay visible; null until a snapshot is active. */
+  attribution: OvertureAttribution | null;
   release_checks: Array<{ status: string; latest_release: string; created_at: string }>;
   partitions: Array<{
     id: string;
@@ -671,13 +791,6 @@ export function createContact(input: {
   });
 }
 
-export function updateContact(id: string, name: string): Promise<Contact> {
-  return request<Contact>(`/api/v1/contacts/${encodeURIComponent(id)}/`, {
-    method: "PATCH",
-    body: JSON.stringify({ name }),
-  });
-}
-
 export function addContactEmail(
   contactId: string,
   email: string,
@@ -897,6 +1010,13 @@ export function createKnowledgeFact(input: {
   });
 }
 
+export function approveKnowledgeFact(revisionId: string): Promise<KnowledgeFactRevision> {
+  return request<KnowledgeFactRevision>(
+    `/api/v1/knowledge/fact-revisions/${encodeURIComponent(revisionId)}/approve/`,
+    { method: "POST", body: "{}" },
+  );
+}
+
 export function getKnowledgeContexts(): Promise<KnowledgeContextRevision[]> {
   return request<KnowledgeContextRevision[]>("/api/v1/knowledge/global-context-revisions/");
 }
@@ -906,6 +1026,13 @@ export function createKnowledgeContext(contextText: string): Promise<KnowledgeCo
     method: "POST",
     body: JSON.stringify({ context_text: contextText }),
   });
+}
+
+export function approveKnowledgeContext(revisionId: string): Promise<KnowledgeContextRevision> {
+  return request<KnowledgeContextRevision>(
+    `/api/v1/knowledge/global-context-revisions/${encodeURIComponent(revisionId)}/approve/`,
+    { method: "POST", body: "{}" },
+  );
 }
 
 export function previewKnowledge(query: string): Promise<{
@@ -972,10 +1099,13 @@ export function updateAutomationMode(
   });
 }
 
-export function setAutomationLive(action: "enable-live" | "disable-live"): Promise<AutomationConfiguration> {
+export function setAutomationLive(
+  action: "enable-live" | "disable-live",
+  confirmation?: string,
+): Promise<AutomationConfiguration> {
   return request<AutomationConfiguration>(`/api/v1/automation/actions/${action}/`, {
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
   });
 }
 
@@ -986,8 +1116,70 @@ export function reauthenticate(password: string): Promise<{ reauthentication_act
   });
 }
 
-export function getSearchCategories(): Promise<SearchCategory[]> {
-  return request<SearchCategory[]>("/api/v1/search-categories/");
+export function getSearchCategories(includeInactive = false): Promise<SearchCategory[]> {
+  return request<SearchCategory[]>(
+    `/api/v1/search-categories/${includeInactive ? "?include_inactive=true" : ""}`,
+  );
+}
+
+export function toggleSearchCategory(id: string): Promise<SearchCategory> {
+  return request<SearchCategory>(`/api/v1/search-categories/${encodeURIComponent(id)}/toggle/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+/** `deleted` when the category was removed, `archived` when campaigns already reference it. */
+export function deleteSearchCategory(id: string): Promise<{ outcome: "deleted" | "archived" }> {
+  return request<{ outcome: "deleted" | "archived" }>(
+    `/api/v1/search-categories/${encodeURIComponent(id)}/`,
+    { method: "DELETE" },
+  );
+}
+
+function queryString(params: Record<string, string | number | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : "";
+}
+
+export function getSuppressions(
+  params: { q?: string; page?: number; page_size?: number } = {},
+): Promise<ApiPage<Suppression[]>> {
+  return requestEnvelope<Suppression[]>(`/api/v1/suppressions/${queryString(params)}`) as Promise<
+    ApiPage<Suppression[]>
+  >;
+}
+
+export function createSuppression(input: {
+  email: string;
+  reason: SuppressionReason;
+  evidence?: string;
+}): Promise<Suppression> {
+  return request<Suppression>("/api/v1/suppressions/", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getProspects(filters: ProspectFilters = {}): Promise<ApiPage<Prospect[]>> {
+  return requestEnvelope<Prospect[]>(`/api/v1/prospects/${queryString(filters)}`) as Promise<
+    ApiPage<Prospect[]>
+  >;
+}
+
+/** Same-origin CSV download for the current filters (the proxy forwards the session cookie). */
+export function prospectsExportUrl(filters: ProspectFilters = {}): string {
+  return `/api/v1/prospects/export.csv${queryString({
+    q: filters.q,
+    campaign: filters.campaign,
+    state: filters.state,
+    category: filters.category,
+    neighborhood: filters.neighborhood,
+  })}`;
 }
 
 export function createSearchCategory(name: string, sortOrder = 0): Promise<SearchCategory> {
@@ -1051,4 +1243,15 @@ export function logout(): Promise<void> {
 
 export function problemMessage(problem: Problem): string {
   return problem.detail ?? "No fue posible completar la solicitud.";
+}
+
+export function getIntegrationConfiguration(): Promise<IntegrationConfiguration> {
+  return request<IntegrationConfiguration>("/api/v1/integrations/configuration/");
+}
+
+export function saveIntegrationConfiguration(patch: IntegrationConfigurationPatch): Promise<IntegrationConfiguration> {
+  return request<IntegrationConfiguration>("/api/v1/integrations/configuration/", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }

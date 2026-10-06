@@ -6,8 +6,7 @@ from typing import Any
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.test import Client, override_settings
-from django.urls import reverse
+from django.test import override_settings
 from django.utils import timezone
 
 from apps.automation.execution import deliver_authorized_outbound
@@ -347,51 +346,6 @@ def test_pause_snooze_and_genuine_interaction_control_the_next_due_date(
     assert plan.last_interaction_at == interacted_at
     assert plan.next_due_at >= interacted_at + timedelta(days=30)
     assert CampaignEnrollment.objects.count() == enrollments_before
-
-
-@pytest.mark.django_db
-def test_contact_plan_ui_is_plain_language_and_vendedor_is_read_only(
-    client: Client,
-    owner: User,
-) -> None:
-    contact, _email = _contact(owner)
-    topic = FollowUpTopic.objects.create(
-        workspace=owner.membership.workspace,
-        name="Pedir feedback",
-        objective="Pedir una opinión general sobre el producto.",
-        cadence_days=30,
-        mode=FollowUpTopic.Mode.REVIEW_BEFORE_SEND,
-        next_due_at=timezone.now() + timedelta(days=7),
-        active=True,
-        created_by=owner,
-        updated_by=owner,
-    )
-    client.force_login(owner)
-    response = client.post(
-        reverse("contact-follow-up-topic-approve", args=(contact.pk, topic.pk)),
-    )
-    assert response.status_code == 302
-    page = client.get(reverse("contact-detail", args=(contact.pk,))).content.decode()
-    assert "Temas de seguimiento" in page
-    assert "Pedir feedback" in page
-    assert "Revisar antes de enviar" in page
-    assert "Posponer" in page
-    assert "Próxima fecha" not in page
-    assert "No incluye PDFs" not in page
-
-    seller = User.objects.create_user(username="seller-scheduled", password="password")
-    client.force_login(seller)
-    seller_page = client.get(reverse("contact-detail", args=(contact.pk,))).content.decode()
-    assert "Temas de seguimiento" in seller_page
-    assert "Aprobar tema" not in seller_page
-    assert "Detalles técnicos" not in seller_page
-    assert (
-        client.post(
-            reverse("contact-follow-up-topic-approve", args=(contact.pk, topic.pk)),
-            {"enabled": "on"},
-        ).status_code
-        == 403
-    )
 
 
 @pytest.mark.django_db

@@ -14,14 +14,17 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({
-    session: { role: "ADMIN" },
-    loading: false,
-    refresh: vi.fn(),
-    signOut: vi.fn(),
-  }),
-}));
+vi.mock("@/components/auth-provider", async () => {
+  const { sessionFor } = await import("./session");
+  return {
+    useAuth: () => ({
+      session: sessionFor("ADMIN"),
+      loading: false,
+      refresh: vi.fn(),
+      signOut: vi.fn(),
+    }),
+  };
+});
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();

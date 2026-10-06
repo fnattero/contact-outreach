@@ -36,7 +36,7 @@ from apps.prospects.models import Prospect, ProspectEmail, ProspectIdentity
 def _profile_values() -> dict[str, object]:
     return {
         "company_name": "Componentes Delta SA",
-        "salesperson_name": "Fran",
+        "salesperson_name": "Vendedor",
         "phone": "",
         "whatsapp": "",
         "description": "",
@@ -44,7 +44,7 @@ def _profile_values() -> dict[str, object]:
         "differentiators": "",
         "address": "CABA",
         "website": "",
-        "signature": "Fran · Componentes Delta SA",
+        "signature": "Vendedor · Componentes Delta SA",
         "additional_instructions": "",
         "relevance_threshold": 70,
     }
@@ -126,7 +126,7 @@ def _campaign(
         zone_ids=[zone.pk],
     )
     return transition_campaign(
-        campaign_id=campaign.pk, target_state=Campaign.State.RUNNING, actor=owner
+        campaign_id=campaign.pk, target_state=Campaign.State.DISCOVERING, actor=owner
     )
 
 
@@ -382,7 +382,7 @@ def test_pause_and_cancel_prevent_provider_effects_and_keep_runs_recoverable(
 
     transition_campaign(
         campaign_id=campaign.pk,
-        target_state=Campaign.State.RUNNING,
+        target_state=Campaign.State.DISCOVERING,
         actor=owner,
     )
     completed = advance_search_run(run.pk, provider=provider, resolver=MockMXResolver())

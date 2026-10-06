@@ -4,8 +4,6 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
-from django.test import Client
-from django.urls import reverse
 
 from apps.audit.models import AuditEvent
 from apps.compliance import services as compliance_services
@@ -115,17 +113,3 @@ def test_postgres_advisory_lock_is_stable_per_normalized_email(
     assert all(sql == "SELECT pg_advisory_xact_lock(%s)" for sql, _ in executed)
     assert executed[0][1] == executed[1][1]
     assert executed[0][1] != executed[2][1]
-
-
-@pytest.mark.django_db
-def test_suppression_dashboard_adds_entry_and_requires_login(client: Client, owner: User) -> None:
-    assert client.get(reverse("suppressions")).status_code == 302
-    client.force_login(owner)
-    response = client.post(
-        reverse("suppressions"),
-        {"email": "blocked@example.com", "reason": SuppressionEntry.Reason.MANUAL},
-    )
-    assert response.status_code == 302
-    assert is_email_suppressed("blocked@example.com")
-    page = client.get(reverse("suppressions"))
-    assert b"blocked@example.com" in page.content

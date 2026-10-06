@@ -109,6 +109,10 @@ def _redis_logical_database(redis_url: str, database: int) -> str:
 
 
 APP_ENV = os.getenv("APP_ENV", "development")
+if APP_ENV not in {"development", "test", "production"}:
+    # Every production safeguard keys off APP_ENV == "production"; a typo must not silently
+    # run with development defaults.
+    raise ImproperlyConfigured("APP_ENV must be development, test, or production")
 DEBUG = env_bool("DJANGO_DEBUG", APP_ENV == "development")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "development-only-change-me")
 
@@ -166,7 +170,6 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
@@ -197,7 +200,6 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "apps.accounts.middleware.MembershipSessionMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.core.security.ApplicationSecurityHeadersMiddleware",
 ]
@@ -210,13 +212,9 @@ TEMPLATES = [
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
-            "builtins": ["apps.dashboard.templatetags.ui_extras"],
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-                "apps.accounts.permissions.capabilities_context",
-                "apps.dashboard.context_processors.runtime_safety",
             ],
         },
     }
@@ -244,6 +242,8 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", redis_url_environment).strip(
 CACHE_REDIS_URL = os.getenv("CACHE_REDIS_URL", "").strip()
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip()
 if not CELERY_BROKER_URL:
+    if APP_ENV == "production":
+        raise ImproperlyConfigured("REDIS_URL is required in production")
     CELERY_BROKER_URL = "redis://redis:6379/0"
 if not CACHE_REDIS_URL:
     CACHE_REDIS_URL = _redis_logical_database(CELERY_BROKER_URL, 1)
@@ -281,7 +281,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -314,9 +313,8 @@ CATALOG_MAX_BYTES = 15 * 1024 * 1024
 MIN_FREE_DISK_BYTES = int(os.getenv("MIN_FREE_DISK_BYTES", str(100 * 1024 * 1024)))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "dashboard"
-LOGOUT_REDIRECT_URL = "login"
+# The sign-in page is a frontend route; the backend only redirects here for non-API requests.
+LOGIN_URL = "/login"
 
 TRUSTED_PROXY_IPS = env_list("DJANGO_TRUSTED_PROXY_IPS")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
@@ -355,6 +353,11 @@ SESSION_COOKIE_NAME = os.getenv(
     "SESSION_COOKIE_NAME",
     "__Host-contact_outreach_session" if APP_ENV == "production" else "contact_outreach_session",
 )
+if APP_ENV == "production":
+    if not SESSION_COOKIE_NAME.startswith("__Host-"):
+        raise ImproperlyConfigured("SESSION_COOKIE_NAME must start with __Host- in production")
+    if not 0 < SESSION_COOKIE_AGE <= 43200:
+        raise ImproperlyConfigured("SESSION_COOKIE_AGE must be at most 12 hours in production")
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_PATH = "/"
@@ -367,8 +370,10 @@ X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_SSL_REDIRECT = env_bool("DJANGO_SSL_REDIRECT", APP_ENV == "production")
+# Container and platform health checks reach this private service over plain HTTP.
+SECURE_REDIRECT_EXEMPT = [r"^api/v1/health/(live|ready)/$"]
 SECURE_HSTS_SECONDS = int(
-    os.getenv("DJANGO_HSTS_SECONDS", "300" if APP_ENV == "production" else "0")
+    os.getenv("DJANGO_HSTS_SECONDS", "31536000" if APP_ENV == "production" else "0")
 )
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_HSTS_INCLUDE_SUBDOMAINS", False)
 SECURE_HSTS_PRELOAD = env_bool("DJANGO_HSTS_PRELOAD", False)
@@ -400,6 +405,7 @@ API_PUBLIC_THROTTLE_RATE = os.getenv("API_PUBLIC_THROTTLE_RATE", "30/h")
 API_READ_THROTTLE_RATE = os.getenv("API_READ_THROTTLE_RATE", "300/5m")
 API_MUTATION_THROTTLE_RATE = os.getenv("API_MUTATION_THROTTLE_RATE", "60/5m")
 API_SENSITIVE_THROTTLE_RATE = os.getenv("API_SENSITIVE_THROTTLE_RATE", "10/h")
+API_REAUTH_THROTTLE_RATE = os.getenv("API_REAUTH_THROTTLE_RATE", "5/5m")
 API_EXPORT_THROTTLE_RATE = os.getenv("API_EXPORT_THROTTLE_RATE", "5/h")
 SPECTACULAR_SETTINGS = {
     "TITLE": "Contact Outreach API",

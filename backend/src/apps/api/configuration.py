@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Any, cast
 from uuid import UUID
 
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.core.exceptions import PermissionDenied, ValidationError
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import ManageConfigurationPermission, authenticated_user
 from apps.api.schema import SchemaAPIView
 from apps.configuration.message_templates import (
@@ -23,9 +23,11 @@ from apps.configuration.models import (
     WorkspaceMessageTemplateRevision,
 )
 from apps.configuration.services import (
+    delete_or_archive_config_item,
     runtime_prompt_configuration,
     save_config_item,
     save_prompt_configuration,
+    toggle_config_item,
 )
 
 
@@ -37,27 +39,36 @@ class SearchCategoryInputSerializer(serializers.Serializer[dict[str, Any]]):
 class SearchCategorySerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField()
     name = serializers.CharField()
+    active = serializers.BooleanField()
     sort_order = serializers.IntegerField()
     rules_revision = serializers.IntegerField()
     rules = serializers.ListField(child=serializers.DictField())
 
 
+class CategoryListQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    # Selection lists (campaign creation) want active categories only; the management page also
+    # needs the inactive ones, otherwise a category switched off could never be switched back on.
+    include_inactive = serializers.BooleanField(required=False, default=False)
+
+
 class CategoryRuleInputSerializer(serializers.Serializer[dict[str, Any]]):
-    taxonomy_code = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    # save_config_item reads this key unconditionally, so it must always be present.
+    taxonomy_code = serializers.CharField(max_length=160, allow_blank=True, default="")
     name_terms = serializers.ListField(
         child=serializers.CharField(max_length=80), required=False, default=list
     )
 
 
 class CategoryRulesInputSerializer(serializers.Serializer[dict[str, Any]]):
-    rules = serializers.ListField(child=CategoryRuleInputSerializer(), max_length=40)
+    # Product rule: a category admits at most 20 search rules (it bounds the Overture query).
+    rules = serializers.ListField(child=CategoryRuleInputSerializer(), max_length=20)
 
 
 class SearchZoneSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField()
     name = serializers.CharField()
     official_code = serializers.CharField()
-    level = serializers.CharField()
+    level = serializers.ChoiceField(choices=SearchZone.Level.choices)
     province_code = serializers.CharField()
     province_name = serializers.CharField()
     parent_id = serializers.UUIDField(allow_null=True)
@@ -75,7 +86,7 @@ class MessageTemplateInputSerializer(serializers.Serializer[dict[str, Any]]):
 
 class MessageTemplateSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField()
-    kind = serializers.CharField()
+    kind = serializers.ChoiceField(choices=WorkspaceMessageTemplateRevision.Kind.choices)
     subject = serializers.CharField()
     body = serializers.CharField()
     revision = serializers.IntegerField()
@@ -98,6 +109,7 @@ def _category_data(category: SearchCategory) -> dict[str, object]:
     return {
         "id": category.pk,
         "name": category.name,
+        "active": category.active,
         "sort_order": category.sort_order,
         "rules_revision": category.rules_revision,
         "rules": [
@@ -146,12 +158,15 @@ class SearchCategoryListView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
+        query = CategoryListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
         workspace_id = authenticated_user(request).membership.workspace_id
         categories = SearchCategory.objects.filter(
             workspace_id=workspace_id,
-            active=True,
             archived_at__isnull=True,
         ).prefetch_related("rules")
+        if not query.validated_data["include_inactive"]:
+            categories = categories.filter(active=True)
         return Response(
             {"data": [SearchCategorySerializer(_category_data(item)).data for item in categories]}
         )
@@ -160,19 +175,56 @@ class SearchCategoryListView(SchemaAPIView):
         serializer = SearchCategoryInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            category = SearchCategory.objects.create(
-                workspace=authenticated_user(request).membership.workspace,
-                name=cast(str, serializer.validated_data["name"]),
-                sort_order=cast(int, serializer.validated_data["sort_order"]),
+            category = save_config_item(
+                item=SearchCategory(
+                    name=cast(str, serializer.validated_data["name"]),
+                    sort_order=cast(int, serializer.validated_data["sort_order"]),
+                ),
+                actor=authenticated_user(request),
             )
-        except IntegrityError as exc:
-            raise serializers.ValidationError(
-                {"name": "Ya existe una categoría con ese nombre."}
-            ) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        assert isinstance(category, SearchCategory)
         return Response(
             {"data": SearchCategorySerializer(_category_data(category)).data},
             status=status.HTTP_201_CREATED,
         )
+
+
+class SearchCategoryDetailView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageConfigurationPermission)
+
+    def delete(self, request: Request, category_id: UUID) -> Response:
+        """Remove a category, or archive it when a campaign already references it."""
+        try:
+            outcome = delete_or_archive_config_item(
+                model=SearchCategory,
+                item_id=category_id,
+                actor=authenticated_user(request),
+            )
+        except SearchCategory.DoesNotExist as exc:
+            raise NotFound from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        return Response({"data": {"outcome": outcome}})
+
+
+class SearchCategoryToggleView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageConfigurationPermission)
+
+    def post(self, request: Request, category_id: UUID) -> Response:
+        try:
+            category = toggle_config_item(
+                model=SearchCategory,
+                item_id=category_id,
+                actor=authenticated_user(request),
+            )
+        except SearchCategory.DoesNotExist as exc:
+            raise NotFound from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        assert isinstance(category, SearchCategory)
+        return Response({"data": SearchCategorySerializer(_category_data(category)).data})
 
 
 class SearchCategoryRulesView(SchemaAPIView):
@@ -202,8 +254,9 @@ class SearchCategoryRulesView(SchemaAPIView):
                 actor=authenticated_user(request),
                 category_rules=cast(list[dict[str, object]], serializer.validated_data["rules"]),
             )
-        except ValidationError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        assert isinstance(saved, SearchCategory)
         return Response({"data": SearchCategorySerializer(_category_data(saved)).data})
 
     patch = post
@@ -284,8 +337,8 @@ class MessageTemplateRevisionView(SchemaAPIView):
                 subject=cast(str, serializer.validated_data.get("subject", "")),
                 body=cast(str, serializer.validated_data["body"]),
             )
-        except ValidationError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         return Response(
             {"data": MessageTemplateSerializer(_template_data(template)).data},
             status=status.HTTP_201_CREATED,

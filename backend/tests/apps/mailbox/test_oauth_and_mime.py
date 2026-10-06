@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from email import policy
 from email.parser import BytesParser
-from pathlib import Path
 
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured, ValidationError
-from django.test import Client, override_settings
-from django.urls import reverse
+from django.test import override_settings
 
 from apps.integrations.contracts import GmailConnectionData, ProviderError
 from apps.integrations.gmail import GMAIL_SCOPES
@@ -38,7 +36,7 @@ def test_mime_is_plain_text_with_exact_pdf_and_stable_message_id() -> None:
 
     pdf = b"%PDF-1.4\nfixture\n%%EOF"
     built = build_message(
-        sender="owner@gmail.com",
+        sender="owner@example.invalid",
         recipient="ventas@example.com",
         subject="PUBLICIDAD - Consulta",
         body_text="Mensaje en texto plano.",
@@ -64,7 +62,7 @@ def test_mime_is_plain_text_with_exact_pdf_and_stable_message_id() -> None:
     assert attachments[0].get_payload(decode=True) == pdf
 
     renamed = build_message(
-        sender="owner@gmail.com",
+        sender="owner@example.invalid",
         recipient="ventas@example.com",
         subject="Asunto",
         body_text="Texto",
@@ -100,7 +98,7 @@ def test_mime_preserves_ordered_pdfs_and_enforces_source_and_final_limits(
     first = b"%PDF-" + b"a" * (8 * 1024 * 1024 - 5)
     second = b"%PDF-" + b"b" * (MAX_SOURCE_PDF_BYTES - len(first) - 5)
     built = build_message(
-        sender="owner@gmail.com",
+        sender="owner@example.invalid",
         recipient="ventas@example.com",
         subject="Propuesta",
         body_text="Adjuntamos ambos catálogos.",
@@ -121,7 +119,7 @@ def test_mime_preserves_ordered_pdfs_and_enforces_source_and_final_limits(
 
     with pytest.raises(ValidationError, match="17 MiB"):
         build_message(
-            sender="owner@gmail.com",
+            sender="owner@example.invalid",
             recipient="ventas@example.com",
             subject="Propuesta",
             body_text="Adjuntos demasiado grandes.",
@@ -138,7 +136,7 @@ def test_mime_preserves_ordered_pdfs_and_enforces_source_and_final_limits(
     monkeypatch.setattr(mime_module, "MAX_SERIALIZED_MIME_BYTES", 100)
     with pytest.raises(ValidationError, match="24 MiB"):
         build_message(
-            sender="owner@gmail.com",
+            sender="owner@example.invalid",
             recipient="ventas@example.com",
             subject="Propuesta",
             body_text="Correo serializado demasiado grande.",
@@ -155,7 +153,7 @@ def test_build_message_rejects_conflicting_or_malformed_pdf_attachments() -> Non
     from apps.mailbox.mime import MAX_PDF_BYTES
 
     common_kwargs = {
-        "sender": "owner@gmail.com",
+        "sender": "owner@example.invalid",
         "recipient": "ventas@example.com",
         "subject": "Propuesta",
         "body_text": "Texto",
@@ -215,7 +213,7 @@ def test_build_reply_message_validates_headers() -> None:
 
     with pytest.raises(ValidationError, match="identificador del mensaje anterior"):
         build_reply_message(
-            sender="owner@gmail.com",
+            sender="owner@example.invalid",
             recipient="ventas@example.com",
             subject="Re: Propuesta",
             body_text="Texto",
@@ -236,56 +234,6 @@ def test_token_crypto_rejects_missing_key_empty_and_invalid_ciphertext() -> None
     with override_settings(FIELD_ENCRYPTION_KEY=""):
         with pytest.raises(ImproperlyConfigured, match="FIELD_ENCRYPTION_KEY"):
             encrypt_token("secret")
-
-
-@pytest.mark.django_db
-def test_fake_oauth_connect_test_only_self_and_disconnect(
-    client: Client, owner: User, private_catalog_dir: Path
-) -> None:
-    del private_catalog_dir
-    client.force_login(owner)
-    begin = client.post(reverse("gmail-connect"))
-    assert begin.status_code == 302
-    callback = client.get(begin["Location"])
-    assert callback.status_code == 302
-
-    connection = GmailConnection.objects.get(owner=owner)
-    assert set(connection.scopes) == set(GMAIL_SCOPES)
-    assert "fake-refresh-token" not in connection.refresh_token_encrypted
-    assert decrypt_token(connection.refresh_token_encrypted) == "fake-refresh-token"
-
-    blocked = client.post(reverse("gmail-test"))
-    assert blocked.status_code == 302
-    assert not FakeGmailMessage.objects.exists()
-
-    with override_settings(SEND_MODE="live", SEND_KILL_SWITCH=False):
-        tested = client.post(
-            reverse("gmail-test"),
-            {"recipient": "attacker@example.com"},
-        )
-    assert tested.status_code == 302
-    connection.refresh_from_db()
-    assert connection.last_tested_at is not None
-    fake = FakeGmailMessage.objects.get()
-    assert fake.recipient == connection.email
-    assert fake.recipient != "attacker@example.com"
-
-    disconnected = client.post(reverse("gmail-disconnect"))
-    assert disconnected.status_code == 302
-    connection.refresh_from_db()
-    assert connection.status == GmailConnection.Status.DISCONNECTED
-    assert connection.refresh_token_encrypted == ""
-
-
-@pytest.mark.django_db
-def test_gmail_mutations_require_login_and_post(owner: User) -> None:
-    anonymous = Client()
-    assert anonymous.get(reverse("gmail-settings")).status_code == 302
-    logged_in = Client()
-    logged_in.force_login(owner)
-    assert logged_in.get(reverse("gmail-connect")).status_code == 405
-    assert logged_in.get(reverse("gmail-test")).status_code == 405
-    assert logged_in.get(reverse("gmail-disconnect")).status_code == 405
 
 
 class _StubExchangeProvider:
@@ -333,7 +281,7 @@ def test_connect_gmail_rejects_non_personal_domain_when_provider_is_api(
 def test_connect_gmail_rejects_scope_mismatch(owner: User, monkeypatch: pytest.MonkeyPatch) -> None:
     stub = _StubExchangeProvider(
         GmailConnectionData(
-            email="user@gmail.com",
+            email="user@example.invalid",
             refresh_token="fake-refresh-token",
             scopes=("https://www.googleapis.com/auth/gmail.readonly",),
             history_id="1",
@@ -354,7 +302,7 @@ def test_connect_gmail_rejects_missing_history_id(
 ) -> None:
     stub = _StubExchangeProvider(
         GmailConnectionData(
-            email="user@gmail.com",
+            email="user@example.invalid",
             refresh_token="fake-refresh-token",
             scopes=GMAIL_SCOPES,
             history_id="",

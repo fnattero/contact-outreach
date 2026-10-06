@@ -40,13 +40,17 @@ from apps.api.campaigns import (
     CampaignMessageListView,
     CampaignProspectListView,
     ProspectExportView,
+    ProspectListView,
 )
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
+from apps.api.compliance import SuppressionListView
 from apps.api.configuration import (
     MessageTemplateRevisionView,
     PromptConfigurationView,
+    SearchCategoryDetailView,
     SearchCategoryListView,
     SearchCategoryRulesView,
+    SearchCategoryToggleView,
     SearchZoneGeometryView,
     SearchZoneListView,
 )
@@ -68,7 +72,7 @@ from apps.api.gmail import (
     GmailTestView,
 )
 from apps.api.health import DegradedHealthView
-from apps.api.integrations import IntegrationStatusView
+from apps.api.integrations import IntegrationConfigurationView, IntegrationStatusView
 from apps.api.knowledge import (
     KnowledgeContextApproveView,
     KnowledgeContextRevisionView,
@@ -98,7 +102,8 @@ from apps.api.scheduled import (
     ContactPlanView,
     FollowUpTopicDetailView,
     FollowUpTopicListView,
-    ScheduledAttemptActionView,
+    ScheduledAttemptAuthorizeView,
+    ScheduledAttemptDraftView,
 )
 from apps.api.workspace import BusinessProfileView
 from apps.health.views import liveness, readiness
@@ -192,6 +197,11 @@ urlpatterns = [
     path("overture/sync/", OvertureSyncView.as_view(), name="api-overture-sync"),
     path("integrations/status/", IntegrationStatusView.as_view(), name="api-integrations-status"),
     path(
+        "integrations/configuration/",
+        IntegrationConfigurationView.as_view(),
+        name="api-integrations-configuration",
+    ),
+    path(
         "integrations/gmail/connection/",
         GmailConnectionView.as_view(),
         name="api-gmail-connection",
@@ -218,6 +228,16 @@ urlpatterns = [
         SearchCategoryRulesView.as_view(),
         name="api-search-category-rules",
     ),
+    path(
+        "search-categories/<uuid:category_id>/",
+        SearchCategoryDetailView.as_view(),
+        name="api-search-category-detail",
+    ),
+    path(
+        "search-categories/<uuid:category_id>/toggle/",
+        SearchCategoryToggleView.as_view(),
+        name="api-search-category-toggle",
+    ),
     path("search-zones/", SearchZoneListView.as_view(), name="api-search-zones"),
     path(
         "search-zones/<uuid:zone_id>/geometry/",
@@ -226,6 +246,7 @@ urlpatterns = [
     ),
     path("dashboard/summary/", DashboardSummaryView.as_view(), name="api-dashboard-summary"),
     path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
+    path("prospects/", ProspectListView.as_view(), name="api-prospects"),
     path("prospects/export.csv", ProspectExportView.as_view(), name="api-prospect-export"),
     path(
         "campaigns/<uuid:campaign_id>/",
@@ -326,12 +347,12 @@ urlpatterns = [
     ),
     path(
         "contacts/<uuid:contact_id>/scheduled-attempts/<uuid:attempt_id>/draft/",
-        ScheduledAttemptActionView.as_view(),
+        ScheduledAttemptDraftView.as_view(),
         name="api-scheduled-attempt-draft",
     ),
     path(
         "contacts/<uuid:contact_id>/scheduled-attempts/<uuid:attempt_id>/authorize/",
-        ScheduledAttemptActionView.as_view(),
+        ScheduledAttemptAuthorizeView.as_view(),
         name="api-scheduled-attempt-authorize",
     ),
     path(
@@ -359,6 +380,7 @@ urlpatterns = [
         RestrictionRevokeView.as_view(),
         name="api-contact-restriction-revoke",
     ),
+    path("suppressions/", SuppressionListView.as_view(), name="api-suppressions"),
     path("health/live/", liveness, name="api-health-live"),
     path("health/ready/", readiness, name="api-health-ready"),
     path("health/degraded/", DegradedHealthView.as_view(), name="api-health-degraded"),

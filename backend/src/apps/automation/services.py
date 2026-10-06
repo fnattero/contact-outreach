@@ -152,22 +152,6 @@ def set_live_mode(
 
 
 @transaction.atomic
-def save_global_knowledge_context(
-    *,
-    workspace: Workspace,
-    actor: User,
-    context_text: str,
-) -> WorkspaceKnowledgeContextRevision:
-    revision = create_global_knowledge_context_revision(
-        workspace=workspace,
-        actor=actor,
-        context_text=context_text,
-        source_notes="",
-    )
-    return approve_global_knowledge_context_revision(revision, actor=actor)
-
-
-@transaction.atomic
 def create_knowledge_revision(
     *,
     workspace: Workspace,
@@ -203,27 +187,6 @@ def create_knowledge_revision(
         after={"fact_id": str(fact.pk), "version": version},
     )
     return revision
-
-
-@transaction.atomic
-def save_knowledge_revision(
-    *,
-    workspace: Workspace,
-    actor: User,
-    title: str,
-    category: str,
-    text: str,
-    source_notes: str = "",
-) -> KnowledgeFactRevision:
-    revision = create_knowledge_revision(
-        workspace=workspace,
-        actor=actor,
-        title=title,
-        category=category,
-        text=text,
-        source_notes=source_notes,
-    )
-    return approve_knowledge_revision(revision, actor=actor)
 
 
 @transaction.atomic

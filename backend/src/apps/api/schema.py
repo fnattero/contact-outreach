@@ -15,7 +15,8 @@ class ApiSchemaSerializer(serializers.Serializer[dict[str, Any]]):
     object shape until a feature-specific response serializer is added.
     """
 
-    data = serializers.JSONField(required=False)
+    # `data` shadows Serializer.data; this is only a schema fallback, never validated at runtime.
+    data = serializers.JSONField(required=False)  # type: ignore[assignment]
     meta = serializers.JSONField(required=False)
     detail = serializers.CharField(required=False)
 

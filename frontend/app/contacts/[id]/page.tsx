@@ -19,7 +19,7 @@ import {
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
-import {
+import { can,
   addContactEmail,
   createContactRestriction,
   createCommunicationPlan,
@@ -49,10 +49,11 @@ export default function ContactDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [plans, setPlans] = useState<CommunicationPlan[]>([]);
   const { session } = useAuth();
+  const canManage = can(session, "manage_contacts");
 
   function refresh() {
     void getContact(params.id).then(setContact).catch(setError);
-    if (session?.role === "ADMIN") void getCommunicationPlans(params.id).then(setPlans).catch(setError);
+    if (canManage) void getCommunicationPlans(params.id).then(setPlans).catch(setError);
   }
 
   useEffect(() => {
@@ -64,11 +65,11 @@ export default function ContactDetailPage() {
       .catch((problem) => {
         if (!cancelled) setError(problem);
       });
-    if (session?.role === "ADMIN") void getCommunicationPlans(params.id).then(setPlans).catch(setError);
+    if (canManage) void getCommunicationPlans(params.id).then(setPlans).catch(setError);
     return () => {
       cancelled = true;
     };
-  }, [params.id, session?.role]);
+  }, [params.id, canManage]);
 
   if (error) return <AuthError error={error} />;
   if (!contact) return <Skeleton active paragraph={{ rows: 10 }} />;
@@ -152,10 +153,10 @@ export default function ContactDetailPage() {
                   {email.active_restriction_count ? (
                     <Tag color="red">Restringido</Tag>
                   ) : null}
-                  {session?.role === "ADMIN" && !email.is_preferred ? (
+                  {can(session, "manage_contacts") && !email.is_preferred ? (
                     <Button size="small" loading={busy === email.id} onClick={() => void choosePreferred(email.id)}>Preferir</Button>
                   ) : null}
-                  {session?.role === "ADMIN" && email.validity !== "VALID" ? (
+                  {can(session, "manage_contacts") && email.validity !== "VALID" ? (
                     <Button size="small" loading={busy === email.id} onClick={() => void validateEmail(email.id)}>Validar</Button>
                   ) : null}
                 </Flex>
@@ -167,7 +168,7 @@ export default function ContactDetailPage() {
         )}
       </Card>
 
-      {session?.role === "ADMIN" ? (
+      {can(session, "manage_contacts") ? (
         <Card title="Agregar email">
           <Form layout="vertical" onFinish={(values) => void addEmail(values as { email: string; label?: string })}>
             <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}><Input /></Form.Item>
@@ -177,9 +178,9 @@ export default function ContactDetailPage() {
         </Card>
       ) : null}
 
-      {contact.restrictions.length || session?.role === "ADMIN" ? (
+      {contact.restrictions.length || can(session, "manage_contacts") ? (
         <Card title="Restricciones">
-          {session?.role === "ADMIN" ? (
+          {can(session, "manage_contacts") ? (
             <Form layout="vertical" onFinish={(values) => void addRestriction(values as { scope: "CONTACT" | "EMAIL"; email_address_id?: string; reason: string })}>
               <Flex gap="middle" wrap>
                 <Form.Item name="scope" label="Alcance" rules={[{ required: true }]}><Select style={{ minWidth: 180 }} options={[{ value: "CONTACT", label: "Todo el contacto" }, { value: "EMAIL", label: "Sólo este email" }]} /></Form.Item>
@@ -199,7 +200,7 @@ export default function ContactDetailPage() {
                 />
                 <Flex gap="small" align="center">
                   <Tag color={restriction.revoked_at ? "default" : "red"}>{restriction.revoked_at ? "Revocada" : "Activa"}</Tag>
-                  {session?.role === "ADMIN" && restriction.kind === "MANUAL" && !restriction.revoked_at ? (
+                  {can(session, "manage_contacts") && restriction.kind === "MANUAL" && !restriction.revoked_at ? (
                     <Popconfirm title="¿Revocar esta restricción?" onConfirm={() => void revokeRestriction(restriction.id)} okText="Revocar" cancelText="Volver">
                       <Button size="small" loading={busy === restriction.id}>Revocar</Button>
                     </Popconfirm>
@@ -244,7 +245,7 @@ export default function ContactDetailPage() {
         )}
       </Card>
 
-      {session?.role === "ADMIN" ? (
+      {can(session, "manage_contacts") ? (
         <Card title="Seguimiento programado">
           <Form layout="vertical" onFinish={(values) => void addPlan(values as { preferred_email_id: string; purpose: string; goal_text?: string })}>
             <Form.Item name="preferred_email_id" label="Email preferido" rules={[{ required: true }]}><Select options={contact.emails.filter((email) => email.is_preferred && email.validity === "VALID").map((email) => ({ value: email.id, label: email.original_email }))} /></Form.Item>

@@ -3,11 +3,13 @@
 import { Alert, Button, Card, Dropdown, Flex } from "antd";
 import type { MenuProps } from "antd";
 import { useEffect, useState } from "react";
-import { AuthError } from "@/components/auth-provider";
+import { AuthError, useAuth } from "@/components/auth-provider";
+import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
+import { ConfigurationForm } from "./configuration-form";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import {
+import { can,
   disconnectGmail,
   getGmailConnection,
   getIntegrationStatus,
@@ -29,10 +31,12 @@ function percent(value: string): string {
 }
 
 export default function IntegrationsSettingsPage() {
+  const { session } = useAuth();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [gmail, setGmail] = useState<GmailConnection | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [gmailBusy, setGmailBusy] = useState(false);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [technicalOpen, setTechnicalOpen] = useState(false);
 
   useEffect(() => {
@@ -44,6 +48,7 @@ export default function IntegrationsSettingsPage() {
       .catch(setError);
   }, []);
 
+  if (!can(session, "manage_integrations")) return <AuthError error={{ detail: "No tenés permisos para ver integraciones." }} />;
   if (error && !status) return <AuthError error={error} />;
   if (!status) return <LoadingState layout="list" />;
 
@@ -77,6 +82,7 @@ export default function IntegrationsSettingsPage() {
     setError(null);
     try {
       setGmail(await disconnectGmail());
+      setDisconnectOpen(false);
     } catch (problem) {
       setError(problem);
     } finally {
@@ -86,21 +92,15 @@ export default function IntegrationsSettingsPage() {
 
   const gmailActions: MenuProps["items"] = [
     { key: "test", label: "Probar conexión", onClick: () => void test() },
-    { key: "disconnect", label: "Desconectar", danger: true, onClick: () => void disconnect() },
+    { key: "disconnect", label: "Desconectar", danger: true, onClick: () => setDisconnectOpen(true) },
   ];
 
   const technicalAction = <Button type="link" onClick={() => setTechnicalOpen(true)}>Ver detalles técnicos</Button>;
 
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Integraciones" description="Estado operativo seguro. Las credenciales pertenecen al entorno y nunca se muestran aquí." />
+      <PageHeader title="Integraciones" description="Estado de las conexiones y configuración de proveedores. Las credenciales se guardan cifradas y nunca se muestran." />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
-      <Alert
-        type="info"
-        showIcon
-        message="Las credenciales se administran como secretos del backend"
-        description="Esta pantalla sólo expone proveedor, configuración segura y estado de conexión."
-      />
       <Card title="Servicios conectados">
         <div className="integration-list">
           <div className="integration-row">
@@ -135,6 +135,23 @@ export default function IntegrationsSettingsPage() {
           </div>
         </div>
       </Card>
+      {disconnectOpen ? (
+        <ConfirmDangerModal
+          open
+          title="Desconectar Gmail"
+          consequences={[
+            "Se eliminan las credenciales guardadas de la cuenta de Gmail.",
+            "Los envíos y la lectura de respuestas se detienen hasta que vuelvas a conectar una cuenta.",
+            "Para cambiar las credenciales de OAuth hay que desconectar primero.",
+          ]}
+          confirmationWord="CONFIRMAR"
+          dangerLabel="Desconectar Gmail"
+          confirming={gmailBusy}
+          onCancel={() => setDisconnectOpen(false)}
+          onConfirm={() => void disconnect()}
+        />
+      ) : null}
+      <ConfigurationForm />
       <Card title="Confianza de búsqueda">
         <div className="integration-confidence"><strong>{percent(status.extractor.overture_min_confidence)}</strong><span>Confianza mínima</span><p>Define el mínimo de confianza requerido para aceptar resultados de búsqueda.</p></div>
       </Card>

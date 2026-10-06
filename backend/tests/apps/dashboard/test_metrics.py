@@ -16,7 +16,7 @@ from apps.contacts.models import (
     EmailAddress,
     Organization,
 )
-from apps.dashboard.metrics import duration_label, workspace_summary_metrics
+from apps.dashboard.metrics import workspace_summary_metrics
 from apps.mailbox.models import GmailConnection, InboundMessage
 
 
@@ -439,10 +439,3 @@ def test_metrics_dedupe_recipient_and_include_legacy_reply_after_reminder(owner)
     assert metrics.responses_after_initial == 0
     assert metrics.responses_after_reminder == 1
     assert metrics.median_first_response is not None
-
-
-def test_metric_helpers_explain_empty_values() -> None:
-    assert duration_label(None) == "—"
-    assert duration_label(timedelta(minutes=45)) == "45 min"
-    assert duration_label(timedelta(hours=3, minutes=15)) == "3 h 15 min"
-    assert duration_label(timedelta(days=2, hours=2)) == "2 días 2 h"

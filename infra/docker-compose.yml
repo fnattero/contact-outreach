@@ -72,6 +72,7 @@ services:
       API_READ_THROTTLE_RATE: ${API_READ_THROTTLE_RATE:-300/5minute}
       API_MUTATION_THROTTLE_RATE: ${API_MUTATION_THROTTLE_RATE:-60/5minute}
       API_SENSITIVE_THROTTLE_RATE: ${API_SENSITIVE_THROTTLE_RATE:-10/hour}
+      API_REAUTH_THROTTLE_RATE: ${API_REAUTH_THROTTLE_RATE:-5/5minute}
       API_EXPORT_THROTTLE_RATE: ${API_EXPORT_THROTTLE_RATE:-5/hour}
       PRIVATE_STORAGE_BACKEND: s3
       S3_ENDPOINT_URL: http://minio:9000
@@ -136,6 +137,53 @@ services:
       start_period: 60s
     stop_grace_period: 100s
     restart: unless-stopped
+
+  # Quality gates. Both sit behind the `test` profile so `make up` never starts them, and both are
+  # run one-shot through `docker compose run` by the Makefile.
+  backend-tests:
+    build:
+      context: ./backend
+      target: dev
+    profiles:
+      - test
+    # The repository root, not ./backend: tests/test_settings.py resolves parents[2] to read
+    # infra/docker-compose.yml and backend/supervisord.conf.
+    volumes:
+      - ./:/repo
+    working_dir: /repo/backend
+    # Run as the invoking user. Under cap_drop: ALL the container's root loses CAP_DAC_OVERRIDE
+    # and cannot write to a bind mount owned by the host user, and matching the uid also keeps
+    # pytest artefacts (.pytest_cache, .test-private) from landing root-owned in the checkout.
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    # No depends_on and no data network: settings_test.py uses in-memory SQLite, a locmem cache
+    # and CELERY_TASK_ALWAYS_EAGER, so Postgres, Redis and MinIO are all unnecessary.
+    environment:
+      DJANGO_SETTINGS_MODULE: contact_outreach.settings_test
+      COVERAGE_FILE: /tmp/.coverage
+      # /opt/venv and / are root-owned; tool caches need a writable HOME.
+      HOME: /tmp
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["pytest"]
+
+  frontend-tests:
+    build:
+      context: ./frontend
+      target: checks
+    profiles:
+      - test
+    # No bind mount: the `checks` stage COPYs the sources, so `make frontend-check` always
+    # rebuilds that layer against the current working tree.
+    working_dir: /app
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["pnpm", "test"]
 
   postgres:
     image: postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0

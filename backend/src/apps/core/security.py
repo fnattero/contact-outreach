@@ -23,6 +23,10 @@ def _trusted_proxy(remote_address: str) -> bool:
     return False
 
 
+# Set only by InternalProxyMiddleware, from the address the authenticated frontend proxy reports.
+CLIENT_IP_META_KEY = "CONTACT_OUTREACH_CLIENT_IP"
+
+
 def internal_proxy_authenticated(request: HttpRequest) -> bool:
     expected = getattr(settings, "INTERNAL_PROXY_TOKEN", "")
     received = request.META.get("HTTP_X_INTERNAL_PROXY_TOKEN", "")
@@ -93,6 +97,10 @@ class ApplicationSecurityHeadersMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
+        if request.path.startswith("/api/v1/"):
+            # API responses carry conversations, contacts and session data; never let an
+            # intermediary or the browser cache them. Views that set their own policy keep it.
+            response.setdefault("Cache-Control", "private, no-store")
         response.setdefault("Content-Security-Policy", self.CSP)
         response.setdefault(
             "Permissions-Policy",

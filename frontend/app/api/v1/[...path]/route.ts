@@ -18,6 +18,35 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
+// In production a missing or malformed setting must stop the proxy instead of degrading: without the
+// token every call would be rejected, and without the public origin the Host would come from the
+// request. Returns the names of the offending settings (logged, never sent to the browser).
+function productionConfigurationProblems(): string[] {
+  if (process.env.NODE_ENV !== "production") {
+    return [];
+  }
+  const problems: string[] = [];
+  if (!process.env.BACKEND_INTERNAL_URL) problems.push("BACKEND_INTERNAL_URL");
+  if (!process.env.INTERNAL_PROXY_TOKEN) problems.push("INTERNAL_PROXY_TOKEN");
+  const origin = process.env.PUBLIC_APP_ORIGIN;
+  if (!origin) {
+    problems.push("PUBLIC_APP_ORIGIN");
+  } else {
+    try {
+      const parsed = new URL(origin);
+      // HTTPS everywhere except a local stack, which has no certificate.
+      const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+      const schemeAllowed = parsed.protocol === "https:" || (parsed.protocol === "http:" && loopback);
+      if (!schemeAllowed || parsed.origin !== origin.replace(/\/$/, "")) {
+        problems.push("PUBLIC_APP_ORIGIN");
+      }
+    } catch {
+      problems.push("PUBLIC_APP_ORIGIN");
+    }
+  }
+  return problems;
+}
+
 function backendUrl(path: string[], search: string): URL {
   const base = process.env.BACKEND_INTERNAL_URL;
   if (!base) {
@@ -59,6 +88,14 @@ function forwardedRequestHeaders(request: Request, correlationId: string): Heade
   headers.set("X-Forwarded-Host", publicOrigin.host);
   headers.set("X-Forwarded-Proto", publicOrigin.protocol.replace(":", ""));
   headers.set("X-Correlation-ID", correlationId);
+
+  // The backend only sees this service's address. Pass on the browser's, read from the header the
+  // platform edge sets (Railway: X-Real-IP), so lockouts and rate limits apply per client. The
+  // backend accepts it only together with the proxy token and ignores anything that is not an IP.
+  const clientIp = request.headers.get(process.env.CLIENT_IP_HEADER || "x-real-ip")?.trim();
+  if (clientIp) {
+    headers.set("X-Internal-Client-IP", clientIp);
+  }
   return headers;
 }
 
@@ -79,6 +116,24 @@ function forwardedResponseHeaders(upstream: Response): Headers {
 
 async function proxyRequest(request: Request, context: RouteContext): Promise<Response> {
   const correlationId = request.headers.get("X-Correlation-ID") ?? newCorrelationId();
+  const configurationProblems = productionConfigurationProblems();
+  if (configurationProblems.length > 0) {
+    console.error(`Proxy is not configured: ${configurationProblems.join(", ")}`);
+    return Response.json(
+      {
+        type: "about:blank",
+        title: "Servicio no disponible",
+        status: 503,
+        code: "proxy_not_configured",
+        detail: "El servicio no está disponible en este momento.",
+        correlation_id: correlationId,
+      },
+      {
+        status: 503,
+        headers: { "Cache-Control": "private, no-store", "X-Correlation-ID": correlationId },
+      },
+    );
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 

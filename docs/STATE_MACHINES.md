@@ -25,18 +25,18 @@ Estados: `DRAFT`, `DISCOVERING`, `AWAITING_APPROVAL`, `RUNNING`, `PAUSED`, `CANC
 | DISCOVERING | AWAITING_APPROVAL | Todas las queries terminaron y audiencia final quedó persistida |
 | DISCOVERING | PAUSED | Admin o fallo recuperable de cobertura/integración/seguridad |
 | AWAITING_APPROVAL | RUNNING | Aprobación campaign-level válida o inicio explícito de per-message con filas aprobadas |
-| AWAITING_APPROVAL | PAUSED | Admin o preflight recuperable |
 | RUNNING | PAUSED | Admin, kill switch, Gmail/PDF inválido, cuotas de seguridad o error recuperable |
-| PAUSED | estado_anterior | Admin reanuda y todas las precondiciones vuelven a ser válidas |
+| PAUSED | DISCOVERING | Admin reanuda una campaña que aún no fue aprobada; sigue la búsqueda |
+| PAUSED | RUNNING | Admin reanuda una campaña ya aprobada y las precondiciones vuelven a ser válidas |
 | DRAFT/DISCOVERING/AWAITING_APPROVAL/RUNNING/PAUSED | CANCELLED | Admin cancela; no empiezan nuevos efectos |
 | RUNNING | COMPLETED | Discovery terminó y cada initial/recordatorio posible quedó terminal |
-| DISCOVERING/AWAITING_APPROVAL/RUNNING/PAUSED | STOPPED_ERROR | Integridad irrecuperable impide continuar |
+| DISCOVERING/RUNNING | STOPPED_ERROR | Integridad irrecuperable impide continuar |
 
-`CANCELLED`, `COMPLETED` y `STOPPED_ERROR` son terminales. Pausa guarda `resume_state`; nunca salta
-aprobación. Un mensaje ya aceptado por Gmail no se revierte.
+`CANCELLED`, `COMPLETED` y `STOPPED_ERROR` son terminales. Reanudar nunca salta la
+aprobación: sin `approved_at` la campaña vuelve a `DISCOVERING`, nunca a `RUNNING`. Un mensaje ya aceptado por Gmail no se revierte.
 
 Discovery mantiene subestado `PENDING|RUNNING|TARGET_REACHED|EXHAUSTED_QUERIES|
-EXHAUSTED_RAW_LIMIT|FAILED_PROVIDER`. Los últimos cuatro cierran búsqueda; sólo los resultados
+EXHAUSTED_RAW_LIMIT|EXHAUSTED_COST|FAILED_PROVIDER`. Los últimos cinco cierran búsqueda; sólo los resultados
 persistidos pasan a audiencia. Si falta una provincia READY, el inicio no sale de DRAFT.
 
 ## 3. Enrollment
