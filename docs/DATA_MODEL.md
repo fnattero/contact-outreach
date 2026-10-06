@@ -61,8 +61,10 @@ proveedor/modelo/dimensiones de embeddings. API keys, Google client secret y cre
 infraestructura se leen sólo del entorno y la API muestra únicamente estado configurado. El refresh
 token obtenido por OAuth sí se persiste cifrado con subclave de propósito. Prompt conserva preferencias usadas sólo por
 respuestas y comunicación con Contactos. Además guarda instrucciones de redacción para respuestas
-automáticas; esas instrucciones orientan tono/estructura y no pueden modificar policy, datos
-permitidos ni reglas de búsqueda. Root keys, barreras live e infraestructura no se guardan.
+automáticas y la configuración del filtro de audiencia (modo, default `LENIENT`, y criterio de
+hasta 1.200 caracteres, auditado por hash); esos textos orientan tono, estructura y criterio y no
+pueden modificar policy, datos permitidos ni reglas de búsqueda. Integration admite además un
+modelo propio para el filtro (`relevance_llm_model`). Root keys, barreras live e infraestructura no se guardan.
 
 ### WorkspaceMessageTemplateRevision
 
@@ -325,7 +327,12 @@ el límite móvil por Conversation empieza a aplicar después de que Gmail crea 
 
 Durante expand/switch, Prospect y ProspectEmail conservan discovery/historia y se vinculan a
 Organization/Enrollment. `AIAnalysis` existente es read-only; campañas nuevas no crean análisis de
-relevancia/copy. ContactLedger/ContactOverride siguen como barrera legacy hasta validar backfill;
+relevancia numérica/copy. `ProspectRelevanceVerdict` guarda el veredicto del filtro de audiencia por
+prospecto (`prospect`, `input_hash`, `provider`, `model` únicos; estado `VALID|ERROR|SKIPPED`;
+`verdict`, motivo de una línea, `vetoed`, tamaños y digests, nunca texto del prompt ni del sitio).
+Es un modelo aparte para que `AIAnalysis` siga siendo sólo lectura. `Prospect` guarda
+`relevance_override_at/by`: una persona conservó ese negocio y el filtro no lo vuelve a evaluar.
+ContactLedger/ContactOverride siguen como barrera legacy hasta validar backfill;
 luego se retiran mediante migración forward. Nunca se borran mensajes/auditorías dependientes ni
 se reescriben campañas completadas.
 

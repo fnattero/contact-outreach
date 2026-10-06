@@ -39,6 +39,23 @@ Discovery mantiene subestado `PENDING|RUNNING|TARGET_REACHED|EXHAUSTED_QUERIES|
 EXHAUSTED_RAW_LIMIT|EXHAUSTED_COST|FAILED_PROVIDER`. Los últimos cinco cierran búsqueda; sólo los resultados
 persistidos pasan a audiencia. Si falta una provincia READY, el inicio no sale de DRAFT.
 
+### 2.1 Pipeline de prospecto
+
+Estados: `DISCOVERED`, `EMAIL_FOUND`, `ENRICHED`, `ANALYZED`, `SKIPPED_NO_EMAIL`,
+`SKIPPED_DUPLICATE`, `SKIPPED_IRRELEVANT`, `QUEUED`, `ERROR`.
+
+| Desde | Hacia | Condición |
+| --- | --- | --- |
+| ENRICHED | SKIPPED_IRRELEVANT | El filtro de audiencia descartó el prospecto según el modo congelado de la campaña |
+| ENRICHED | QUEUED / SKIPPED_DUPLICATE | Elegibilidad, sin intervención del filtro |
+| SKIPPED_IRRELEVANT | ENRICHED | Una persona lo recupera; sólo con la campaña en `DISCOVERING` o `AWAITING_APPROVAL` |
+
+Un descarte limpia `error_stage` y `last_error`: la causa vive en el evento de auditoría y en la
+fila de veredicto. Tras un descarte siempre se vuelve a evaluar la aprobación de la campaña, para
+que el último prospecto descartado no la deje detenida en `DISCOVERING`. Un prospecto recuperado con
+la campaña en `AWAITING_APPROVAL` recibe su mensaje preparado y actualiza el hash de audiencia antes
+de aprobar. `ANALYZED` queda reservado para el scoring numérico pendiente (A-059).
+
 ## 3. Enrollment
 
 Estados de elegibilidad: `DISCOVERED`, `EMAIL_SELECTED`, `PREPARED`, `EXCLUDED_DUPLICATE`,

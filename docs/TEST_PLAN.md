@@ -89,7 +89,14 @@ nunca sustituye negativos.
 
 ## 6. Campañas, copy y aprobación
 
-- Nueva campaña produce exactamente cero calls LLM analyze/draft/classify.
+- Nueva campaña produce cero calls `analyze`/draft/classify; con el filtro de audiencia en `OFF`
+  produce cero calls de cualquier tipo, y con el filtro activo exactamente una `screen_prospect` por
+  prospecto evaluado.
+- Filtro de audiencia: matriz modo × veredicto; falla abierta ante cada error de proveedor con una
+  sola llamada; caché por prospecto que un cambio de modo reutiliza y un cambio de criterio o de
+  sitio invalida; prospecto no elegible nunca llega al modelo; texto hostil del sitio es dato; el
+  último prospecto descartado igual deja la campaña lista para aprobar; Recuperar es permanente, no
+  llama de nuevo al proveedor y se suma a la audiencia preparada durante la revisión.
 - Seeds byte-for-byte, saltos LF y firma BusinessProfile determinista; todos recipients reciben
   mismo subject/body/signature sin placeholders.
 - DRAFT -> DISCOVERING -> AWAITING_APPROVAL: audiencia final existe antes de confirmar.

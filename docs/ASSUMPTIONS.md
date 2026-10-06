@@ -23,7 +23,7 @@ seguridad no se relajan desde el dashboard.
 | A-016 | Overture separa Release de particiones provinciales; una campaña usa sólo particiones READY del mismo release. | Integridad |
 | A-017 | El import hace una lectura bbox por provincia y filtro exacto de distritos. La campaña nunca usa un bbox combinado nacional. | Costo / operación |
 | A-018 | El snapshot activo legacy se preserva/backfillea como CABA; cobertura inesperada queda histórica y migraciones Overture existentes no se editan. | Migración |
-| A-019 | Nuevas campañas no llaman LLM para relevancia ni copy inicial; el objetivo cuenta enrollments elegibles con initial preparado. | Producto / costo |
+| A-019 | Nuevas campañas no llaman LLM para redactar copy inicial ni para puntuar relevancia numéricamente; sí aplican un filtro de audiencia por IA sólo veto, desactivable desde el dashboard (A-060). El objetivo cuenta enrollments elegibles con initial preparado. | Producto / costo |
 | A-020 | Contenido inicial/reminder/referido usa exactamente los seeds de PRODUCT_SPEC, sin placeholders, más firma BusinessProfile determinista. | Copy |
 | A-021 | Ciclo nuevo: DRAFT, DISCOVERING, AWAITING_APPROVAL, RUNNING, COMPLETED con PAUSED/CANCELLED/STOPPED_ERROR. | Estado |
 | A-022 | Discovery termina antes de approval. `CAMPAIGN` es default; `PER_MESSAGE` exige aprobación individual y start separado. | Control humano |
@@ -64,11 +64,16 @@ seguridad no se relajan desde el dashboard.
 | A-053 | No Google Maps scraping, SMTP password, tracking, HTML outbound, account rotation ni evasión de cuotas. | Legal / seguridad |
 | A-054 | Campañas/AIAnalysis históricos siguen legibles y nunca se regeneran o reenvían retroactivamente. | Migración |
 | A-059 | La IA nunca redacta el cuerpo del contacto inicial. Se eliminó el camino `analyze_prospect`, que puntuaba relevancia y redactaba copy en una sola llamada. El scoring se perdió con él y se acepta esa pérdida; el modelo `AIAnalysis` se conserva a propósito como punto de partida para reconstruirlo sin redacción. | Producto / seguridad |
+| A-060 | El filtro de audiencia por IA es sólo veto: puede quitar un prospecto descubierto, nunca agregarlo, ordenarlo ni reinstalarlo. Modo default `LENIENT`; `OFF` lo desactiva; `OBSERVE` evalúa sin descartar. El modelo devuelve `FIT|UNCLEAR|UNFIT` y el código decide el veto; nunca se le pide "ser más estricto". El criterio es texto abierto que guía cómo juzgar los casos dudosos pero no puede cambiar el formato ni los veredictos. No devuelve evidencia por `fact_id`: sólo un motivo de una línea. | Producto / seguridad |
+| A-061 | La campaña congela modo y criterio (texto y hash) en `prompt_snapshot.prospect_screening` al iniciar; editar el criterio no altera una campaña en curso. Una campaña sin esa clave es anterior al filtro y se trata como `OFF`. El literal `llm_calls: 0` pasó a `initial_outreach_llm_calls: 0`. | Trazabilidad |
+| A-062 | Entrada del filtro ≤ 4.000 caracteres: criterio ≤ 1.200 y nombre/rubro/zona/dominio más un extracto de la primera página del sitio ≤ 1.200, rotulado `UNTRUSTED_DATA`. Una llamada por prospecto, `temperature=0`, sin retry y sin batch; el veredicto se guarda por prospecto con un hash que incluye el digest del criterio y excluye el modo, así que cambiar de modo no cuesta una llamada. Un prospecto que la elegibilidad ya rechaza no se envía al modelo. El modelo puede ser distinto del de las respuestas (`relevance_llm_model`). | Costo / seguridad |
+| A-063 | "Recuperar" es durable por negocio y permanente: el filtro no vuelve a descartarlo aunque cambie el criterio, y no existe "des-recuperar". Es posible mientras la campaña está en `DISCOVERING` o `AWAITING_APPROVAL`; el negocio se suma a la audiencia preparada antes de aprobar. Con la campaña ya enviando, la UI lo deshabilita explicando el motivo. | Control humano |
 
 ## Calidad de audiencia y scoring pendiente
 
-Esta sección registra una capacidad que existía, se perdió como efecto secundario y todavía no se
-reconstruyó. No describe el comportamiento deseado a futuro sino el estado real de hoy.
+Esta sección registra una capacidad que existía y se perdió como efecto secundario. El filtro de
+audiencia categórico y sólo veto (A-060 a A-063) la reconstruye en parte; el scoring numérico con
+evidencia sigue pendiente.
 
 **Qué existía.** `apps/prospects/analysis.py::analyze_prospect` llamaba al `LLMProvider` una sola vez
 por prospecto y obtenía, en un único objeto JSON, dos cosas distintas:
@@ -84,18 +89,21 @@ mover las campañas al mensaje fijo aprobado por una persona y eliminar la redac
 scoring se fue con ella. No fue una decisión sobre el scoring: fue un efecto colateral, y se
 registra como tal.
 
-**Qué filtra un prospecto hoy.** Únicamente `enrollment_eligibility` en `apps/contacts/services.py`,
-que verifica cinco condiciones: hay una dirección elegida, esa dirección es válida, la Organization
-no es ya un Contact, no existe otra inscripción activa y la dirección no está suprimida. Las cinco
-son higiene y cumplimiento. **Ninguna evalúa si el prospecto es un destinatario sensato.**
+**Qué filtra un prospecto hoy.** `enrollment_eligibility` en `apps/contacts/services.py` verifica
+cinco condiciones de higiene y cumplimiento (dirección elegida y válida, la Organization no es ya un
+Contact, no existe otra inscripción activa y la dirección no está suprimida); es el único filtro
+que puede **admitir** un prospecto. Encima, el filtro de audiencia por IA puede **quitar** un
+prospecto que no encaja con el criterio escrito por el operador (A-060).
 
-**Dónde queda la calidad de audiencia.** Enteramente en la selección de rubros y zonas que arma la
-consulta Overture. Si esa selección es amplia, la campaña es amplia: no hay ningún filtro posterior
-que la corrija.
+**Dónde queda la calidad de audiencia.** En la selección de rubros y zonas que arma la consulta
+Overture y, además, en el filtro de audiencia, que sólo puede descartar y es configurable desde el
+dashboard. Con el filtro en `OFF`, la calidad depende sólo de rubros y zonas.
 
 **Consecuencias registradas.**
 
-- `Campaign.relevance_threshold` y `BusinessProfile.relevance_threshold` **ya no los lee nadie**.
+- `Campaign.relevance_threshold` y `BusinessProfile.relevance_threshold` **siguen sin leerlos
+  nadie**: el filtro de audiencia es categórico (tres veredictos y cuatro modos) y no usa
+  umbrales numéricos.
   Las columnas, las constraints `0..100` y los valores guardados se conservan a propósito, y los
   snapshots de campaña y de perfil los siguen escribiendo, para que el scoring nuevo pueda
   retomarlos sin migración destructiva ni pérdida de configuración histórica. El control se
@@ -111,10 +119,10 @@ que la corrija.
   para siempre los mismos prospectos. Un prospecto de una campaña pausada durante el descubrimiento
   y reanudada a `RUNNING` queda sin avanzar.
 
-**Ítem abierto.** Reconstruir el scoring de relevancia como capacidad independiente, sin redacción:
-entrada de hechos versionados, salida numérica con evidencia, y una decisión explícita sobre si
-filtra automáticamente o sólo ordena para revisión humana. Hasta entonces la calidad de la audiencia
-es responsabilidad de quien elige rubros y zonas.
+**Ítem abierto.** Un scoring numérico de relevancia como capacidad independiente, sin redacción:
+entrada de hechos versionados y salida numérica con evidencia. El estado `ANALYZED` queda reservado
+para él y hoy nadie lo alcanza. El veto categórico ya resuelve la decisión sobre si filtra
+automáticamente: sólo quita, y una persona puede recuperar lo quitado.
 
 ## Rubros seed
 

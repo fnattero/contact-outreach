@@ -207,8 +207,14 @@ def screen_prospect_relevance(
 
     # Eligibility is a pure read. A prospect it rejects is already headed for SKIPPED_DUPLICATE,
     # so paying to screen it would be waste: this is the single biggest saving in the design.
+    # (A prospect already removed by this filter is "ineligible" only because of that removal, so
+    # it is not a reason to overwrite its stored verdict.)
     enrollment = prospect.campaign_enrollment
-    if enrollment is not None and not enrollment_eligibility(enrollment).eligible:
+    if (
+        enrollment is not None
+        and prospect.pipeline_state != Prospect.PipelineState.SKIPPED_IRRELEVANT
+        and not enrollment_eligibility(enrollment).eligible
+    ):
         return _record(
             prospect_id=prospect.pk,
             key=key,

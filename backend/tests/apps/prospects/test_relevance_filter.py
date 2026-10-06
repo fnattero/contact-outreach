@@ -559,3 +559,54 @@ def test_restoring_a_prospect_that_was_not_removed_changes_nothing(
 
     assert result.relevance_override_at is None
     assert not AuditEvent.objects.filter(action="prospect.relevance_restored").exists()
+
+
+# --- A removed business must not stay in the audience ----------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_removed_business_is_not_eligible_until_a_person_restores_it(
+    owner: User, private_catalog_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apps.contacts.services import enrollment_eligibility, refresh_enrollment_eligibility
+
+    del private_catalog_dir
+    _use_provider(monkeypatch, MockLLMProvider(screening_outputs=[_verdict("UNFIT")]))
+    prospect = _prospect(owner)
+    with transaction.atomic():
+        enrollment = ensure_prospect_enrollment(prospect, campaign=prospect.campaign)
+    assert enrollment_eligibility(enrollment).eligible
+
+    process_prospect_pipeline(str(prospect.pk))
+
+    removed = enrollment_eligibility(enrollment)
+    assert (removed.eligible, removed.code) == (False, "AUDIENCE_FILTER")
+    # Re-checking the enrollment (as preparing and approving a campaign do) keeps it out.
+    assert refresh_enrollment_eligibility(enrollment).eligible is False
+    enrollment.refresh_from_db()
+    assert enrollment.state == "INELIGIBLE"
+
+    restore_prospect_relevance(prospect.pk, actor=owner)
+    assert enrollment_eligibility(enrollment).eligible
+
+
+@pytest.mark.django_db
+def test_retrying_a_removed_prospect_keeps_its_stored_reason(
+    owner: User, private_catalog_dir: Path
+) -> None:
+    del private_catalog_dir
+    prospect = _prospect(owner)
+    with transaction.atomic():
+        ensure_prospect_enrollment(prospect, campaign=prospect.campaign)
+    prospect.refresh_from_db()
+    provider = MockLLMProvider(screening_outputs=[_verdict("UNFIT", "Es una tienda.")])
+    first = screen_prospect_relevance(prospect.pk, provider=provider)
+    skip_irrelevant_prospect(prospect.pk, verdict="UNFIT", reason="Es una tienda.", mode="LENIENT")
+    prospect.refresh_from_db()
+
+    again = screen_prospect_relevance(prospect.pk, provider=provider)
+
+    assert first.vetoed and again.vetoed
+    assert provider.screening_call_count == 1
+    row = ProspectRelevanceVerdict.objects.get(prospect=prospect)
+    assert (row.status, row.reason) == ("VALID", "Es una tienda.")
