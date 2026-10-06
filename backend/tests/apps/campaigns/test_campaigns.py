@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import time
 from decimal import Decimal
 from pathlib import Path
@@ -419,13 +420,15 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     assert started.settings_snapshot["objective"] == 300
     assert started.settings_snapshot["website_fetcher"] == "fake"
     assert started.profile_snapshot["company_name"] == "Componentes Delta SA"
-    assert started.prompt_snapshot == {
-        "version": "fixed-campaign-message-v1",
-        "schema_version": "fixed-message-no-placeholders-v1",
-        "initial_outreach": "fixed-no-llm",
-        "llm_calls": 0,
-        "search_mode": "structured-overture-rules-v1",
-    }
+    assert started.prompt_snapshot["initial_outreach"] == "fixed-no-llm"
+    assert started.prompt_snapshot["initial_outreach_llm_calls"] == 0
+    assert "llm_calls" not in started.prompt_snapshot
+    screening = started.prompt_snapshot["prospect_screening"]
+    assert screening["mode"] == "LENIENT"
+    assert screening["criteria"] == "Priorizá el contexto técnico disponible."
+    assert (
+        screening["criteria_sha256"] == hashlib.sha256(screening["criteria"].encode()).hexdigest()
+    )
     query = SearchQuery.objects.get(campaign=started)
     assert query.category_snapshot == "Bobinados de motores"
     assert query.query_text == "Bobinados de motores en Palermo"
@@ -439,6 +442,12 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     )
     started.refresh_from_db()
     assert started.prompt_snapshot["initial_outreach"] == "fixed-no-llm"
+    # Editing the filter afterwards cannot change a campaign that already started.
+    assert started.prompt_snapshot["prospect_screening"]["mode"] == "LENIENT"
+    assert (
+        started.prompt_snapshot["prospect_screening"]["criteria"]
+        == "Priorizá el contexto técnico disponible."
+    )
     started.objective = 999
     with pytest.raises(ValidationError, match="inmutable"):
         started.save()

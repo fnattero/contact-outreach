@@ -19,9 +19,11 @@ from apps.prospects.pipeline import (
     clear_prospect_pipeline_reservation,
     reserve_prospect_pipeline,
 )
+from apps.prospects.screening import screen_prospect_relevance
 from apps.prospects.services import (
     discover_website_email,
     mark_fixed_campaign_prospect_ready,
+    skip_irrelevant_prospect,
     skip_website_email_after_mx_retries,
 )
 
@@ -104,11 +106,27 @@ def process_prospect_pipeline(
         if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
             enrich_prospect(prospect.pk)
         prospect.refresh_from_db()
-        prospect = mark_fixed_campaign_prospect_ready(prospect.pk)
-        if prospect.campaign.state == Campaign.State.DISCOVERING:
-            from apps.campaigns.approval import maybe_move_campaign_to_approval
+        screened = screen_prospect_relevance(prospect.pk)
+        if screened.vetoed:
+            prospect = skip_irrelevant_prospect(
+                prospect.pk,
+                verdict=screened.verdict,
+                reason=screened.reason,
+                mode=screened.mode,
+            )
+        else:
+            prospect = mark_fixed_campaign_prospect_ready(prospect.pk)
+        # A removed prospect still has to re-check approval: if it was the last one still being
+        # processed, nothing else would ever move the campaign out of DISCOVERING.
+        from apps.campaigns.approval import maybe_move_campaign_to_approval, refresh_review_audience
 
+        if prospect.campaign.state == Campaign.State.DISCOVERING:
             maybe_move_campaign_to_approval(prospect.campaign_id)
+        elif (
+            prospect.campaign.state == Campaign.State.AWAITING_APPROVAL
+            and prospect.pipeline_state == Prospect.PipelineState.QUEUED
+        ):
+            refresh_review_audience(prospect.campaign_id)
         finish_job(job)
         return prospect.pipeline_state
     except (ProspectPipelineInactive, StaleProspectAnalysis):

@@ -15,6 +15,7 @@ MAX_LLM_INPUT_CHARACTERS = 24_000
 # Screening is one short question per discovered business: the budget is the cost control.
 MAX_PROSPECT_SCREENING_CHARACTERS = 4_000
 MAX_SCREENING_REASON_LENGTH = 160
+PROSPECT_SCREENING_SCHEMA_VERSION = "prospect-screening-v1"
 
 
 def _serialized_messages(messages: list[dict[str, str]]) -> str:

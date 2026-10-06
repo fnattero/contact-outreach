@@ -24,6 +24,7 @@ from apps.campaigns.models import (
     SearchRun,
 )
 from apps.catalogs.models import Catalog
+from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import (
     BusinessProfile,
     SearchCategory,
@@ -32,13 +33,42 @@ from apps.configuration.models import (
 )
 from apps.configuration.services import (
     profile_snapshot,
+    runtime_prompt_configuration,
 )
+from apps.integrations.llm_inputs import PROSPECT_SCREENING_SCHEMA_VERSION
 from apps.overture.geometry import validate_geojson
 from apps.overture.models import OvertureCoveragePartition, OvertureDatasetSnapshot
 
 # Historical AI analyses remain readable but are never regenerated.
 PROMPT_VERSION = "prospect-analysis-v3"
 SCHEMA_VERSION = "prospect-analysis-schema-v3"
+
+
+def _prompt_snapshot(campaign: Campaign) -> dict[str, Any]:
+    """Freeze the audience-filter settings; the filter reads only this, never live settings.
+
+    The criteria text is stored in clear on purpose: a hash alone would freeze nothing, because the
+    pipeline would still have to read the live text to build each request.
+    """
+
+    prompts = runtime_prompt_configuration(campaign.created_by_id)
+    integrations = runtime_integration_configuration(campaign.created_by_id)
+    return {
+        "version": "fixed-campaign-message-v1",
+        "schema_version": "fixed-message-no-placeholders-v1",
+        "initial_outreach": "fixed-no-llm",
+        "initial_outreach_llm_calls": 0,
+        "search_mode": "structured-overture-rules-v1",
+        "prospect_screening": {
+            "mode": prompts.relevance_filter_mode,
+            "criteria": prompts.relevance_criteria,
+            "criteria_sha256": hashlib.sha256(prompts.relevance_criteria.encode()).hexdigest(),
+            "criteria_characters": len(prompts.relevance_criteria),
+            "model": integrations.relevance_llm_model or campaign.llm_model,
+            "configuration_revision": prompts.revision,
+            "schema_version": PROSPECT_SCREENING_SCHEMA_VERSION,
+        },
+    }
 
 
 class InvalidCampaignTransition(ValidationError):
@@ -559,13 +589,7 @@ def _freeze_draft(
     coverage_selection_by_zone = {selection.district_id: selection for selection in coverage_models}
     campaign.settings_snapshot = _settings_snapshot(campaign)
     campaign.profile_snapshot = profile_snapshot(profile)
-    campaign.prompt_snapshot = {
-        "version": "fixed-campaign-message-v1",
-        "schema_version": "fixed-message-no-placeholders-v1",
-        "initial_outreach": "fixed-no-llm",
-        "llm_calls": 0,
-        "search_mode": "structured-overture-rules-v1",
-    }
+    campaign.prompt_snapshot = _prompt_snapshot(campaign)
     queries: list[SearchQuery] = []
     order = 0
     for category in campaign.category_selections.all():

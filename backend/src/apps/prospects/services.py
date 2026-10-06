@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from urllib.parse import urlsplit
 
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import connection, transaction
 from django.utils import timezone
 
+from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.campaigns.models import Campaign, SearchRun
 from apps.compliance.services import is_email_suppressed
@@ -52,6 +54,13 @@ CONTACT_CENTRIC_EXCLUSION_CODES = frozenset(
 )
 
 
+# A discovered prospect can still be finished (or, after a person restores it, finished again)
+# while the campaign is searching or waiting for approval. Sending freezes the audience.
+REVIEWABLE_CAMPAIGN_STATES = frozenset(
+    {Campaign.State.DISCOVERING, Campaign.State.AWAITING_APPROVAL}
+)
+
+
 class IngestOutcome(StrEnum):
     CREATED = "CREATED"
     DUPLICATE = "DUPLICATE"
@@ -85,7 +94,7 @@ def mark_fixed_campaign_prospect_ready(prospect_id: uuid.UUID | str) -> Prospect
         .select_related("campaign", "campaign_enrollment")
         .get(pk=prospect_id)
     )
-    if prospect.campaign.state != Campaign.State.DISCOVERING:
+    if prospect.campaign.state not in REVIEWABLE_CAMPAIGN_STATES:
         return prospect
     enrollment = ensure_prospect_enrollment(prospect, campaign=prospect.campaign)
     eligibility = refresh_enrollment_eligibility(enrollment)
@@ -107,8 +116,79 @@ def mark_fixed_campaign_prospect_ready(prospect_id: uuid.UUID | str) -> Prospect
         after={
             "pipeline_state": prospect.pipeline_state,
             "enrollment_id": str(enrollment.pk),
-            "llm_calls": 0,
+            "initial_outreach_llm_calls": 0,
         },
+    )
+    return prospect
+
+
+@transaction.atomic
+def skip_irrelevant_prospect(
+    prospect_id: uuid.UUID | str, *, verdict: str, reason: str, mode: str
+) -> Prospect:
+    """Record that the audience filter removed a prospect. The cause lives in the verdict row."""
+
+    prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
+    if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
+        raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.pipeline_state == Prospect.PipelineState.SKIPPED_IRRELEVANT:
+        return prospect
+    before = {"pipeline_state": prospect.pipeline_state}
+    prospect.pipeline_state = Prospect.PipelineState.SKIPPED_IRRELEVANT
+    prospect.error_stage = ""
+    prospect.last_error = ""
+    prospect.save(update_fields=("pipeline_state", "error_stage", "last_error", "updated_at"))
+    record_event(
+        action="prospect.skipped_irrelevant",
+        entity=prospect,
+        actor=None,
+        before=before,
+        after={
+            "pipeline_state": prospect.pipeline_state,
+            "source": "relevance_filter",
+            "mode": mode,
+            "verdict": verdict,
+            "reason": reason,
+        },
+    )
+    return prospect
+
+
+@transaction.atomic
+def restore_prospect_relevance(prospect_id: uuid.UUID | str, *, actor: User) -> Prospect:
+    """A person keeps a business the filter removed. The choice is permanent for that business."""
+
+    prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
+    membership = require_user_capability(
+        actor, Capability.MANAGE_CAMPAIGNS, workspace_id=prospect.campaign.workspace_id
+    )
+    del membership
+    if prospect.pipeline_state != Prospect.PipelineState.SKIPPED_IRRELEVANT:
+        return prospect
+    if prospect.campaign.state not in REVIEWABLE_CAMPAIGN_STATES:
+        raise ValidationError("La campaña ya empezó a enviar y no admite cambios en la audiencia.")
+    before = {"pipeline_state": prospect.pipeline_state}
+    prospect.relevance_override_at = timezone.now()
+    prospect.relevance_override_by = actor
+    prospect.pipeline_state = Prospect.PipelineState.ENRICHED
+    prospect.error_stage = ""
+    prospect.last_error = ""
+    prospect.save(
+        update_fields=(
+            "relevance_override_at",
+            "relevance_override_by",
+            "pipeline_state",
+            "error_stage",
+            "last_error",
+            "updated_at",
+        )
+    )
+    record_event(
+        action="prospect.relevance_restored",
+        entity=prospect,
+        actor=actor,
+        before=before,
+        after={"pipeline_state": prospect.pipeline_state, "override": True},
     )
     return prospect
 

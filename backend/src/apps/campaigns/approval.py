@@ -272,6 +272,25 @@ def prepare_fixed_initial_messages(campaign: Campaign) -> tuple[OutboundMessage,
 
 
 @transaction.atomic
+def refresh_review_audience(campaign_id: uuid.UUID | str) -> None:
+    """Bring a campaign that is waiting for approval up to date after its audience grew.
+
+    A person can restore a discarded business while reviewing. The new recipient needs a prepared
+    message and the audience hash the approval later checks has to describe it.
+    """
+
+    campaign = (
+        Campaign.objects.select_for_update()
+        .select_related("workspace", "catalog")
+        .get(pk=campaign_id)
+    )
+    if campaign.state != Campaign.State.AWAITING_APPROVAL:
+        return
+    prepare_fixed_initial_messages(campaign)
+    campaign.save(update_fields=("audience_hash", "attachment_hash", "schedule_hash", "updated_at"))
+
+
+@transaction.atomic
 def move_campaign_to_approval(campaign_id: uuid.UUID | str) -> Campaign:
     campaign = (
         Campaign.objects.select_for_update()
