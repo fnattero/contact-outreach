@@ -7,13 +7,14 @@ from hashlib import sha256
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -42,7 +43,10 @@ from apps.contacts.models import CampaignEnrollment
 from apps.dashboard.csv_export import csv_download
 from apps.dashboard.queries import prospect_queryset
 from apps.mailbox.tasks import deliver_message_task
-from apps.prospects.models import Prospect
+from apps.prospects.models import Prospect, ProspectRelevanceVerdict
+from apps.prospects.pipeline import reserve_prospect_pipeline
+from apps.prospects.services import restore_prospect_relevance
+from apps.prospects.tasks import process_prospect_pipeline
 
 
 class CampaignListQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -724,6 +728,33 @@ class ProspectListQuerySerializer(PageQuerySerializer):
     state = serializers.ChoiceField(required=False, choices=Prospect.PipelineState.choices)
     category = serializers.CharField(required=False, allow_blank=True, max_length=150)
     neighborhood = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    verdict = serializers.ChoiceField(
+        required=False, choices=ProspectRelevanceVerdict.Verdict.choices
+    )
+
+
+def _prospect_row(item: Prospect) -> dict[str, object]:
+    return {
+        "id": str(item.pk),
+        "name": item.name,
+        "address": item.address,
+        "neighborhood": item.neighborhood,
+        "category": item.category,
+        "website": item.website,
+        "pipeline_state": item.pipeline_state,
+        "pipeline_state_label": item.get_pipeline_state_display(),
+        "primary_email": getattr(item, "primary_email", None),
+        # Only campaigns that predate fixed-message outreach carry a score.
+        "historical_score": getattr(item, "latest_score", None),
+        "relevance_verdict": getattr(item, "relevance_verdict", None),
+        "relevance_reason": getattr(item, "relevance_reason", None),
+        "relevance_checked_at": getattr(item, "relevance_checked_at", None),
+        "relevance_override": item.relevance_override_at is not None,
+        "campaign_state": item.campaign.state,
+        "campaign": {"id": str(item.campaign_id), "name": item.campaign.name},
+        "provenance": _provenance_data(item),
+        "created_at": item.created_at,
+    }
 
 
 class ProspectListView(SchemaAPIView):
@@ -740,28 +771,50 @@ class ProspectListView(SchemaAPIView):
         rows, meta = page_slice(prospects, page=values["page"], page_size=values["page_size"])
         return Response(
             {
-                "data": [
-                    {
-                        "id": str(item.pk),
-                        "name": item.name,
-                        "address": item.address,
-                        "neighborhood": item.neighborhood,
-                        "category": item.category,
-                        "website": item.website,
-                        "pipeline_state": item.pipeline_state,
-                        "pipeline_state_label": item.get_pipeline_state_display(),
-                        "primary_email": getattr(item, "primary_email", None),
-                        # Only campaigns that predate fixed-message outreach carry a score.
-                        "historical_score": getattr(item, "latest_score", None),
-                        "campaign": {"id": str(item.campaign_id), "name": item.campaign.name},
-                        "provenance": _provenance_data(item),
-                        "created_at": item.created_at,
-                    }
-                    for item in rows
-                ],
+                "data": [_prospect_row(item) for item in rows],
                 "meta": meta,
             }
         )
+
+
+def _verdict_label(verdict: str | None) -> str:
+    return ProspectRelevanceVerdict.Verdict(verdict).label if verdict else ""
+
+
+class ProspectRestoreView(SchemaAPIView):
+    """Keep a business the audience filter removed.
+
+    Deliberately not under `/actions/`: that segment gets the strictest throttle, which a normal
+    session of reading the removed list and rescuing a few businesses would exhaust.
+    """
+
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
+
+    def post(self, request: Request, prospect_id: uuid.UUID) -> Response:
+        user = authenticated_user(request)
+        workspace = workspace_for_user(user, Capability.MANAGE_CAMPAIGNS)
+        if not Prospect.objects.filter(pk=prospect_id, campaign__workspace=workspace).exists():
+            raise NotFound("El prospecto no existe.")
+        try:
+            with transaction.atomic():
+                restore_prospect_relevance(prospect_id, actor=user)
+                reservation = reserve_prospect_pipeline(
+                    prospect_id,
+                    allowed_states=(Prospect.PipelineState.ENRICHED,),
+                    manual=True,
+                )
+                if reservation is not None:
+                    token = reservation.token
+                    # Only dispatch once the restore is committed.
+                    transaction.on_commit(
+                        lambda: process_prospect_pipeline.delay(
+                            str(prospect_id), actor_id=user.pk, reservation_token=token
+                        )
+                    )
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        item = prospect_queryset(request.query_params).get(pk=prospect_id)
+        return Response({"data": _prospect_row(item)})
 
 
 class ProspectExportView(SchemaAPIView):
@@ -775,7 +828,16 @@ class ProspectExportView(SchemaAPIView):
         prospects = prospect_queryset(request.query_params).filter(campaign__workspace=workspace)
         return csv_download(
             filename="prospectos.csv",
-            headers=("campaña", "prospecto", "email", "rubro", "barrio", "estado"),
+            headers=(
+                "campaña",
+                "prospecto",
+                "email",
+                "rubro",
+                "barrio",
+                "estado",
+                "evaluación",
+                "motivo",
+            ),
             rows=(
                 (
                     item.campaign.name,
@@ -787,6 +849,8 @@ class ProspectExportView(SchemaAPIView):
                     item.category,
                     item.neighborhood,
                     item.get_pipeline_state_display(),
+                    _verdict_label(getattr(item, "relevance_verdict", None)),
+                    getattr(item, "relevance_reason", None) or "",
                 )
                 for item in prospects
             ),

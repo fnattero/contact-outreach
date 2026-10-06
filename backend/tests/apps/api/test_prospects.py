@@ -10,7 +10,7 @@ from django.utils import timezone
 from apps.campaigns.models import Campaign, SearchQuery, SearchRun
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import create_catalog
-from apps.prospects.models import Prospect, ProspectEmail
+from apps.prospects.models import Prospect, ProspectEmail, ProspectRelevanceVerdict
 
 
 def _campaign(owner: User, catalog: Catalog, name: str) -> Campaign:
@@ -238,3 +238,120 @@ def test_malformed_provider_data_never_breaks_the_prospect_list(
     assert row["provenance"]["attribution"] == []
     assert row["provenance"]["licenses"] == []
     assert row["provenance"]["matched_rule"] is None
+
+
+def _verdict(prospect: Prospect, verdict: str, reason: str, *, vetoed: bool = False) -> None:
+    ProspectRelevanceVerdict.objects.create(
+        prospect=prospect,
+        input_hash="a" * 64,
+        criteria_digest="b" * 64,
+        mode="LENIENT",
+        verdict=verdict,
+        reason=reason,
+        vetoed=vetoed,
+        provider="fake",
+        model="fake-deterministic",
+        schema_version="prospect-screening-v1",
+        status="VALID",
+        evaluated_at=timezone.now(),
+    )
+
+
+@pytest.mark.django_db
+def test_the_list_carries_the_verdict_reason_and_can_filter_by_it(
+    owner: User, audience: dict[str, object]
+) -> None:
+    taller, ferreteria = audience["taller"], audience["ferreteria"]
+    assert isinstance(taller, Prospect) and isinstance(ferreteria, Prospect)
+    _verdict(taller, "FIT", "Repara motores.")
+    _verdict(ferreteria, "UNFIT", "Es una tienda.")
+    client = Client()
+    client.force_login(owner)
+
+    rows = {item["name"]: item for item in client.get(reverse("api-prospects")).json()["data"]}
+    assert rows["Taller Uno"]["relevance_verdict"] == "FIT"
+    assert rows["Taller Uno"]["relevance_reason"] == "Repara motores."
+    assert rows["Ferretería Dos"]["relevance_verdict"] == "UNFIT"
+    assert rows["Taller Tres"]["relevance_verdict"] is None
+    assert rows["Taller Tres"]["relevance_override"] is False
+    assert rows["Taller Tres"]["campaign_state"] == Campaign.State.PAUSED
+
+    only_unfit = client.get(reverse("api-prospects"), {"verdict": "UNFIT"}).json()
+    assert [item["name"] for item in only_unfit["data"]] == ["Ferretería Dos"]
+    assert client.get(reverse("api-prospects"), {"verdict": "MAYBE"}).status_code == 400
+
+
+@pytest.mark.django_db
+def test_the_export_includes_the_verdict_and_reason(
+    owner: User, audience: dict[str, object]
+) -> None:
+    ferreteria = audience["ferreteria"]
+    assert isinstance(ferreteria, Prospect)
+    _verdict(ferreteria, "UNFIT", "Es una tienda.")
+    client = Client()
+    client.force_login(owner)
+
+    lines = client.get(reverse("api-prospect-export")).content.decode().splitlines()
+
+    assert lines[0].endswith("evaluación,motivo")
+    assert any("Ferretería Dos" in line and "No encaja,Es una tienda." in line for line in lines)
+
+
+@pytest.mark.django_db
+def test_restoring_a_removed_business_keeps_it_and_queues_the_pipeline(
+    owner: User,
+    audience: dict[str, object],
+    django_capture_on_commit_callbacks: object,
+) -> None:
+    first, ferreteria = audience["first"], audience["ferreteria"]
+    assert isinstance(first, Campaign) and isinstance(ferreteria, Prospect)
+    Campaign.objects.filter(pk=first.pk).update(state=Campaign.State.DISCOVERING)
+    Prospect.objects.filter(pk=ferreteria.pk).update(
+        pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT
+    )
+    client = Client()
+    client.force_login(owner)
+    url = reverse("api-prospect-restore", args=(ferreteria.pk,))
+
+    # The route must stay clear of /actions/, which has the strictest throttle.
+    assert "/actions/" not in url
+    with django_capture_on_commit_callbacks() as callbacks:  # type: ignore[operator]
+        response = client.post(url)
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"]["relevance_override"] is True
+    assert response.json()["data"]["pipeline_state"] == Prospect.PipelineState.ENRICHED
+    assert len(callbacks) == 1
+
+
+@pytest.mark.django_db
+def test_restoring_after_sending_started_is_refused_with_a_reason(
+    owner: User, audience: dict[str, object]
+) -> None:
+    ferreteria = audience["ferreteria"]
+    assert isinstance(ferreteria, Prospect)
+    Campaign.objects.filter(pk=ferreteria.campaign_id).update(state=Campaign.State.RUNNING)
+    Prospect.objects.filter(pk=ferreteria.pk).update(
+        pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT
+    )
+    client = Client()
+    client.force_login(owner)
+
+    response = client.post(reverse("api-prospect-restore", args=(ferreteria.pk,)))
+
+    assert response.status_code == 400
+    assert "empezó a enviar" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_restoring_an_unknown_prospect_is_not_found(
+    owner: User, audience: dict[str, object]
+) -> None:
+    import uuid
+
+    client = Client()
+    client.force_login(owner)
+
+    response = client.post(reverse("api-prospect-restore", args=(uuid.uuid4(),)))
+
+    assert response.status_code == 404

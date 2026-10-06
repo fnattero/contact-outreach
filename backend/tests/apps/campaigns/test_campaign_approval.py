@@ -170,3 +170,71 @@ def test_campaign_approval_rejects_a_tampered_pdf_snapshot_without_partial_queue
     assert compromised.state == OutboundMessage.State.PREPARED
     assert enrollments[0].state == CampaignEnrollment.State.PREPARED
     assert not campaign.messages.filter(state=OutboundMessage.State.QUEUED).exists()
+
+
+@pytest.mark.django_db
+def test_a_business_restored_during_review_joins_the_audience_and_the_campaign_still_approves(
+    owner: User,
+    private_catalog_dir: Path,
+) -> None:
+    from django.db import transaction
+
+    from apps.campaigns.approval import refresh_review_audience
+    from apps.campaigns.models import SearchQuery, SearchRun
+    from apps.prospects.models import Prospect, ProspectEmail
+    from apps.prospects.services import (
+        mark_fixed_campaign_prospect_ready,
+        restore_prospect_relevance,
+    )
+
+    del private_catalog_dir
+    campaign, enrollments = _ready_campaign(owner, recipient_count=1)
+    before_hash = campaign.audience_hash
+    # A business the filter removed earlier, still waiting for a person to look at it.
+    query = SearchQuery.objects.create(
+        campaign=campaign,
+        category_snapshot="Taller",
+        zone_snapshot="Palermo",
+        location_snapshot="CABA",
+        query_text="taller en Palermo",
+        normalized_query="taller en palermo",
+    )
+    run = SearchRun.objects.create(
+        campaign=campaign,
+        query=query,
+        provider="fake",
+        idempotency_key=f"review:{campaign.pk}",
+        requested_limit=1,
+    )
+    prospect = Prospect.objects.create(
+        campaign=campaign,
+        source_run=run,
+        name="Taller Recuperado",
+        normalized_name="taller recuperado",
+        pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT,
+    )
+    ProspectEmail.objects.create(
+        prospect=prospect,
+        original_email="recuperado@taller.example",
+        normalized_email="recuperado@taller.example",
+        domain="taller.example",
+        local_part="recuperado",
+        source="fixture",
+        mx_status=ProspectEmail.MXStatus.VALID,
+        mx_checked_at=prospect.created_at,
+        is_primary=True,
+    )
+
+    restore_prospect_relevance(prospect.pk, actor=owner)
+    with transaction.atomic():
+        ready = mark_fixed_campaign_prospect_ready(prospect.pk)
+    assert ready.pipeline_state == Prospect.PipelineState.QUEUED
+    refresh_review_audience(campaign.pk)
+
+    campaign.refresh_from_db()
+    assert campaign.audience_hash != before_hash
+    assert campaign.messages.filter(kind=OutboundMessage.Kind.INITIAL).count() == 2
+    approved = approve_campaign(campaign.pk, actor=owner)
+    assert approved.state == Campaign.State.RUNNING
+    assert approved.messages.filter(state=OutboundMessage.State.QUEUED).count() == 2
+    assert enrollments[0].pk

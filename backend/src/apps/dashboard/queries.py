@@ -9,7 +9,13 @@ from django.http import QueryDict
 
 from apps.campaigns.models import OutboundMessage
 from apps.mailbox.models import InboundMessage
-from apps.prospects.models import AIAnalysis, Prospect, ProspectEmail, WebsiteSnapshot
+from apps.prospects.models import (
+    AIAnalysis,
+    Prospect,
+    ProspectEmail,
+    ProspectRelevanceVerdict,
+    WebsiteSnapshot,
+)
 
 
 def parsed_date(value: str) -> date | None:
@@ -30,6 +36,9 @@ def prospect_queryset(params: QueryDict) -> QuerySet[Prospect]:
     latest_analysis = AIAnalysis.objects.filter(
         prospect=OuterRef("pk"), status=AIAnalysis.Status.VALID
     ).order_by("-analyzed_at")
+    latest_verdict = ProspectRelevanceVerdict.objects.filter(
+        prospect=OuterRef("pk"), status=ProspectRelevanceVerdict.Status.VALID
+    ).order_by("-evaluated_at")
     primary_email = ProspectEmail.objects.filter(prospect=OuterRef("pk"), is_primary=True).order_by(
         "provider_order", "created_at"
     )
@@ -46,6 +55,9 @@ def prospect_queryset(params: QueryDict) -> QuerySet[Prospect]:
             latest_score=Subquery(latest_analysis.values("relevance_score")[:1]),
             latest_reason=Subquery(latest_analysis.values("relevance_reason")[:1]),
             primary_email=Subquery(primary_email.values("normalized_email")[:1]),
+            relevance_verdict=Subquery(latest_verdict.values("verdict")[:1]),
+            relevance_reason=Subquery(latest_verdict.values("reason")[:1]),
+            relevance_checked_at=Subquery(latest_verdict.values("evaluated_at")[:1]),
         )
     )
     query = params.get("q", "").strip()
@@ -59,6 +71,8 @@ def prospect_queryset(params: QueryDict) -> QuerySet[Prospect]:
         queryset = queryset.filter(campaign_id=campaign)
     if state := params.get("state", ""):
         queryset = queryset.filter(pipeline_state=state)
+    if verdict := params.get("verdict", ""):
+        queryset = queryset.filter(relevance_verdict=verdict)
     if category := params.get("category", "").strip():
         queryset = queryset.filter(category__icontains=category)
     if neighborhood := params.get("neighborhood", "").strip():

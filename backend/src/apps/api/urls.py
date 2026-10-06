@@ -41,6 +41,7 @@ from apps.api.campaigns import (
     CampaignProspectListView,
     ProspectExportView,
     ProspectListView,
+    ProspectRestoreView,
 )
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
 from apps.api.compliance import SuppressionListView
@@ -248,6 +249,11 @@ urlpatterns = [
     path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
     path("prospects/", ProspectListView.as_view(), name="api-prospects"),
     path("prospects/export.csv", ProspectExportView.as_view(), name="api-prospect-export"),
+    path(
+        "prospects/<uuid:prospect_id>/restore/",
+        ProspectRestoreView.as_view(),
+        name="api-prospect-restore",
+    ),
     path(
         "campaigns/<uuid:campaign_id>/",
         CampaignDetailView.as_view(),
