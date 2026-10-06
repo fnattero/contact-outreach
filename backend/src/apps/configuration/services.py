@@ -15,7 +15,7 @@ from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.configuration.models import (
     DEFAULT_AUTOMATIC_REPLY_PROMPT,
-    DEFAULT_EMAIL_DRAFTING_PROMPT,
+    DEFAULT_RELEVANCE_CRITERIA,
     BusinessProfile,
     PromptConfiguration,
     SearchCategory,
@@ -25,14 +25,16 @@ from apps.configuration.models import (
 )
 
 ConfigItem = SearchCategory | SearchZone
-MAX_EMAIL_DRAFTING_PROMPT_LENGTH = 4000
 MAX_AUTOMATIC_REPLY_PROMPT_LENGTH = 4000
+# The criteria travels in every screening call, so its limit is a cost control.
+MAX_RELEVANCE_CRITERIA_LENGTH = 1200
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimePromptConfiguration:
-    email_drafting_prompt: str
     automatic_reply_prompt: str
+    relevance_filter_mode: str
+    relevance_criteria: str
     revision: int
 
 
@@ -45,11 +47,11 @@ def _clean_prompt(value: str, *, label: str, max_length: int) -> str:
     return prompt
 
 
-def _clean_email_drafting_prompt(value: str) -> str:
+def _clean_relevance_criteria(value: str) -> str:
     return _clean_prompt(
         value,
-        label="El prompt de redacción",
-        max_length=MAX_EMAIL_DRAFTING_PROMPT_LENGTH,
+        label="El criterio de audiencia",
+        max_length=MAX_RELEVANCE_CRITERIA_LENGTH,
     )
 
 
@@ -63,8 +65,9 @@ def _clean_automatic_reply_prompt(value: str) -> str:
 
 def runtime_prompt_configuration(owner_id: int | None) -> RuntimePromptConfiguration:
     default = RuntimePromptConfiguration(
-        email_drafting_prompt=DEFAULT_EMAIL_DRAFTING_PROMPT,
         automatic_reply_prompt=DEFAULT_AUTOMATIC_REPLY_PROMPT,
+        relevance_filter_mode=PromptConfiguration.RelevanceFilterMode.LENIENT,
+        relevance_criteria=DEFAULT_RELEVANCE_CRITERIA,
         revision=0,
     )
     if owner_id is None:
@@ -78,8 +81,9 @@ def runtime_prompt_configuration(owner_id: int | None) -> RuntimePromptConfigura
     if configured is None:
         return default
     return RuntimePromptConfiguration(
-        email_drafting_prompt=_clean_email_drafting_prompt(configured.email_drafting_prompt),
         automatic_reply_prompt=_clean_automatic_reply_prompt(configured.automatic_reply_prompt),
+        relevance_filter_mode=configured.relevance_filter_mode,
+        relevance_criteria=_clean_relevance_criteria(configured.relevance_criteria),
         revision=configured.revision,
     )
 
@@ -87,24 +91,33 @@ def runtime_prompt_configuration(owner_id: int | None) -> RuntimePromptConfigura
 def _prompt_audit_state(configuration: PromptConfiguration) -> dict[str, object]:
     return {
         "revision": configuration.revision,
-        "email_drafting_prompt_sha256": hashlib.sha256(
-            configuration.email_drafting_prompt.encode("utf-8")
-        ).hexdigest(),
         "automatic_reply_prompt_sha256": hashlib.sha256(
             configuration.automatic_reply_prompt.encode("utf-8")
         ).hexdigest(),
     }
 
 
+def _relevance_filter_audit_state(configuration: PromptConfiguration) -> dict[str, object]:
+    # The mode is the safety control, so it is recorded in clear; the criteria is operator prose
+    # and is recorded by digest only, like the reply prompt.
+    return {
+        "revision": configuration.revision,
+        "relevance_filter_mode": configuration.relevance_filter_mode,
+        "relevance_criteria_sha256": hashlib.sha256(
+            configuration.relevance_criteria.encode("utf-8")
+        ).hexdigest(),
+        "relevance_criteria_characters": len(configuration.relevance_criteria),
+    }
+
+
 @transaction.atomic
-def save_prompt_configuration(
-    *,
-    owner: User,
-    email_drafting_prompt: str,
-    automatic_reply_prompt: str | None = None,
-) -> PromptConfiguration:
+def save_relevance_filter(*, owner: User, mode: str, criteria: str) -> PromptConfiguration:
     membership = require_user_capability(owner, Capability.MANAGE_CONFIGURATION)
-    clean_email_prompt = _clean_email_drafting_prompt(email_drafting_prompt)
+    if mode not in PromptConfiguration.RelevanceFilterMode.values:
+        raise ValidationError("El modo del filtro no es válido.")
+    clean_criteria = _clean_relevance_criteria(criteria)
+    if mode != PromptConfiguration.RelevanceFilterMode.OFF and not clean_criteria:
+        raise ValidationError("Escribí el criterio antes de activar el filtro.")
     configuration = (
         PromptConfiguration.objects.select_for_update()
         .filter(workspace=membership.workspace)
@@ -113,14 +126,13 @@ def save_prompt_configuration(
     before: dict[str, object] = {}
     if configuration is None:
         configuration = PromptConfiguration(owner=owner, workspace=membership.workspace)
-        action = "prompt_configuration.created"
+        action = "relevance_filter.created"
     else:
-        before = _prompt_audit_state(configuration)
+        before = _relevance_filter_audit_state(configuration)
         configuration.revision += 1
-        action = "prompt_configuration.updated"
-    configuration.email_drafting_prompt = clean_email_prompt
-    if automatic_reply_prompt is not None:
-        configuration.automatic_reply_prompt = _clean_automatic_reply_prompt(automatic_reply_prompt)
+        action = "relevance_filter.updated"
+    configuration.relevance_filter_mode = mode
+    configuration.relevance_criteria = clean_criteria
     configuration.full_clean()
     configuration.save()
     record_event(
@@ -128,7 +140,7 @@ def save_prompt_configuration(
         entity=configuration,
         actor=owner,
         before=before,
-        after=_prompt_audit_state(configuration),
+        after=_relevance_filter_audit_state(configuration),
     )
     return configuration
 

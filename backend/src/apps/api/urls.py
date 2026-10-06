@@ -46,7 +46,7 @@ from apps.api.catalogs import CatalogDownloadView, CatalogListView
 from apps.api.compliance import SuppressionListView
 from apps.api.configuration import (
     MessageTemplateRevisionView,
-    PromptConfigurationView,
+    RelevanceFilterView,
     SearchCategoryDetailView,
     SearchCategoryListView,
     SearchCategoryRulesView,
@@ -144,7 +144,7 @@ urlpatterns = [
         MessageTemplateRevisionView.as_view(),
         name="api-message-template-revisions",
     ),
-    path("prompts/", PromptConfigurationView.as_view(), name="api-prompts"),
+    path("relevance-filter/", RelevanceFilterView.as_view(), name="api-relevance-filter"),
     path(
         "automation/configuration/",
         AutomationConfigurationView.as_view(),

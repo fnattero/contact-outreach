@@ -113,7 +113,7 @@ def test_seller_is_refused_every_administrative_read(seller_world: dict[str, obj
         reverse("api-outbound-message-export"),
         reverse("api-inbound-message-export"),
         reverse("api-workspace-profile"),
-        reverse("api-prompts"),
+        reverse("api-relevance-filter"),
         reverse("api-integrations-status"),
         reverse("api-overture-status"),
         reverse("api-search-categories"),

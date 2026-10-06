@@ -32,7 +32,7 @@ from apps.configuration.integrations import (
     save_integration_configuration,
 )
 from apps.configuration.models import BusinessProfile, IntegrationConfiguration
-from apps.configuration.services import save_business_profile, save_prompt_configuration
+from apps.configuration.services import save_business_profile, save_relevance_filter
 from apps.mailbox.crypto import encrypt_token
 from apps.mailbox.manual import authorize_manual_reply
 from apps.mailbox.models import GmailConnection, InboundMessage
@@ -283,7 +283,7 @@ def test_vendedor_cannot_bypass_permissions_through_domain_services(
     with pytest.raises(PermissionDenied):
         save_business_profile(owner=seller, values={})
     with pytest.raises(PermissionDenied):
-        save_prompt_configuration(owner=seller, email_drafting_prompt="No autorizado")
+        save_relevance_filter(owner=seller, mode="LENIENT", criteria="No autorizado")
     with pytest.raises(PermissionDenied):
         save_integration_configuration(owner=seller, values={})
     with pytest.raises(PermissionDenied):

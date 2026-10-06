@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from apps.audit.models import AuditEvent
 from apps.configuration.models import (
     DEFAULT_AUTOMATIC_REPLY_PROMPT,
+    DEFAULT_AUTOMATIC_REPLY_PROMPT,
+    DEFAULT_RELEVANCE_CRITERIA,
     BusinessProfile,
     PromptConfiguration,
     SearchCategory,
@@ -15,10 +17,12 @@ from apps.configuration.models import (
 )
 from apps.configuration.services import (
     MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
+    MAX_AUTOMATIC_REPLY_PROMPT_LENGTH,
+    runtime_prompt_configuration,
     save_automatic_reply_prompt,
     save_business_profile,
     save_config_item,
-    save_prompt_configuration,
+    save_relevance_filter,
 )
 
 
@@ -95,53 +99,64 @@ def test_profile_rejects_invalid_threshold(owner: User) -> None:
 
 
 @pytest.mark.django_db
-def test_prompt_configuration_is_versioned_and_audited_without_plaintext(owner: User) -> None:
-    first = save_prompt_configuration(
-        owner=owner,
-        email_drafting_prompt="Destacá la atención técnica comprobable.",
+def test_relevance_filter_is_versioned_and_audited_without_plaintext(owner: User) -> None:
+    first = save_relevance_filter(
+        owner=owner, mode="LENIENT", criteria="Destacá la atención técnica comprobable."
     )
-    second = save_prompt_configuration(
-        owner=owner,
-        email_drafting_prompt="Usá un tono sobrio.",
-    )
+    second = save_relevance_filter(owner=owner, mode="STRICT", criteria="Usá un criterio sobrio.")
 
     assert first.pk == second.pk
     assert second.revision == 2
-    assert (
-        PromptConfiguration.objects.get(owner=owner).email_drafting_prompt == "Usá un tono sobrio."
-    )
-    event = AuditEvent.objects.get(action="prompt_configuration.updated")
-    assert "email_drafting_prompt_sha256" in event.after
-    assert "automatic_reply_prompt_sha256" in event.after
-    assert "Usá un tono sobrio" not in str(event.after)
+    configured = PromptConfiguration.objects.get(owner=owner)
+    assert configured.relevance_filter_mode == "STRICT"
+    assert configured.relevance_criteria == "Usá un criterio sobrio."
+    assert AuditEvent.objects.filter(action="relevance_filter.created").count() == 1
+    event = AuditEvent.objects.get(action="relevance_filter.updated")
+    assert event.before["relevance_filter_mode"] == "LENIENT"
+    assert event.after["relevance_filter_mode"] == "STRICT"
+    assert "relevance_criteria_sha256" in event.after
+    assert "Usá un criterio sobrio" not in str(event.after)
 
 
 @pytest.mark.django_db
-def test_prompt_configuration_keeps_campaign_and_reply_prompts_separate(owner: User) -> None:
+def test_relevance_filter_defaults_to_lenient_with_default_criteria() -> None:
+    runtime = runtime_prompt_configuration(None)
+    assert runtime.relevance_filter_mode == "LENIENT"
+    assert runtime.relevance_criteria == DEFAULT_RELEVANCE_CRITERIA
+    assert runtime.revision == 0
+
+
+@pytest.mark.django_db
+def test_relevance_filter_needs_criteria_unless_off(owner: User) -> None:
+    with pytest.raises(ValidationError, match="Escribí el criterio"):
+        save_relevance_filter(owner=owner, mode="LENIENT", criteria="   ")
+    saved = save_relevance_filter(owner=owner, mode="OFF", criteria="")
+    assert saved.relevance_filter_mode == "OFF"
+
+
+@pytest.mark.django_db
+def test_relevance_filter_rejects_unknown_mode_long_text_and_null_characters(
+    owner: User,
+) -> None:
+    with pytest.raises(ValidationError, match="modo"):
+        save_relevance_filter(owner=owner, mode="CHAOS", criteria="texto")
+    with pytest.raises(ValidationError, match="no puede superar"):
+        save_relevance_filter(owner=owner, mode="LENIENT", criteria="x" * 1201)
+    with pytest.raises(ValidationError, match="carácter no permitido"):
+        save_relevance_filter(owner=owner, mode="LENIENT", criteria="texto con \x00 nulo")
+
+
+@pytest.mark.django_db
+def test_relevance_filter_and_reply_prompt_are_saved_independently(owner: User) -> None:
     save_automatic_reply_prompt(
         owner=owner,
         automatic_reply_prompt="Contestá primero la pregunta concreta.",
     )
-
-    save_prompt_configuration(
-        owner=owner,
-        email_drafting_prompt="Usá un tono comercial sobrio.",
-    )
+    save_relevance_filter(owner=owner, mode="OBSERVE", criteria="Talleres de motores.")
 
     configured = PromptConfiguration.objects.get(owner=owner)
-    assert configured.email_drafting_prompt == "Usá un tono comercial sobrio."
+    assert configured.relevance_criteria == "Talleres de motores."
     assert configured.automatic_reply_prompt == "Contestá primero la pregunta concreta."
-
-
-def test_default_automatic_reply_prompt_contains_only_style_preferences() -> None:
-    assert "Tono:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
-    assert "Extensión y estructura:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
-    assert "Idioma:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
-    assert "Iniciativa:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
-    assert "MEETING_OR_DATE" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
-    assert "No inventes precios" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
-    assert "reglas de seguridad" not in DEFAULT_AUTOMATIC_REPLY_PROMPT.casefold()
-    assert len(DEFAULT_AUTOMATIC_REPLY_PROMPT) < MAX_AUTOMATIC_REPLY_PROMPT_LENGTH
 
 
 @pytest.mark.django_db
@@ -177,10 +192,12 @@ def test_category_normalization_and_unique_active_name(owner: User) -> None:
         save_config_item(item=SearchCategory(name="REPARACIÓN ESPECIAL"), actor=owner)
 
 
-@pytest.mark.django_db
-def test_save_prompt_configuration_rejects_null_characters(owner: User) -> None:
-    with pytest.raises(ValidationError, match="carácter no permitido"):
-        save_prompt_configuration(
-            owner=owner,
-            email_drafting_prompt="texto con \x00 nulo",
-        )
+def test_default_automatic_reply_prompt_contains_only_style_preferences() -> None:
+    assert "Tono:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "Extensión y estructura:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "Idioma:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "Iniciativa:" in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "MEETING_OR_DATE" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "No inventes precios" not in DEFAULT_AUTOMATIC_REPLY_PROMPT
+    assert "reglas de seguridad" not in DEFAULT_AUTOMATIC_REPLY_PROMPT.casefold()
+    assert len(DEFAULT_AUTOMATIC_REPLY_PROMPT) < MAX_AUTOMATIC_REPLY_PROMPT_LENGTH

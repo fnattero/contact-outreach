@@ -36,6 +36,7 @@ def _status_data(request: Request) -> dict[str, object]:
         "llm": {
             "provider": runtime.llm_provider,
             "model": runtime.llm_model,
+            "relevance_model": runtime.relevance_llm_model,
             "credential_source": runtime.llm_credential_source,
             "configured": runtime.llm_credential_configured,
         },
@@ -84,6 +85,7 @@ class IntegrationConfigurationInputSerializer(serializers.Serializer[dict[str, A
     )
     llm_provider = serializers.ChoiceField(choices=IntegrationConfiguration.LLMProvider.choices)
     llm_model = serializers.CharField(max_length=120)
+    relevance_llm_model = serializers.CharField(max_length=120, allow_blank=True)
     ollama_base_url = serializers.CharField(max_length=500)
     openai_compatible_base_url = serializers.CharField(max_length=500, allow_blank=True)
     llm_api_key = serializers.CharField(max_length=4096, allow_blank=True, write_only=True)
@@ -109,6 +111,7 @@ def _configuration_data(request: Request) -> dict[str, object]:
         "website_fetcher": runtime.website_fetcher,
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
+        "relevance_llm_model": runtime.relevance_llm_model,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
         "embedding_provider": runtime.embedding_provider,

@@ -39,17 +39,27 @@ def test_configuration_api_exposes_safe_templates_and_persists_prompt_revision(o
         "REFERRED_PROPOSAL",
     }
 
-    prompts = client.get(reverse("api-prompts"))
-    assert prompts.status_code == 200
+    relevance = client.get(reverse("api-relevance-filter"))
+    assert relevance.status_code == 200
+    assert relevance.json()["data"]["mode"] == "LENIENT"
+    assert relevance.json()["data"]["criteria_limit"] == 1200
+    assert relevance.json()["data"]["default_criteria"]
     changed = _patch(
         client,
-        reverse("api-prompts"),
-        {"email_drafting_prompt": "Usá un tono breve y prudente."},
+        reverse("api-relevance-filter"),
+        {"mode": "STRICT", "criteria": "Usá un criterio breve y prudente."},
         csrf,
     )
     assert changed.status_code == 200
-    assert changed.json()["data"]["email_drafting_prompt"] == "Usá un tono breve y prudente."
-    assert changed.json()["data"]["revision"] == prompts.json()["data"]["revision"] + 1
+    assert changed.json()["data"]["mode"] == "STRICT"
+    assert changed.json()["data"]["mode_label"] == "Estricto"
+    assert changed.json()["data"]["criteria"] == "Usá un criterio breve y prudente."
+    assert changed.json()["data"]["revision"] == relevance.json()["data"]["revision"] + 1
+    invalid = _patch(
+        client, reverse("api-relevance-filter"), {"mode": "CHAOS", "criteria": "texto"}, csrf
+    )
+    assert invalid.status_code == 400
+    assert "mode" in invalid.json()["field_errors"]
 
 
 @pytest.mark.django_db

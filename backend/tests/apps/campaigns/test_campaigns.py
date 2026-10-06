@@ -37,7 +37,7 @@ from apps.configuration.services import (
     delete_or_archive_config_item,
     save_business_profile,
     save_config_item,
-    save_prompt_configuration,
+    save_relevance_filter,
 )
 from apps.overture.models import (
     OvertureCoveragePartition,
@@ -402,9 +402,10 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     save_business_profile(owner=owner, values=profile_values())
     catalog = make_catalog(owner)
     campaign = make_campaign(owner, catalog)
-    save_prompt_configuration(
+    save_relevance_filter(
         owner=owner,
-        email_drafting_prompt="Priorizá el contexto técnico disponible.",
+        mode="LENIENT",
+        criteria="Priorizá el contexto técnico disponible.",
     )
     category = campaign.category_selections.get().category
     category.name = "Nombre modificado"
@@ -431,9 +432,10 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     assert query.normalized_query.startswith("structured-overture-rules-v1:")
     assert query.criteria_json["category_rules"]
     assert query.zone_boundary_hash
-    save_prompt_configuration(
+    save_relevance_filter(
         owner=owner,
-        email_drafting_prompt="Este cambio no debe afectar la campaña iniciada.",
+        mode="STRICT",
+        criteria="Este cambio no debe afectar la campaña iniciada.",
     )
     started.refresh_from_db()
     assert started.prompt_snapshot["initial_outreach"] == "fixed-no-llm"
