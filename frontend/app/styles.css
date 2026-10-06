@@ -2056,6 +2056,32 @@ time {
   color: var(--warning);
 }
 
+.filters__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  column-gap: 16px;
+}
+
+.muted {
+  color: var(--ink-secondary);
+}
+
+.prospect-verdict {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.prospect-verdict h4 {
+  margin: 0 0 8px;
+}
+
+.prospect-verdict p {
+  margin: 0 0 8px;
+}
+
 .instruction-notice {
   max-width: 760px;
   padding: 16px 20px;

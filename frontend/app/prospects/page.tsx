@@ -1,9 +1,10 @@
 "use client";
 
-import { Alert, Button, Card, Flex, Form, Input, Select, Table } from "antd";
+import { Alert, Button, Card, Flex, Form, Input, Modal, Select, Table } from "antd";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
+import { DisabledReason } from "@/components/design-system/disabled-reason";
 import { PageHeader } from "@/components/design-system/page-header";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
@@ -12,6 +13,7 @@ import { can,
   getProspects,
   problemMessage,
   prospectsExportUrl,
+  restoreProspect,
   type DashboardCampaign,
   type Problem,
   type Prospect,
@@ -22,8 +24,12 @@ import {
   collectAttribution,
   filtersFromForm,
   hasActiveFilters,
+  restoreBlockedReason,
   stateLabel,
   stateLevel,
+  VERDICT_OPTIONS,
+  verdictLabel,
+  verdictLevel,
   type FilterFormValues,
 } from "./prospect-helpers";
 
@@ -43,6 +49,9 @@ export default function ProspectsPage() {
   const [campaigns, setCampaigns] = useState<DashboardCampaign[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
+  const [restoring, setRestoring] = useState<Prospect | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
 
   const isAdmin = can(session, "manage_campaigns");
 
@@ -68,10 +77,26 @@ export default function ProspectsPage() {
       .catch((problem) => { if (!cancelled) setError(problem); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [isAdmin, applied, page]);
+  }, [isAdmin, applied, page, reload]);
 
   if (!isAdmin) return <AuthError error={{ detail: "No tenés permisos para ver la audiencia." }} />;
   if (error && !rows.length && !loading) return <AuthError error={error} />;
+
+  async function confirmRestore() {
+    if (!restoring) return;
+    setRestoreBusy(true);
+    try {
+      await restoreProspect(restoring.id);
+      setRestoring(null);
+      setLoading(true);
+      setReload((current) => current + 1);
+    } catch (problem) {
+      setRestoring(null);
+      setError(problem);
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
 
   function apply(values: FilterFormValues) {
     setLoading(true);
@@ -97,6 +122,9 @@ export default function ProspectsPage() {
             <Form.Item name="state" label="Estado">
               <Select allowClear placeholder="Todos" options={PIPELINE_STATE_OPTIONS.map(({ value, label }) => ({ value, label }))} />
             </Form.Item>
+            <Form.Item name="verdict" label="Evaluación del filtro">
+              <Select allowClear placeholder="Todas" options={VERDICT_OPTIONS.map(({ value, label }) => ({ value, label }))} />
+            </Form.Item>
             <Form.Item name="category" label="Rubro"><Input allowClear /></Form.Item>
             <Form.Item name="neighborhood" label="Zona"><Input allowClear /></Form.Item>
           </div>
@@ -116,7 +144,28 @@ export default function ProspectsPage() {
               rowKey="id"
               dataSource={rows}
               scroll={{ x: 900 }}
-              expandable={{ expandedRowRender: (row) => <ProvenanceDetails provenance={row.provenance} />, rowExpandable: () => true }}
+              expandable={{
+                expandedRowRender: (row) => (
+                  <>
+                    {row.relevance_verdict ? (
+                      <section className="prospect-verdict" aria-label="Evaluación del filtro">
+                        <h4 className="type-title">Por qué se evaluó así</h4>
+                        <p>{row.relevance_reason}</p>
+                        {row.relevance_checked_at ? (
+                          <time className="data-text" dateTime={row.relevance_checked_at}>
+                            {dateFormatter.format(new Date(row.relevance_checked_at))}
+                          </time>
+                        ) : null}
+                        {row.relevance_override ? (
+                          <p className="muted">Lo recuperaste a mano. El filtro no lo va a descartar de nuevo.</p>
+                        ) : null}
+                      </section>
+                    ) : null}
+                    <ProvenanceDetails provenance={row.provenance} />
+                  </>
+                ),
+                rowExpandable: () => true,
+              }}
               pagination={{ current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false, onChange: (next) => { setLoading(true); setPage(next); } }}
               locale={{ emptyText: "Ningún prospecto coincide con los filtros." }}
               columns={[
@@ -133,12 +182,30 @@ export default function ProspectsPage() {
                   render: (state: string, row) => <StatusBadge label={stateLabel(state, row.pipeline_state_label)} level={stateLevel(state)} />,
                 },
                 {
+                  title: "Evaluación",
+                  dataIndex: "relevance_verdict",
+                  render: (verdict: string | null) =>
+                    verdict ? <StatusBadge label={verdictLabel(verdict)} level={verdictLevel(verdict)} /> : "—",
+                },
+                {
                   title: "Evaluación anterior",
                   dataIndex: "historical_score",
                   align: "right",
                   render: (score: number | null) => (score === null ? "—" : score),
                 },
                 { title: "Alta", dataIndex: "created_at", render: (value: string) => <time className="data-text" dateTime={value}>{dateFormatter.format(new Date(value))}</time> },
+                {
+                  title: "Acciones",
+                  render: (_: unknown, row) => {
+                    if (row.pipeline_state !== "SKIPPED_IRRELEVANT") return null;
+                    const blocked = restoreBlockedReason(row.campaign_state);
+                    return (
+                      <DisabledReason disabled={blocked !== null} reason={blocked ?? ""}>
+                        <Button size="small" onClick={() => setRestoring(row)}>Recuperar</Button>
+                      </DisabledReason>
+                    );
+                  },
+                },
               ]}
             />
             {collectAttribution(rows).length ? (
@@ -151,6 +218,17 @@ export default function ProspectsPage() {
           <EmptyState headline="Todavía no hay prospectos" explanation="Los negocios aparecen acá cuando una campaña termina su búsqueda." actionLabel="Ir a campañas" actionHref="/campaigns" />
         )}
       </Card>
+      <Modal
+        open={restoring !== null}
+        title="Recuperar este negocio"
+        okText="Recuperar"
+        cancelText="Cancelar"
+        confirmLoading={restoreBusy}
+        onOk={() => void confirmRestore()}
+        onCancel={() => setRestoring(null)}
+      >
+        <p>Vuelve a la audiencia de la campaña. El filtro no lo va a descartar de nuevo, aunque cambies el criterio más adelante.</p>
+      </Modal>
     </Flex>
   );
 }

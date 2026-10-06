@@ -19,7 +19,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 function config(overrides: Partial<IntegrationConfiguration> = {}): IntegrationConfiguration {
   return {
     extractor_provider: "fake", overture_min_confidence: "0.750", website_fetcher: "fake", llm_provider: "fake",
-    llm_model: "fake-deterministic", ollama_base_url: "http://127.0.0.1:11434", openai_compatible_base_url: "",
+    llm_model: "fake-deterministic", relevance_llm_model: "", ollama_base_url: "http://127.0.0.1:11434", openai_compatible_base_url: "",
     embedding_provider: "fake", embedding_model: "text-embedding-3-small", embedding_dimensions: 1536,
     gmail_provider: "fake", gmail_oauth_client_id: "",
     llm_credential: { configured: false, source: "NONE" }, gmail_credential: { configured: false, source: "NONE" },
@@ -29,6 +29,7 @@ function config(overrides: Partial<IntegrationConfiguration> = {}): IntegrationC
 const values = (c: IntegrationConfiguration) => ({
   extractor_provider: c.extractor_provider, overture_min_confidence: c.overture_min_confidence,
   website_fetcher: c.website_fetcher, llm_provider: c.llm_provider, llm_model: c.llm_model,
+  relevance_llm_model: c.relevance_llm_model,
   ollama_base_url: c.ollama_base_url, openai_compatible_base_url: c.openai_compatible_base_url,
   embedding_provider: c.embedding_provider, embedding_model: c.embedding_model,
   embedding_dimensions: c.embedding_dimensions, gmail_provider: c.gmail_provider,

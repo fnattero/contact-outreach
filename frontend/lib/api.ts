@@ -260,6 +260,7 @@ export type IntegrationConfiguration = {
   website_fetcher: string;
   llm_provider: string;
   llm_model: string;
+  relevance_llm_model: string;
   ollama_base_url: string;
   openai_compatible_base_url: string;
   embedding_provider: string;
@@ -286,7 +287,7 @@ export type IntegrationConfigurationPatch = Partial<
 export type IntegrationStatus = {
   extractor: { provider: string; overture_min_confidence: string };
   website_fetcher: { provider: string };
-  llm: { provider: string; model: string; credential_source: string; configured: boolean };
+  llm: { provider: string; model: string; relevance_model: string; credential_source: string; configured: boolean };
   embeddings: { provider: string; model: string; dimensions: number };
   gmail: {
     provider: string;
@@ -337,10 +338,17 @@ export type Prospect = {
   pipeline_state_label: string;
   primary_email: string | null;
   historical_score: number | null;
+  relevance_verdict: RelevanceVerdict | null;
+  relevance_reason: string | null;
+  relevance_checked_at: string | null;
+  relevance_override: boolean;
+  campaign_state: string;
   campaign: { id: string; name: string };
   provenance: Provenance | null;
   created_at: string;
 };
+
+export type RelevanceVerdict = "FIT" | "UNCLEAR" | "UNFIT";
 
 export type Provenance = {
   release_id: string | null;
@@ -358,6 +366,7 @@ export type ProspectFilters = {
   state?: string;
   category?: string;
   neighborhood?: string;
+  verdict?: string;
   page?: number;
   page_size?: number;
 };
@@ -404,9 +413,14 @@ export type MessageTemplate = {
   active: boolean;
 };
 
-export type PromptConfiguration = {
-  email_drafting_prompt: string;
-  automatic_reply_prompt: string;
+export type RelevanceFilterMode = "OFF" | "OBSERVE" | "LENIENT" | "STRICT";
+
+export type RelevanceFilter = {
+  mode: RelevanceFilterMode;
+  mode_label: string;
+  criteria: string;
+  default_criteria: string;
+  criteria_limit: number;
   revision: number;
 };
 
@@ -972,14 +986,28 @@ export function createMessageTemplate(input: {
   });
 }
 
-export function getPromptConfiguration(): Promise<PromptConfiguration> {
-  return request<PromptConfiguration>("/api/v1/prompts/");
+export function getRelevanceFilter(): Promise<RelevanceFilter> {
+  return request<RelevanceFilter>("/api/v1/relevance-filter/");
 }
 
-export function updatePromptConfiguration(emailDraftingPrompt: string): Promise<PromptConfiguration> {
-  return request<PromptConfiguration>("/api/v1/prompts/", {
+export function updateRelevanceFilter(
+  mode: RelevanceFilterMode,
+  criteria: string,
+): Promise<RelevanceFilter> {
+  return request<RelevanceFilter>("/api/v1/relevance-filter/", {
     method: "PATCH",
-    body: JSON.stringify({ email_drafting_prompt: emailDraftingPrompt }),
+    body: JSON.stringify({ mode, criteria }),
+  });
+}
+
+export function getAutomaticReplyPrompt(): Promise<{ automatic_reply_prompt: string }> {
+  return request<{ automatic_reply_prompt: string }>("/api/v1/automation/writing-instructions/");
+}
+
+export function restoreProspect(id: string): Promise<Prospect> {
+  return request<Prospect>(`/api/v1/prospects/${encodeURIComponent(id)}/restore/`, {
+    method: "POST",
+    body: "{}",
   });
 }
 
@@ -1179,6 +1207,7 @@ export function prospectsExportUrl(filters: ProspectFilters = {}): string {
     state: filters.state,
     category: filters.category,
     neighborhood: filters.neighborhood,
+    verdict: filters.verdict,
   })}`;
 }
 
