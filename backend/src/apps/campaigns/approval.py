@@ -29,6 +29,10 @@ from apps.contacts.services import enrollment_eligibility, refresh_enrollment_el
 MAX_ATTACHMENT_SOURCE_BYTES = 17 * 1024 * 1024
 
 
+class NoRecipientsError(ValidationError):
+    """Discovery finished but no prospect is left to approve."""
+
+
 def _canonical_hash(value: object) -> str:
     payload = json.dumps(
         value,
@@ -272,6 +276,25 @@ def prepare_fixed_initial_messages(campaign: Campaign) -> tuple[OutboundMessage,
 
 
 @transaction.atomic
+def refresh_review_audience(campaign_id: uuid.UUID | str) -> None:
+    """Bring a campaign that is waiting for approval up to date after its audience grew.
+
+    A person can restore a discarded business while reviewing. The new recipient needs a prepared
+    message and the audience hash the approval later checks has to describe it.
+    """
+
+    campaign = (
+        Campaign.objects.select_for_update()
+        .select_related("workspace", "catalog")
+        .get(pk=campaign_id)
+    )
+    if campaign.state != Campaign.State.AWAITING_APPROVAL:
+        return
+    prepare_fixed_initial_messages(campaign)
+    campaign.save(update_fields=("audience_hash", "attachment_hash", "schedule_hash", "updated_at"))
+
+
+@transaction.atomic
 def move_campaign_to_approval(campaign_id: uuid.UUID | str) -> Campaign:
     campaign = (
         Campaign.objects.select_for_update()
@@ -289,7 +312,7 @@ def move_campaign_to_approval(campaign_id: uuid.UUID | str) -> Campaign:
         raise ValidationError("La búsqueda todavía no terminó correctamente.")
     prepare_fixed_initial_messages(campaign)
     if not campaign.messages.filter(kind=OutboundMessage.Kind.INITIAL).exists():
-        raise ValidationError("No encontramos destinatarios válidos para aprobar.")
+        raise NoRecipientsError("No encontramos destinatarios válidos para aprobar.")
     campaign.state = Campaign.State.AWAITING_APPROVAL
     campaign.save(
         update_fields=(
@@ -345,7 +368,22 @@ def maybe_move_campaign_to_approval(campaign_id: uuid.UUID | str) -> Campaign | 
         ),
     ).exists():
         return None
-    return move_campaign_to_approval(campaign.pk)
+    try:
+        return move_campaign_to_approval(campaign.pk)
+    except NoRecipientsError:
+        # Every business was removed or ineligible. Leaving the campaign searching forever with a
+        # failed task would hide that, so stop it with a reason the operator can act on.
+        with transaction.atomic():
+            locked = Campaign.objects.select_for_update().get(pk=campaign.pk)
+            if locked.state == Campaign.State.DISCOVERING:
+                locked.state = Campaign.State.STOPPED_ERROR
+                locked.status_reason = (
+                    "Ningún negocio quedó para aprobar. Revisá el filtro de audiencia o ampliá "
+                    "la búsqueda."
+                )
+                locked.finished_at = timezone.now()
+                locked.save(update_fields=("state", "status_reason", "finished_at", "updated_at"))
+            return locked
 
 
 def _recheck_prepared_message(message: OutboundMessage) -> str:

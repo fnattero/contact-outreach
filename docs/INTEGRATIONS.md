@@ -29,6 +29,7 @@ class WebsiteFetcher(Protocol):
     def fetch(self, request: WebsiteRequest) -> WebsiteResult: ...
 
 class LLMProvider(Protocol):
+    def screen_prospect(self, request: ProspectScreeningRequest) -> ProspectScreening: ...  # filtro de audiencia, sólo veto
     def analyze(self, request: AnalysisRequest) -> AIAnalysisResult: ...  # sólo legacy
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification: ...  # compatibilidad
     def decide_reply(self, request: ReplyDecisionRequest) -> ReplyDecisionResult: ...
@@ -136,10 +137,32 @@ reemplazar el cache relacional por un vector store sin cambiar el contrato de do
 
 ### 4.1 Campañas nuevas y compatibilidad
 
-Nuevas campañas iniciales realizan **cero** llamadas `analyze`: rubro/zonas/email determinan
-audiencia y el mensaje fijo se compone en dominio. `analyze` y `classify_reply` permanecen
+Nuevas campañas iniciales realizan **cero** llamadas `analyze` y cero redacción: rubro/zonas/email
+determinan audiencia y el mensaje fijo se compone en dominio. Cuando el filtro de audiencia no está
+`OFF`, el descubrimiento hace a lo sumo una llamada `screen_prospect` por prospecto (§4.6); una
+campaña congelada antes del filtro no tiene la clave `prospect_screening` y se trata como `OFF`. `analyze` y `classify_reply` permanecen
 temporalmente para leer/reprocesar únicamente flujos legacy permitidos; `AIAnalysis` histórico es
 read-only y nunca se regenera para enviar una campaña completada.
+
+### 4.6 ProspectScreeningRequest
+
+Una sola pregunta acotada por prospecto: ¿encaja el negocio en el criterio del operador? La
+respuesta es un objeto con `verdict` (`FIT`, `UNCLEAR`, `UNFIT`) y `reason` de una línea (≤ 160
+caracteres), con schema estricto, `temperature=0` y validación local siempre.
+
+- Entrada ≤ 4.000 caracteres serializados, verificada antes de llamar al proveedor: instrucciones
+  fijas, `OPERATOR_CRITERIA` (≤ 1.200) y hechos literales (nombre, rubro, zona, dominio y un extracto
+  de la primera página del sitio ≤ 1.200 caracteres, rotulado `UNTRUSTED_DATA`). No se envían la
+  dirección, el teléfono ni las demás páginas.
+- Las reglas de seguridad (formato de salida, texto web como dato, "sólo decidís si encaja") viven en
+  código. Sólo el criterio es editable desde el dashboard; guía cómo juzgar los casos dudosos pero no
+  puede cambiar el formato ni el significado de los veredictos.
+- El modo (`OFF`, `OBSERVE`, `LENIENT`, `STRICT`) decide qué veredicto descarta, en código. No forma
+  parte del hash de entrada, así que cambiar de modo reutiliza el veredicto guardado.
+- Un solo intento, sin batch: cualquier falla del proveedor conserva el prospecto y queda registrada
+  y redactada en `ProspectRelevanceVerdict`.
+- El modelo puede configurarse aparte del de las respuestas (`relevance_llm_model`); vacío usa el
+  modelo general.
 
 ### 4.2 ReplyDecisionRequest
 
@@ -287,6 +310,7 @@ marca delivery; HumanTask permanece.
 | Website | uno por página dentro de presupuesto | fallback auditable |
 | Embeddings | máximo 3 técnicos; no fallback a facts no seleccionados | HumanTask/provider failure cuando hacen falta facts |
 | LLM decide | máximo 3 técnicos; rate limits diferidos | HumanTask/provider failure; nunca auto fallback |
+| LLM screen prospect | sin retry; una sola llamada con timeout corto | falla abierta: el prospecto se conserva y el error queda redactado en la fila de veredicto |
 | Gmail send/reply | no retry ciego | RECONCILING o FAILED/HumanTask |
 | Gmail sync | 3; fallback history 404 | conexión degradada, UI disponible |
 | Notification | retry + reconciliation por Message-ID | FAILED; task durable |

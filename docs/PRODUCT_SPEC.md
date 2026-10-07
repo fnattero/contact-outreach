@@ -125,11 +125,24 @@ oficiales se consultan con `WebsiteFetcher` SSRF-safe sólo para encontrar email
 Overture no ofrece uno útil. No se infieren direcciones.
 
 Las identidades descubiertas se resuelven hacia `Organization` y `EmailAddress`; los datos
-históricos de `Prospect` y `AIAnalysis` permanecen legibles. Ninguna campaña invoca al LLM: el
-camino de análisis y redacción fue eliminado y el descubrimiento no llama a ningún proveedor de
-lenguaje. La elegibilidad es el único filtro de prospectos; ver A-059 en `docs/ASSUMPTIONS.md`
-por el scoring de relevancia pendiente. Su objetivo cuenta enrollments únicos con una dirección
-elegible y un mensaje inicial preparado. Se revalida elegibilidad al preparar, aprobar,
+históricos de `Prospect` y `AIAnalysis` permanecen legibles y no se regeneran. Ninguna campaña
+invoca al LLM para redactar: el camino de análisis y redacción sigue eliminado y el contenido
+inicial es fijo y aprobado por una persona.
+
+El descubrimiento sí aplica un **filtro de audiencia por IA, acotado y sólo veto**: a lo sumo una
+llamada por prospecto, con entrada limitada, que responde `FIT`, `UNCLEAR` o `UNFIT` junto con un
+motivo de una línea. El modo del espacio de trabajo —`OFF`, `OBSERVE`, `LENIENT` (default) o
+`STRICT`, mostrados como Desactivado, Sólo marcar, Prudente y Estricto— decide en código
+determinista qué veredicto descarta; el modelo nunca decide la sensibilidad. El texto del criterio,
+escrito por un admin con sus propias palabras, indica cómo juzgar los casos dudosos pero no puede
+cambiar el formato ni el significado de los veredictos. El filtro nunca agrega, ordena ni
+reinstala un prospecto y una falla del proveedor conserva el prospecto. La campaña congela modo y
+criterio al iniciar; una campaña anterior al filtro se trata como `OFF`. Una persona puede
+recuperar un negocio descartado mientras la campaña busca o espera aprobación, y esa decisión es
+permanente para ese negocio. Ver A-060 a A-063 en `docs/ASSUMPTIONS.md`.
+
+La elegibilidad sigue siendo el único filtro que puede **admitir** un prospecto. Su objetivo
+cuenta enrollments únicos con una dirección elegible y un mensaje inicial preparado. Se revalida elegibilidad al preparar, aprobar,
 encolar y justo antes de Gmail: dirección válida, sin Contacto de la organización, sin
 restricciones, campaña/mode correctos, barreras Gmail y adjuntos íntegros.
 

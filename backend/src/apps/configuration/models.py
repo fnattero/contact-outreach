@@ -14,10 +14,6 @@ from django.db.models import Q
 from apps.core.models import TimestampedUUIDModel
 from apps.overture.matching import normalize_search_text, normalize_taxonomy_code
 
-DEFAULT_EMAIL_DRAFTING_PROMPT = (
-    "Priorizá un tono profesional, directo y prudente. Explicá una relación posible con los "
-    "productos del perfil sin asumir que el negocio ya los compra o necesita."
-)
 DEFAULT_AUTOMATIC_REPLY_PROMPT = "\n\n".join(
     (
         "Tono: cordial, claro y profesional, como un mail real escrito por una persona "
@@ -32,6 +28,15 @@ DEFAULT_AUTOMATIC_REPLY_PROMPT = "\n\n".join(
         "la acción comerciales que no sean relevantes para la consulta. Cuando ayude a "
         "avanzar, cerrá con una próxima acción simple y concreta.",
     )
+)
+
+DEFAULT_RELEVANCE_CRITERIA = (
+    "Nos sirven los negocios que reparan, mantienen o rebobinan equipos con motor eléctrico: "
+    "talleres electromecánicos, bobinados de motores, service de herramientas eléctricas, "
+    "reparación de bombas, autoelectricidad, alternadores y arranques, mantenimiento "
+    "industrial, reparación de electrodomésticos y de máquinas industriales.\n"
+    "No nos sirven los negocios que sólo venden equipos nuevos sin taller propio, ni los "
+    "rubros sin relación con motores eléctricos."
 )
 
 
@@ -144,6 +149,8 @@ class IntegrationConfiguration(TimestampedUUIDModel):
         default=LLMProvider.FAKE,
     )
     llm_model = models.CharField(max_length=120, default="fake-deterministic")
+    # Blank means the audience filter uses llm_model; a cheaper model can be set here.
+    relevance_llm_model = models.CharField(max_length=120, blank=True, default="")
     llm_api_key_encrypted = models.TextField(blank=True, editable=False)
     llm_api_key_source = models.CharField(
         max_length=20,
@@ -207,6 +214,12 @@ class IntegrationConfiguration(TimestampedUUIDModel):
 
 
 class PromptConfiguration(TimestampedUUIDModel):
+    class RelevanceFilterMode(models.TextChoices):
+        OFF = "OFF", "Desactivado"
+        OBSERVE = "OBSERVE", "Sólo marcar"
+        LENIENT = "LENIENT", "Prudente"
+        STRICT = "STRICT", "Estricto"
+
     workspace = models.OneToOneField(
         "accounts.Workspace",
         on_delete=models.PROTECT,
@@ -217,8 +230,13 @@ class PromptConfiguration(TimestampedUUIDModel):
         on_delete=models.PROTECT,
         related_name="prompt_configuration",
     )
-    email_drafting_prompt = models.TextField(default=DEFAULT_EMAIL_DRAFTING_PROMPT)
     automatic_reply_prompt = models.TextField(default=DEFAULT_AUTOMATIC_REPLY_PROMPT)
+    relevance_filter_mode = models.CharField(
+        max_length=20,
+        choices=RelevanceFilterMode.choices,
+        default=RelevanceFilterMode.LENIENT,
+    )
+    relevance_criteria = models.TextField(default=DEFAULT_RELEVANCE_CRITERIA, blank=True)
     revision = models.PositiveIntegerField(default=1, editable=False)
 
     def __str__(self) -> str:

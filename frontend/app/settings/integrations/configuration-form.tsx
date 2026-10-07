@@ -16,7 +16,7 @@ import { applyFieldErrors } from "@/lib/form-errors";
 import { buildConfigurationPatch, credentialStatus, hasChanges, type ConfigurationFormValues } from "./configuration-helpers";
 
 const FIELDS = [
-  "extractor_provider", "overture_min_confidence", "website_fetcher", "llm_provider", "llm_model",
+  "extractor_provider", "overture_min_confidence", "website_fetcher", "llm_provider", "llm_model", "relevance_llm_model",
   "ollama_base_url", "openai_compatible_base_url", "llm_api_key", "embedding_provider", "embedding_model",
   "embedding_dimensions", "gmail_provider", "gmail_oauth_client_id", "gmail_oauth_client_secret",
 ] as const;
@@ -84,9 +84,10 @@ export function ConfigurationForm() {
           <Form.Item name="overture_min_confidence" label="Confianza mínima de Overture" extra="Entre 0 y 1."><Input inputMode="decimal" /></Form.Item>
           <Form.Item name="website_fetcher" label="Lectura de sitios web" extra="La lectura real sólo visita sitios públicos y bloquea redes internas."><Select options={[fake, { value: "http", label: "HTTP seguro" }]} /></Form.Item>
         </FormSection>
-        <FormSection title="Inteligencia artificial" description="Proveedor para analizar respuestas. Nunca redacta el primer contacto.">
+        <FormSection title="Inteligencia artificial" description="Revisa la audiencia y analiza las respuestas. Nunca redacta el primer contacto.">
           <Form.Item name="llm_provider" label="Proveedor"><Select options={[fake, { value: "ollama", label: "Ollama" }, { value: "openai-compatible", label: "Compatible con OpenAI" }]} /></Form.Item>
           <Form.Item name="llm_model" label="Modelo"><Input maxLength={120} /></Form.Item>
+          <Form.Item name="relevance_llm_model" label="Modelo para el filtro de audiencia" extra="Opcional. Revisar cada negocio es una tarea simple: un modelo más económico alcanza. Si lo dejás vacío se usa el modelo de arriba."><Input maxLength={120} /></Form.Item>
           <Form.Item name="ollama_base_url" label="Dirección base de Ollama"><Input /></Form.Item>
           <Form.Item name="openai_compatible_base_url" label="Dirección base compatible con OpenAI" extra="Debe usar HTTPS."><Input /></Form.Item>
           <Form.Item name="llm_api_key" label="Nueva clave de API" extra={`Estado actual: ${credentialStatus(current.llm_credential)}. Dejala vacía para conservarla; nunca vuelve a mostrarse.`}><Input.Password autoComplete="new-password" spellCheck={false} /></Form.Item>

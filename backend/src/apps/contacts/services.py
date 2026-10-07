@@ -616,6 +616,8 @@ def ensure_prospect_enrollment(
 
 
 def enrollment_eligibility(enrollment: CampaignEnrollment) -> EnrollmentEligibility:
+    from apps.prospects.models import Prospect
+
     selected = enrollment.selected_email
     if selected is None:
         return EnrollmentEligibility(False, "NO_EMAIL", "Elegí un email válido antes de continuar.")
@@ -639,6 +641,16 @@ def enrollment_eligibility(enrollment: CampaignEnrollment) -> EnrollmentEligibil
             False,
             "EXISTING_CONTACT",
             "Esta organización ya es un contacto y no recibirá campañas nuevas.",
+        )
+    # The audience filter can only remove: a business it removed (and nobody restored) is not
+    # eligible, at every place eligibility is re-checked.
+    if enrollment.legacy_prospects.filter(
+        pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT
+    ).exists():
+        return EnrollmentEligibility(
+            False,
+            "AUDIENCE_FILTER",
+            "Este negocio fue descartado por el filtro de audiencia.",
         )
     active = CommunicationRestriction.objects.filter(
         workspace_id=enrollment.workspace_id,

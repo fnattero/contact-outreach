@@ -2,7 +2,7 @@
 
 import { Alert, Button, Card, Dropdown, Flex } from "antd";
 import type { MenuProps } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
 import { PageHeader } from "@/components/design-system/page-header";
@@ -38,6 +38,7 @@ export default function IntegrationsSettingsPage() {
   const [gmailBusy, setGmailBusy] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [technicalOpen, setTechnicalOpen] = useState(false);
+  const technicalRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     void Promise.all([getIntegrationStatus(), getGmailConnection()])
@@ -95,7 +96,15 @@ export default function IntegrationsSettingsPage() {
     { key: "disconnect", label: "Desconectar", danger: true, onClick: () => setDisconnectOpen(true) },
   ];
 
-  const technicalAction = <Button type="link" onClick={() => setTechnicalOpen(true)}>Ver detalles técnicos</Button>;
+  function showTechnical() {
+    setTechnicalOpen(true);
+    // The details live at the bottom of the page: open them and bring them into view.
+    window.requestAnimationFrame(() =>
+      technicalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }
+
+  const technicalAction = <Button type="link" onClick={showTechnical}>Ver detalles técnicos</Button>;
 
   return (
     <Flex vertical gap="large">
@@ -104,25 +113,25 @@ export default function IntegrationsSettingsPage() {
       <Card title="Servicios conectados">
         <div className="integration-list">
           <div className="integration-row">
-            <div className="integration-row__name"><strong>Extractor de búsqueda</strong><span>Obtiene candidatos para las campañas.</span></div>
+            <div className="integration-row__name"><strong>Búsqueda de negocios</strong><span>Encuentra los negocios de cada campaña por rubro y zona.</span></div>
             <StatusBadge label="Disponible" level="success" />
             <span className="integration-row__account">Configuración del backend</span>
             {technicalAction}
           </div>
           <div className="integration-row">
-            <div className="integration-row__name"><strong>Fetcher web</strong><span>Consulta sitios para validar información.</span></div>
+            <div className="integration-row__name"><strong>Lectura de sitios web</strong><span>Lee el sitio de cada negocio para encontrar su correo.</span></div>
             <StatusBadge label="Disponible" level="success" />
             <span className="integration-row__account">Configuración del backend</span>
             {technicalAction}
           </div>
           <div className="integration-row">
-            <div className="integration-row__name"><strong>Modelo de redacción</strong><span>Prepara borradores según la política.</span></div>
+            <div className="integration-row__name"><strong>Inteligencia artificial</strong><span>Revisa la audiencia y propone respuestas a los correos que llegan.</span></div>
             <StatusBadge label={status.llm.configured ? "Configurado" : "No configurado"} level={status.llm.configured ? "success" : "warning"} />
             <span className="integration-row__account">{status.llm.configured ? "Credencial del backend" : "Sin credencial disponible"}</span>
             {technicalAction}
           </div>
           <div className="integration-row">
-            <div className="integration-row__name"><strong>Búsqueda semántica</strong><span>Relaciona consultas con información aprobada.</span></div>
+            <div className="integration-row__name"><strong>Búsqueda en tu información</strong><span>Encuentra los datos aprobados que sirven para contestar.</span></div>
             <StatusBadge label="Disponible" level="success" />
             <span className="integration-row__account">Configuración del backend</span>
             {technicalAction}
@@ -156,13 +165,14 @@ export default function IntegrationsSettingsPage() {
         <div className="integration-confidence"><strong>{percent(status.extractor.overture_min_confidence)}</strong><span>Confianza mínima</span><p>Define el mínimo de confianza requerido para aceptar resultados de búsqueda.</p></div>
       </Card>
       <Card title="Detalles técnicos">
-        <details open={technicalOpen} onToggle={(event) => setTechnicalOpen(event.currentTarget.open)} className="integration-technical">
+        <details ref={technicalRef} open={technicalOpen} onToggle={(event) => setTechnicalOpen(event.currentTarget.open)} className="integration-technical">
           <summary>Mostrar proveedor, modelo y configuración interna</summary>
           <dl>
-            <dt>Extractor</dt><dd>{status.extractor.provider}</dd>
-            <dt>Fetcher web</dt><dd>{status.website_fetcher.provider}</dd>
-            <dt>Modelo de redacción</dt><dd>{status.llm.provider} · {status.llm.model} · {status.llm.credential_source}</dd>
-            <dt>Búsqueda semántica</dt><dd>{status.embeddings.provider} · {status.embeddings.model} · {status.embeddings.dimensions} dimensiones</dd>
+            <dt>Búsqueda de negocios</dt><dd>{status.extractor.provider}</dd>
+            <dt>Lectura de sitios web</dt><dd>{status.website_fetcher.provider}</dd>
+            <dt>Inteligencia artificial</dt><dd>{status.llm.provider} · {status.llm.model} · {status.llm.credential_source}</dd>
+            <dt>Modelo del filtro de audiencia</dt><dd>{status.llm.relevance_model || `${status.llm.model} (el mismo de arriba)`}</dd>
+            <dt>Búsqueda en tu información</dt><dd>{status.embeddings.provider} · {status.embeddings.model} · {status.embeddings.dimensions} dimensiones</dd>
             <dt>Gmail</dt><dd>{status.gmail.provider} · OAuth {configured(status.gmail.oauth_client_id_configured)} · secreto {configured(status.gmail.credential_configured)} · estado {gmail?.status ?? status.gmail.connection_status}</dd>
             <dt>Umbral interno</dt><dd>{status.extractor.overture_min_confidence}</dd>
             <dt>Revisión de configuración</dt><dd>{status.revision}</dd>

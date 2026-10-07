@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import time
 from decimal import Decimal
 from pathlib import Path
@@ -37,7 +38,7 @@ from apps.configuration.services import (
     delete_or_archive_config_item,
     save_business_profile,
     save_config_item,
-    save_prompt_configuration,
+    save_relevance_filter,
 )
 from apps.overture.models import (
     OvertureCoveragePartition,
@@ -402,9 +403,10 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     save_business_profile(owner=owner, values=profile_values())
     catalog = make_catalog(owner)
     campaign = make_campaign(owner, catalog)
-    save_prompt_configuration(
+    save_relevance_filter(
         owner=owner,
-        email_drafting_prompt="Priorizá el contexto técnico disponible.",
+        mode="LENIENT",
+        criteria="Priorizá el contexto técnico disponible.",
     )
     category = campaign.category_selections.get().category
     category.name = "Nombre modificado"
@@ -418,25 +420,34 @@ def test_start_freezes_profile_settings_and_deterministic_queries(
     assert started.settings_snapshot["objective"] == 300
     assert started.settings_snapshot["website_fetcher"] == "fake"
     assert started.profile_snapshot["company_name"] == "Componentes Delta SA"
-    assert started.prompt_snapshot == {
-        "version": "fixed-campaign-message-v1",
-        "schema_version": "fixed-message-no-placeholders-v1",
-        "initial_outreach": "fixed-no-llm",
-        "llm_calls": 0,
-        "search_mode": "structured-overture-rules-v1",
-    }
+    assert started.prompt_snapshot["initial_outreach"] == "fixed-no-llm"
+    assert started.prompt_snapshot["initial_outreach_llm_calls"] == 0
+    assert "llm_calls" not in started.prompt_snapshot
+    screening = started.prompt_snapshot["prospect_screening"]
+    assert screening["mode"] == "LENIENT"
+    assert screening["criteria"] == "Priorizá el contexto técnico disponible."
+    assert (
+        screening["criteria_sha256"] == hashlib.sha256(screening["criteria"].encode()).hexdigest()
+    )
     query = SearchQuery.objects.get(campaign=started)
     assert query.category_snapshot == "Bobinados de motores"
     assert query.query_text == "Bobinados de motores en Palermo"
     assert query.normalized_query.startswith("structured-overture-rules-v1:")
     assert query.criteria_json["category_rules"]
     assert query.zone_boundary_hash
-    save_prompt_configuration(
+    save_relevance_filter(
         owner=owner,
-        email_drafting_prompt="Este cambio no debe afectar la campaña iniciada.",
+        mode="STRICT",
+        criteria="Este cambio no debe afectar la campaña iniciada.",
     )
     started.refresh_from_db()
     assert started.prompt_snapshot["initial_outreach"] == "fixed-no-llm"
+    # Editing the filter afterwards cannot change a campaign that already started.
+    assert started.prompt_snapshot["prospect_screening"]["mode"] == "LENIENT"
+    assert (
+        started.prompt_snapshot["prospect_screening"]["criteria"]
+        == "Priorizá el contexto técnico disponible."
+    )
     started.objective = 999
     with pytest.raises(ValidationError, match="inmutable"):
         started.save()

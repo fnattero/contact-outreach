@@ -148,6 +148,24 @@ class AnalysisFact:
 
 
 @dataclass(frozen=True, slots=True)
+class ProspectScreeningRequest:
+    """One bounded question: does this discovered business fit the operator's criteria?"""
+
+    criteria: str
+    facts: tuple[AnalysisFact, ...]
+    correlation_id: str
+    idempotency_key: str
+    schema_version: str = "1"
+    timeout_seconds: float = 12.0
+
+
+@dataclass(frozen=True, slots=True)
+class ProspectScreening:
+    verdict: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisRequest:
     facts: tuple[AnalysisFact, ...]
     correlation_id: str
@@ -375,6 +393,8 @@ class WebsiteFetcher(Protocol):
 
 
 class LLMProvider(Protocol):
+    def screen_prospect(self, request: ProspectScreeningRequest) -> ProspectScreening: ...
+
     def analyze(self, request: AnalysisRequest) -> AIAnalysisResult: ...
 
     def classify_reply(self, request: ReplyClassificationRequest) -> ReplyClassification: ...

@@ -8,7 +8,7 @@ export type ConfigurationFormValues = Omit<IntegrationConfiguration, "llm_creden
 };
 
 const PLAIN_FIELDS = [
-  "extractor_provider", "overture_min_confidence", "website_fetcher", "llm_provider", "llm_model",
+  "extractor_provider", "overture_min_confidence", "website_fetcher", "llm_provider", "llm_model", "relevance_llm_model",
   "ollama_base_url", "openai_compatible_base_url", "embedding_provider", "embedding_model",
   "embedding_dimensions", "gmail_provider", "gmail_oauth_client_id",
 ] as const;

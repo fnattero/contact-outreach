@@ -25,7 +25,12 @@ class PipelineReservation:
 
 def _campaign_allows_work(campaign: Campaign, *, manual: bool) -> bool:
     if manual:
-        return campaign.state in {Campaign.State.RUNNING, Campaign.State.PAUSED} or (
+        return campaign.state in {
+            Campaign.State.DISCOVERING,
+            Campaign.State.AWAITING_APPROVAL,
+            Campaign.State.RUNNING,
+            Campaign.State.PAUSED,
+        } or (
             campaign.state == Campaign.State.COMPLETED
             and campaign.delivery_mode == Campaign.DeliveryMode.REVIEW_ONLY
         )

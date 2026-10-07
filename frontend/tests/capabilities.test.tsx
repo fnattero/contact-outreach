@@ -42,7 +42,7 @@ describe("shell routes follow capabilities", () => {
   it("blocks a seller from administration and creation routes only", () => {
     const seller = sessionFor("VENDEDOR");
     expect(canSeeAdministration(seller)).toBe(false);
-    for (const path of ["/audit", "/jobs", "/campaigns/new", "/contacts/new", "/settings/users", "/settings/integrations/x"]) {
+    for (const path of ["/audit", "/jobs", "/campaigns/new", "/contacts/new", "/settings/users", "/settings/integrations/x", "/settings/relevance", "/settings/prompts"]) {
       expect(isForbiddenShellRoute(seller, path), path).toBe(true);
     }
     for (const path of ["/dashboard", "/campaigns", "/campaigns/123", "/contacts", "/responses", "/outbound"]) {

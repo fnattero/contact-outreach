@@ -41,12 +41,13 @@ from apps.api.campaigns import (
     CampaignProspectListView,
     ProspectExportView,
     ProspectListView,
+    ProspectRestoreView,
 )
 from apps.api.catalogs import CatalogDownloadView, CatalogListView
 from apps.api.compliance import SuppressionListView
 from apps.api.configuration import (
     MessageTemplateRevisionView,
-    PromptConfigurationView,
+    RelevanceFilterView,
     SearchCategoryDetailView,
     SearchCategoryListView,
     SearchCategoryRulesView,
@@ -144,7 +145,7 @@ urlpatterns = [
         MessageTemplateRevisionView.as_view(),
         name="api-message-template-revisions",
     ),
-    path("prompts/", PromptConfigurationView.as_view(), name="api-prompts"),
+    path("relevance-filter/", RelevanceFilterView.as_view(), name="api-relevance-filter"),
     path(
         "automation/configuration/",
         AutomationConfigurationView.as_view(),
@@ -248,6 +249,11 @@ urlpatterns = [
     path("campaigns/", CampaignListView.as_view(), name="api-campaigns"),
     path("prospects/", ProspectListView.as_view(), name="api-prospects"),
     path("prospects/export.csv", ProspectExportView.as_view(), name="api-prospect-export"),
+    path(
+        "prospects/<uuid:prospect_id>/restore/",
+        ProspectRestoreView.as_view(),
+        name="api-prospect-restore",
+    ),
     path(
         "campaigns/<uuid:campaign_id>/",
         CampaignDetailView.as_view(),

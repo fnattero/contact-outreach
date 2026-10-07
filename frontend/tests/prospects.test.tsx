@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { App } from "antd";
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProspectsPage from "@/app/prospects/page";
@@ -9,10 +10,13 @@ import {
   contactSourceLabel,
   filtersFromForm,
   hasActiveFilters,
+  restoreBlockedReason,
   stateLabel,
   stateLevel,
+  verdictLabel,
+  verdictLevel,
 } from "@/app/prospects/prospect-helpers";
-import { getCampaigns, getProspects, prospectsExportUrl, type Prospect, type Provenance } from "@/lib/api";
+import { getCampaigns, getProspects, prospectsExportUrl, restoreProspect, type Prospect, type Provenance } from "@/lib/api";
 
 const auth = vi.hoisted(() => ({ role: "ADMIN" as "ADMIN" | "VENDEDOR" }));
 
@@ -32,7 +36,7 @@ vi.mock("@/components/auth-provider", async (importOriginal) => {
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, getProspects: vi.fn(), getCampaigns: vi.fn() };
+  return { ...actual, getProspects: vi.fn(), getCampaigns: vi.fn(), restoreProspect: vi.fn() };
 });
 
 function prospect(overrides: Partial<Prospect> = {}): Prospect {
@@ -47,6 +51,11 @@ function prospect(overrides: Partial<Prospect> = {}): Prospect {
     pipeline_state_label: "En cola",
     primary_email: "uno@taller.example",
     historical_score: null,
+    relevance_verdict: null,
+    relevance_reason: null,
+    relevance_checked_at: null,
+    relevance_override: false,
+    campaign_state: "DISCOVERING",
     campaign: { id: "campaign-1", name: "Primera campaña" },
     provenance: null,
     created_at: "2026-10-01T12:00:00Z",
@@ -93,6 +102,30 @@ describe("prospect helpers", () => {
     expect(stateLabel("MYSTERY", "Etiqueta del servidor")).toBe("Etiqueta del servidor");
     expect(stateLevel("ERROR")).toBe("danger");
     expect(stateLevel("MYSTERY")).toBe("inactive");
+  });
+
+  it("labels a removed business by who removed it, not as a verdict on the business", () => {
+    expect(stateLabel("SKIPPED_IRRELEVANT", "Irrelevante")).toBe("Descartado por el filtro");
+  });
+
+  it("maps every filter verdict to plain Spanish and a level, with a neutral fallback", () => {
+    expect([verdictLabel("FIT"), verdictLabel("UNCLEAR"), verdictLabel("UNFIT")]).toEqual(["Encaja", "Dudoso", "No encaja"]);
+    expect([verdictLevel("FIT"), verdictLevel("UNCLEAR"), verdictLevel("UNFIT")]).toEqual(["success", "warning", "danger"]);
+    expect(verdictLabel("MYSTERY")).toBe("Sin evaluar");
+    expect(verdictLevel("MYSTERY")).toBe("inactive");
+  });
+
+  it("carries the verdict filter and drops it when blank", () => {
+    expect(filtersFromForm({ verdict: "UNFIT" }, 1, 25).verdict).toBe("UNFIT");
+    expect(filtersFromForm({ verdict: "" }, 1, 25).verdict).toBeUndefined();
+    expect(hasActiveFilters({ verdict: "UNFIT" })).toBe(true);
+    expect(prospectsExportUrl({ verdict: "UNFIT" })).toBe("/api/v1/prospects/export.csv?verdict=UNFIT");
+  });
+
+  it("allows restoring only while the campaign can still change its audience", () => {
+    expect(restoreBlockedReason("DISCOVERING")).toBeNull();
+    expect(restoreBlockedReason("AWAITING_APPROVAL")).toBeNull();
+    expect(restoreBlockedReason("RUNNING")).toMatch(/ya empezó a enviar/);
   });
 
   it("exports the same filters but never the page", () => {
@@ -202,5 +235,67 @@ describe("prospects page", () => {
 
     expect(screen.getByText("No tenés permisos para ver la audiencia.")).toBeInTheDocument();
     return waitFor(() => expect(getProspects).not.toHaveBeenCalled());
+  });
+
+  it("shows the verdict and, when expanded, the reason and the manual-restore note", async () => {
+    vi.mocked(getProspects).mockResolvedValue({
+      data: [
+        prospect({
+          relevance_verdict: "UNCLEAR",
+          relevance_reason: "No se puede confirmar que tenga taller propio.",
+          relevance_checked_at: "2026-10-02T12:00:00Z",
+          relevance_override: true,
+        }),
+        prospect({ id: "prospect-2", name: "Sin evaluar" }),
+      ],
+      meta: { page: 1, page_size: 25, total: 2 },
+    });
+
+    render(createElement(ProspectsPage));
+
+    expect(await screen.findByText("Dudoso")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /Expand row/i })[0]);
+    expect(await screen.findByText("No se puede confirmar que tenga taller propio.")).toBeInTheDocument();
+    expect(screen.getByText(/Lo recuperaste a mano/)).toBeInTheDocument();
+  });
+
+  it("offers Recuperar only for removed businesses and explains when it is blocked", async () => {
+    vi.mocked(getProspects).mockResolvedValue({
+      data: [
+        prospect({ id: "a", name: "Descartado Uno", pipeline_state: "SKIPPED_IRRELEVANT", campaign_state: "AWAITING_APPROVAL" }),
+        prospect({ id: "b", name: "Descartado Dos", pipeline_state: "SKIPPED_IRRELEVANT", campaign_state: "RUNNING" }),
+        prospect({ id: "c", name: "En cola", pipeline_state: "QUEUED" }),
+      ],
+      meta: { page: 1, page_size: 25, total: 3 },
+    });
+
+    render(createElement(ProspectsPage));
+
+    await screen.findByText("Descartado Uno");
+    const buttons = screen.getAllByRole("button", { name: "Recuperar" });
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toBeEnabled();
+    expect(buttons[1]).toBeDisabled();
+    expect(screen.getAllByText(/ya empezó a enviar/).length).toBeGreaterThan(0);
+  }, 20000);
+
+  it("restores after a plain confirmation and refreshes the list", async () => {
+    vi.mocked(getProspects).mockResolvedValue({
+      data: [prospect({ id: "a", name: "Descartado Uno", pipeline_state: "SKIPPED_IRRELEVANT" })],
+      meta: { page: 1, page_size: 25, total: 1 },
+    });
+    vi.mocked(restoreProspect).mockResolvedValue(prospect({ id: "a" }));
+
+    render(createElement(App, null, createElement(ProspectsPage)));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Recuperar" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/no lo va a descartar de nuevo/)).toBeInTheDocument();
+    // A plain confirmation: restoring is additive, so no typed word is asked for.
+    expect(within(dialog).queryByLabelText(/Escribí/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Recuperar" }));
+
+    await waitFor(() => expect(restoreProspect).toHaveBeenCalledWith("a"));
+    await waitFor(() => expect(getProspects).toHaveBeenCalledTimes(2));
   });
 });

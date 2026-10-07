@@ -85,6 +85,7 @@ class RuntimeIntegrationConfiguration:
     website_fetcher: str
     llm_provider: str
     llm_model: str
+    relevance_llm_model: str
     ollama_base_url: str
     openai_compatible_base_url: str
     embedding_provider: str
@@ -173,6 +174,7 @@ def runtime_integration_configuration(
             website_fetcher=settings.WEBSITE_FETCHER,
             llm_provider=settings.LLM_PROVIDER,
             llm_model=settings.LLM_MODEL,
+            relevance_llm_model="",
             ollama_base_url=settings.OLLAMA_BASE_URL,
             openai_compatible_base_url=settings.OPENAI_COMPATIBLE_BASE_URL,
             embedding_provider=settings.EMBEDDING_PROVIDER,
@@ -192,6 +194,7 @@ def runtime_integration_configuration(
         website_fetcher=configuration.website_fetcher,
         llm_provider=configuration.llm_provider,
         llm_model=configuration.llm_model,
+        relevance_llm_model=configuration.relevance_llm_model,
         ollama_base_url=configuration.ollama_base_url,
         openai_compatible_base_url=configuration.openai_compatible_base_url,
         embedding_provider=configuration.embedding_provider,
@@ -257,6 +260,7 @@ def integration_configuration_initial(owner_id: int) -> dict[str, object]:
         "website_fetcher": runtime.website_fetcher,
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
+        "relevance_llm_model": runtime.relevance_llm_model,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
         "embedding_provider": runtime.embedding_provider,
@@ -274,6 +278,7 @@ def _safe_snapshot(runtime: RuntimeIntegrationConfiguration) -> dict[str, object
         "website_fetcher": runtime.website_fetcher,
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
+        "relevance_llm_model": runtime.relevance_llm_model,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
         "embedding_provider": runtime.embedding_provider,
@@ -367,6 +372,7 @@ def save_integration_configuration(
         "website_fetcher",
         "llm_provider",
         "llm_model",
+        "relevance_llm_model",
         "embedding_provider",
         "embedding_model",
         "embedding_dimensions",

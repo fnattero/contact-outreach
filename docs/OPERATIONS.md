@@ -86,6 +86,14 @@ motor; no reencolar efectos Gmail hasta reconciliar estados `SENDING|RECONCILING
   misma fila/idempotencia. Campañas cerradas, Contactos/restricciones, emails inválidos, PDFs rotos,
   tareas humanas o confirmación Gmail bloquean la acción.
 
+### Filtro de audiencia
+
+Si el proveedor de IA falla, el filtro conserva los prospectos y deja una fila de veredicto con
+`status=ERROR`; en la lista de audiencia esos negocios aparecen sin evaluación. Para detenerlo al
+instante basta poner el modo en Desactivado en Ajustes → Filtro de audiencia: no requiere deploy.
+Cada prospecto evaluado usa del orden de mil tokens; el modelo del filtro puede ser más económico
+que el de las respuestas (Integraciones).
+
 ## 6. Reinicios
 
 Los mensajes Celery son señales. Las tareas vuelven a leer estado y los barridos reconstruyen runs,

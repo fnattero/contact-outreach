@@ -36,7 +36,7 @@ from apps.overture.models import (
 from apps.overture.reader import OfficialOverturePlaceReader
 from apps.overture.releases import official_places_source_uri
 from apps.prospects.email_validation import MXStatus
-from apps.prospects.models import Prospect, WebsiteSnapshot
+from apps.prospects.models import Prospect, ProspectRelevanceVerdict, WebsiteSnapshot
 from contact_outreach.tasks import healthcheck
 
 PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF"
@@ -213,6 +213,9 @@ def test_review_only_fake_flow_searches_drafts_and_exposes_content_without_gmail
     assert campaign.state == Campaign.State.AWAITING_APPROVAL
     assert campaign.search_runs.exists()
     assert campaign.prospects.exists()
+    # The audience filter ran (it is on by default) and kept the business.
+    verdict = ProspectRelevanceVerdict.objects.get(prospect__campaign=campaign)
+    assert (verdict.verdict, verdict.vetoed, verdict.status) == ("FIT", False, "VALID")
 
     with django_capture_on_commit_callbacks(execute=True):
         approved = operator.run_action(campaign_id, "approve")
@@ -234,6 +237,42 @@ def test_review_only_fake_flow_searches_drafts_and_exposes_content_without_gmail
     assert not GmailConnection.objects.filter(owner=owner).exists()
     assert not FakeGmailMessage.objects.exists()
     assert not ContactLedger.objects.exists()
+
+
+@pytest.mark.e2e
+@pytest.mark.django_db
+def test_a_strict_filter_that_removes_everything_stops_the_campaign_with_a_reason(
+    owner: User,
+    private_catalog_dir: object,
+    django_capture_on_commit_callbacks: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.configuration.services import save_relevance_filter
+    from apps.integrations.llm import MockLLMProvider
+
+    del private_catalog_dir
+    unfit = MockLLMProvider(
+        screening_outputs=[{"verdict": "UNFIT", "reason": "No tiene relación con motores."}] * 50
+    )
+    monkeypatch.setattr("apps.prospects.screening.get_llm_provider", lambda *a, **k: unfit)
+    save_relevance_filter(owner=owner, mode="STRICT", criteria="Sólo talleres de motores.")
+    operator = Operator(owner.username)
+    operator.save_profile("Componentes Filtro")
+    campaign_id = operator.create_review_only_campaign(
+        "Aceptación filtro", operator.upload_catalog("Catálogo filtro")
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        started = operator.run_action(campaign_id, "start-discovery")
+    assert started.status_code == 200, started.content
+
+    campaign = Campaign.objects.get(pk=campaign_id)
+    # Everything was removed: the search stops with a reason instead of hanging in DISCOVERING.
+    assert campaign.state == Campaign.State.STOPPED_ERROR
+    assert "filtro de audiencia" in campaign.status_reason
+    removed = campaign.prospects.filter(pipeline_state=Prospect.PipelineState.SKIPPED_IRRELEVANT)
+    assert removed.exists()
+    assert not campaign.messages.exists()
 
 
 @pytest.mark.e2e

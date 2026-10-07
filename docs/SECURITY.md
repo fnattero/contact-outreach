@@ -106,6 +106,12 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
   policy ni listas permitidas.
 - Las instrucciones de redacción editables por admin se envían como guía separada y no pueden
   contradecir la policy fija, permitir hechos no aprobados ni evitar HumanTask.
+- El filtro de audiencia recibe un extracto acotado de la primera página del sitio, rotulado
+  `UNTRUSTED_DATA`. Ese texto no puede cambiar el schema, el significado de los veredictos ni la
+  decisión de descartar, que se toma en código. El criterio es configuración de un admin: se envía
+  como bloque separado, se audita por hash y no puede cambiar el formato ni las reglas de salida.
+  El filtro falla abierto: un error técnico, un timeout o una salida inválida conservan el
+  prospecto, y el error se guarda redactado.
 - El LLM no recibe Gmail, HTTP, calendario, filesystem ni tool calling. Sólo devuelve JSON.
 - El schema enumera en cada request candidate IDs, fact revision IDs, intents y actions exactos.
   Campos/IDs extra, conflicto, multi-intent o output inválido fallan hacia HumanTask.

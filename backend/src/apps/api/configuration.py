@@ -18,15 +18,18 @@ from apps.configuration.message_templates import (
     ensure_default_message_templates,
 )
 from apps.configuration.models import (
+    DEFAULT_RELEVANCE_CRITERIA,
+    PromptConfiguration,
     SearchCategory,
     SearchZone,
     WorkspaceMessageTemplateRevision,
 )
 from apps.configuration.services import (
+    MAX_RELEVANCE_CRITERIA_LENGTH,
     delete_or_archive_config_item,
     runtime_prompt_configuration,
     save_config_item,
-    save_prompt_configuration,
+    save_relevance_filter,
     toggle_config_item,
 )
 
@@ -95,13 +98,19 @@ class MessageTemplateSerializer(serializers.Serializer[dict[str, Any]]):
     active = serializers.BooleanField()
 
 
-class PromptInputSerializer(serializers.Serializer[dict[str, Any]]):
-    email_drafting_prompt = serializers.CharField(max_length=4000)
+class RelevanceFilterInputSerializer(serializers.Serializer[dict[str, Any]]):
+    mode = serializers.ChoiceField(choices=PromptConfiguration.RelevanceFilterMode.choices)
+    criteria = serializers.CharField(
+        max_length=MAX_RELEVANCE_CRITERIA_LENGTH, allow_blank=True, trim_whitespace=False
+    )
 
 
-class PromptSerializer(serializers.Serializer[dict[str, Any]]):
-    email_drafting_prompt = serializers.CharField()
-    automatic_reply_prompt = serializers.CharField()
+class RelevanceFilterSerializer(serializers.Serializer[dict[str, Any]]):
+    mode = serializers.CharField()
+    mode_label = serializers.CharField()
+    criteria = serializers.CharField(allow_blank=True)
+    default_criteria = serializers.CharField()
+    criteria_limit = serializers.IntegerField()
     revision = serializers.IntegerField()
 
 
@@ -345,41 +354,51 @@ class MessageTemplateRevisionView(SchemaAPIView):
         )
 
 
-class PromptConfigurationView(SchemaAPIView):
+def _relevance_filter_data(*, mode: str, criteria: str, revision: int) -> dict[str, object]:
+    return RelevanceFilterSerializer(
+        {
+            "mode": mode,
+            "mode_label": PromptConfiguration.RelevanceFilterMode(mode).label,
+            "criteria": criteria,
+            "default_criteria": DEFAULT_RELEVANCE_CRITERIA,
+            "criteria_limit": MAX_RELEVANCE_CRITERIA_LENGTH,
+            "revision": revision,
+        }
+    ).data
+
+
+class RelevanceFilterView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageConfigurationPermission)
 
     def get(self, request: Request) -> Response:
         runtime = runtime_prompt_configuration(authenticated_user(request).pk)
         return Response(
             {
-                "data": PromptSerializer(
-                    {
-                        "email_drafting_prompt": runtime.email_drafting_prompt,
-                        "automatic_reply_prompt": runtime.automatic_reply_prompt,
-                        "revision": runtime.revision,
-                    }
-                ).data
+                "data": _relevance_filter_data(
+                    mode=runtime.relevance_filter_mode,
+                    criteria=runtime.relevance_criteria,
+                    revision=runtime.revision,
+                )
             }
         )
 
     def patch(self, request: Request) -> Response:
-        serializer = PromptInputSerializer(data=request.data)
+        serializer = RelevanceFilterInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            saved = save_prompt_configuration(
+            saved = save_relevance_filter(
                 owner=authenticated_user(request),
-                email_drafting_prompt=cast(str, serializer.validated_data["email_drafting_prompt"]),
+                mode=cast(str, serializer.validated_data["mode"]),
+                criteria=cast(str, serializer.validated_data["criteria"]),
             )
-        except ValidationError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
         return Response(
             {
-                "data": PromptSerializer(
-                    {
-                        "email_drafting_prompt": saved.email_drafting_prompt,
-                        "automatic_reply_prompt": saved.automatic_reply_prompt,
-                        "revision": saved.revision,
-                    }
-                ).data
+                "data": _relevance_filter_data(
+                    mode=saved.relevance_filter_mode,
+                    criteria=saved.relevance_criteria,
+                    revision=saved.revision,
+                )
             }
         )

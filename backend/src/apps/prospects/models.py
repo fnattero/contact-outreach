@@ -16,7 +16,7 @@ class Prospect(TimestampedUUIDModel):
         ANALYZED = "ANALYZED", "Analizado"
         SKIPPED_NO_EMAIL = "SKIPPED_NO_EMAIL", "Sin email"
         SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE", "Duplicado"
-        SKIPPED_IRRELEVANT = "SKIPPED_IRRELEVANT", "Irrelevante"
+        SKIPPED_IRRELEVANT = "SKIPPED_IRRELEVANT", "Descartado por el filtro"
         QUEUED = "QUEUED", "En cola"
         ERROR = "ERROR", "Error"
 
@@ -57,6 +57,18 @@ class Prospect(TimestampedUUIDModel):
     pipeline_reserved_at = models.DateTimeField(blank=True, null=True)
     pipeline_claimed_at = models.DateTimeField(blank=True, null=True)
     analysis_generation = models.PositiveIntegerField(default=0)
+
+    # A person kept this business despite the audience filter. Because a business is one Prospect
+    # for good (identities are globally unique), this is what stops the filter from discarding it
+    # again. There is deliberately no way to undo it.
+    relevance_override_at = models.DateTimeField(blank=True, null=True)
+    relevance_override_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="restored_prospects",
+    )
 
     class Meta:
         ordering = ("created_at",)
@@ -206,5 +218,58 @@ class AIAnalysis(TimestampedUUIDModel):
             models.CheckConstraint(
                 condition=Q(confidence__isnull=True) | Q(confidence__gte=0, confidence__lte=1),
                 name="ai_analysis_confidence_0_1",
+            ),
+        ]
+
+
+class ProspectRelevanceVerdict(TimestampedUUIDModel):
+    """The audience filter's answer for one prospect. Never holds prompt or website text."""
+
+    class Verdict(models.TextChoices):
+        FIT = "FIT", "Encaja"
+        UNCLEAR = "UNCLEAR", "Dudoso"
+        UNFIT = "UNFIT", "No encaja"
+
+    class Status(models.TextChoices):
+        VALID = "VALID", "Válido"
+        ERROR = "ERROR", "Error"
+        SKIPPED = "SKIPPED", "Omitido"
+
+    prospect = models.ForeignKey(
+        Prospect, on_delete=models.PROTECT, related_name="relevance_verdicts"
+    )
+    input_hash = models.CharField(max_length=64)
+    criteria_digest = models.CharField(max_length=64)
+    snapshot_content_hash = models.CharField(max_length=64, blank=True)
+    mode = models.CharField(max_length=20)
+    verdict = models.CharField(max_length=10, choices=Verdict.choices, blank=True)
+    reason = models.CharField(max_length=300, blank=True)
+    vetoed = models.BooleanField(default=False)
+    provider = models.CharField(max_length=50)
+    model = models.CharField(max_length=120)
+    schema_version = models.CharField(max_length=40)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    evaluated_at = models.DateTimeField()
+    input_characters = models.PositiveIntegerField(default=0)
+    request_manifest = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-evaluated_at",)
+        indexes = [models.Index(fields=("prospect", "-evaluated_at"))]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("prospect", "input_hash", "provider", "model"),
+                name="prospect_relevance_cache_unique",
+            ),
+            models.CheckConstraint(
+                condition=~Q(status="VALID") | Q(verdict__in=("FIT", "UNCLEAR", "UNFIT")),
+                name="prospect_relevance_valid_has_verdict",
+            ),
+            # The AI is veto-only: a business judged to fit can never be recorded as removed.
+            models.CheckConstraint(
+                condition=Q(vetoed=False) | Q(verdict__in=("UNFIT", "UNCLEAR")),
+                name="prospect_relevance_veto_requires_negative_verdict",
             ),
         ]

@@ -1,8 +1,9 @@
 "use client";
 
+import { DownOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 import { AnimatePresence, motion } from "framer-motion";
-import type { ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { DisabledReason } from "@/components/design-system/disabled-reason";
 import { motion as motionTokens } from "@/src/theme/tokens";
 
@@ -10,15 +11,33 @@ export type FormSectionProps = {
   title: string;
   description?: string;
   children: ReactNode;
+  /** Sections start open; the person can fold the ones they are not working on. */
+  defaultOpen?: boolean;
 };
 
-export function FormSection({ title, description, children }: FormSectionProps) {
+export function FormSection({ title, description, children, defaultOpen = true }: FormSectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId().replaceAll(":", "");
   return (
-    <fieldset className="form-section">
-      <legend className="type-title">{title}</legend>
-      {description ? <p className="form-section__description">{description}</p> : null}
-      <div className="form-section__fields">{children}</div>
-    </fieldset>
+    <section className={`form-section${open ? "" : " form-section--collapsed"}`} aria-labelledby={`${id}-title`}>
+      <h2 className="form-section__heading" id={`${id}-title`}>
+        <button
+          type="button"
+          className="form-section__toggle"
+          aria-expanded={open}
+          aria-controls={`${id}-body`}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <span className="type-title">{title}</span>
+          <DownOutlined aria-hidden className="form-section__chevron" />
+        </button>
+      </h2>
+      {/* Kept mounted while folded so form fields keep their values and validation. */}
+      <div id={`${id}-body`} className="form-section__body" hidden={!open}>
+        {description ? <p className="form-section__description">{description}</p> : null}
+        <div className="form-section__fields">{children}</div>
+      </div>
+    </section>
   );
 }
 
