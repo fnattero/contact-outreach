@@ -5,3 +5,6 @@ allowBuilds:
   esbuild: true
   # eslint-config-next resolves imports through this reviewed native package.
   unrs-resolver: true
+overrides:
+  # Next.js pulls in postcss, which depends on a source-map-js release with a known advisory.
+  source-map-js: '>=1.2.2'
