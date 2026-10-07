@@ -3,14 +3,11 @@ import { App } from "antd";
 import { createElement, type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RelevanceSettingsPage from "@/app/settings/relevance/page";
-import { criteriaFromProfile } from "@/app/settings/relevance/relevance-helpers";
 import { isForbiddenShellRoute } from "@/components/app-shell";
 import {
-  getBusinessProfile,
   getIntegrationStatus,
   getRelevanceFilter,
   updateRelevanceFilter,
-  type BusinessProfile,
   type IntegrationStatus,
   type RelevanceFilter,
 } from "@/lib/api";
@@ -36,7 +33,6 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     getRelevanceFilter: vi.fn(),
     updateRelevanceFilter: vi.fn(),
-    getBusinessProfile: vi.fn(),
     getIntegrationStatus: vi.fn(),
   };
 });
@@ -57,31 +53,13 @@ function inApp(element: ReactElement) {
   return render(createElement(App, null, element));
 }
 
-function profile(overrides: Partial<BusinessProfile> = {}): BusinessProfile {
-  return { products: "Carbones para motores", description: "Distribuidora industrial", ...overrides } as BusinessProfile;
-}
-
 beforeEach(() => {
   auth.role = "ADMIN";
   vi.mocked(getRelevanceFilter).mockReset().mockResolvedValue(filter());
   vi.mocked(updateRelevanceFilter).mockReset();
-  vi.mocked(getBusinessProfile).mockReset().mockResolvedValue(profile());
   vi.mocked(getIntegrationStatus)
     .mockReset()
     .mockResolvedValue({ llm: { provider: "openai-compatible" } } as IntegrationStatus);
-});
-
-describe("criteriaFromProfile", () => {
-  it("builds the starting text only from the operator's own words and leaves the last line open", () => {
-    expect(criteriaFromProfile({ products: " Carbones ", description: "Distribuidora" })).toBe(
-      "Vendemos: Carbones\nSobre nosotros: Distribuidora\nNos sirven los negocios que puedan usar estos productos en su trabajo diario.\nNo nos sirven: ",
-    );
-  });
-
-  it("gives nothing when the profile has neither products nor description", () => {
-    expect(criteriaFromProfile({ products: "  ", description: "" })).toBeNull();
-    expect(criteriaFromProfile(null)).toBeNull();
-  });
 });
 
 describe("audience filter settings page", () => {
@@ -150,34 +128,14 @@ describe("audience filter settings page", () => {
     expect(screen.getByRole("link", { name: "Conectar un proveedor" })).toHaveAttribute("href", "/settings/integrations");
   });
 
-  it("fills the criteria from the business profile", async () => {
-    inApp(createElement(RelevanceSettingsPage));
-    fireEvent.click(await screen.findByRole("button", { name: "Completar desde el perfil comercial" }));
-
-    expect((screen.getByLabelText("Describí a quién le vendés") as HTMLTextAreaElement).value).toMatch(
-      /^Vendemos: Carbones para motores/,
-    );
-  });
-
-  it("asks before replacing text the operator already edited", async () => {
+  it("restores the suggested text and keeps no technical details on the page", async () => {
     inApp(createElement(RelevanceSettingsPage));
     const box = (await screen.findByLabelText("Describí a quién le vendés")) as HTMLTextAreaElement;
-    fireEvent.change(box, { target: { value: "Mi propio texto." } });
-    fireEvent.click(screen.getByRole("button", { name: "Completar desde el perfil comercial" }));
+    fireEvent.change(box, { target: { value: "Otro texto." } });
+    fireEvent.click(screen.getByRole("button", { name: "Volver al texto sugerido" }));
 
-    const dialog = await screen.findByRole("dialog");
-    expect(box.value).toBe("Mi propio texto.");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reemplazar" }));
-    await waitFor(() => expect(box.value).toMatch(/^Vendemos: Carbones para motores/));
-  });
-
-  it("disables the profile shortcut with a visible reason when the profile is empty", async () => {
-    vi.mocked(getBusinessProfile).mockResolvedValue(profile({ products: "", description: "" }));
-
-    inApp(createElement(RelevanceSettingsPage));
-
-    expect(await screen.findByRole("button", { name: "Completar desde el perfil comercial" })).toBeDisabled();
-    expect(screen.getByText("Completá productos o descripción en el perfil comercial.")).toBeInTheDocument();
+    await waitFor(() => expect(box.value).toBe("Texto sugerido de ejemplo."));
+    expect(screen.queryByText("Detalles técnicos")).toBeNull();
   });
 
   it("counts characters against the limit", async () => {

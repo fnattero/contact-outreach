@@ -1,28 +1,24 @@
 "use client";
 
-import { Alert, Button, Collapse, Flex, Form, Input, Modal, Radio } from "antd";
+import { Alert, Button, Flex, Form, Input, Modal, Radio } from "antd";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
-import { DisabledReason } from "@/components/design-system/disabled-reason";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
-import { StatusBadge } from "@/components/design-system/status-badge";
 import {
   can,
-  getBusinessProfile,
   getIntegrationStatus,
   getRelevanceFilter,
   problemMessage,
   updateRelevanceFilter,
-  type BusinessProfile,
   type Problem,
   type RelevanceFilter,
   type RelevanceFilterMode,
 } from "@/lib/api";
-import { criteriaFromProfile, MODE_OPTIONS } from "./relevance-helpers";
+import { MODE_OPTIONS } from "./relevance-helpers";
 
 type Feedback =
   | { state: "idle" | "saving"; message?: string }
@@ -45,7 +41,6 @@ export default function RelevanceSettingsPage() {
   const { session } = useAuth();
   const [form] = Form.useForm<FormValues>();
   const [filter, setFilter] = useState<RelevanceFilter | null>(null);
-  const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [realProvider, setRealProvider] = useState<boolean | null>(null);
   const [dirty, setDirty] = useState(false);
   const [length, setLength] = useState(0);
@@ -53,7 +48,6 @@ export default function RelevanceSettingsPage() {
   const [error, setError] = useState<unknown>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [confirmStrict, setConfirmStrict] = useState<FormValues | null>(null);
-  const [fillOpen, setFillOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const allowed = can(session, "manage_configuration");
@@ -67,8 +61,7 @@ export default function RelevanceSettingsPage() {
         setLength(next.criteria.length);
       })
       .catch(setError);
-    // These two only improve the page; the filter itself loads and saves without them.
-    void getBusinessProfile().then(setProfile).catch(() => undefined);
+    // Only used to warn that no real provider is connected; the page works without it.
     void getIntegrationStatus()
       .then((status) => setRealProvider(status.llm.provider !== "fake"))
       .catch(() => undefined);
@@ -108,13 +101,6 @@ export default function RelevanceSettingsPage() {
     setFeedback({ state: "idle" });
   }
 
-  function fromProfile() {
-    const text = criteriaFromProfile(profile);
-    if (text === null) return;
-    if (dirty || (filter && form.getFieldValue("criteria") !== filter.criteria)) setFillOpen(true);
-    else applyCriteria(text);
-  }
-
   function requestCancel() {
     if (dirty) setCancelOpen(true);
   }
@@ -134,8 +120,6 @@ export default function RelevanceSettingsPage() {
   }
   if (error && !filter) return <AuthError error={error} />;
   if (!filter) return <LoadingState layout="form" />;
-
-  const profileText = criteriaFromProfile(profile);
 
   return (
     <Flex vertical gap="large">
@@ -204,13 +188,7 @@ export default function RelevanceSettingsPage() {
             </Form.Item>
             <CharacterFooter count={length} limit={filter.criteria_limit} />
             <Flex gap="small" wrap>
-              <DisabledReason
-                disabled={profileText === null}
-                reason="Completá productos o descripción en el perfil comercial."
-              >
-                <Button onClick={fromProfile}>Completar desde el perfil comercial</Button>
-              </DisabledReason>
-              <Button onClick={() => applyCriteria(filter.default_criteria)}>Usar el texto sugerido</Button>
+              <Button onClick={() => applyCriteria(filter.default_criteria)}>Volver al texto sugerido</Button>
             </Flex>
           </FormSection>
         </div>
@@ -220,24 +198,6 @@ export default function RelevanceSettingsPage() {
         feedback={saving ? { state: "saving", message: "Guardando cambios…" } : feedback}
         onSave={() => void form.submit()}
         onCancel={requestCancel}
-      />
-      <Collapse
-        items={[
-          {
-            key: "technical",
-            label: "Detalles técnicos",
-            children: (
-              <dl className="integration-technical">
-                <dt>Revisión</dt>
-                <dd className="data-text">{filter.revision}</dd>
-                <dt>Modo guardado</dt>
-                <dd className="data-text">{filter.mode}</dd>
-                <dt>Proveedor</dt>
-                <dd>{realProvider === false ? <StatusBadge value="fake" /> : "Configurado en Integraciones"}</dd>
-              </dl>
-            ),
-          },
-        ]}
       />
       <ConfirmDangerModal
         open={confirmStrict !== null}
@@ -267,19 +227,6 @@ export default function RelevanceSettingsPage() {
         okButtonProps={{ danger: true }}
       >
         <p>Lo que editaste se perderá si descartás los cambios.</p>
-      </Modal>
-      <Modal
-        open={fillOpen}
-        title="Reemplazar el texto actual"
-        onCancel={() => setFillOpen(false)}
-        onOk={() => {
-          if (profileText) applyCriteria(profileText);
-          setFillOpen(false);
-        }}
-        okText="Reemplazar"
-        cancelText="Cancelar"
-      >
-        <p>Vas a reemplazar lo que escribiste por un texto armado con tu perfil comercial.</p>
       </Modal>
     </Flex>
   );
