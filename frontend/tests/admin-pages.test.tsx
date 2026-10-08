@@ -118,7 +118,7 @@ describe("suppressions page", () => {
 
     inApp(createElement(SuppressionsPage));
 
-    expect(screen.getByText("No tenés permisos para administrar supresiones.")).toBeInTheDocument();
+    expect(screen.getByText("No tenés permisos para administrar los correos bloqueados.")).toBeInTheDocument();
     await waitFor(() => expect(getSuppressions).not.toHaveBeenCalled());
   });
 

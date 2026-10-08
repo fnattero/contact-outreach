@@ -25,13 +25,13 @@ export default function OvertureSettingsPage() {
   if (!status) return null;
 
   return <Flex vertical gap="large">
-    <PageHeader title="Cobertura Overture" description="El worker de mantenimiento importa particiones verificadas. La API sólo muestra estado seguro y no expone proveedores ni credenciales." />
+    <PageHeader title="Zonas con datos" description="Las provincias cuyos datos de negocios ya están cargados. Si falta una, todavía no se puede buscar ahí." />
     {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
     <section className="overture-snapshot-state" aria-labelledby="overture-snapshot-title">
-      <span className="type-micro">Estado de cobertura</span>
-      <h2 className="type-title" id="overture-snapshot-title">{status.active_snapshot_id ? "Hay un snapshot activo" : "No hay un snapshot activo"}</h2>
+      <span className="type-micro">Estado de los datos</span>
+      <h2 className="type-title" id="overture-snapshot-title">{status.active_snapshot_id ? "Hay datos cargados para buscar" : "Todavía no hay datos cargados"}</h2>
       <StatusBadge label={status.active_snapshot_id ? "Disponible" : "Pendiente"} level={status.active_snapshot_id ? "success" : "warning"} />
-      <p>Un snapshot es una versión verificada de los datos geográficos que el sistema usa para buscar lugares. Mientras no haya uno activo, las búsquedas no tienen cobertura confirmada.</p>
+      <p>Son los datos de negocios y mapas de los que salen los resultados de cada campaña. Mientras no haya datos cargados, las búsquedas no encuentran nada.</p>
     </section>
     <Card title="Atribución y licencias">
       {status.attribution ? (
@@ -41,15 +41,15 @@ export default function OvertureSettingsPage() {
           {status.attribution.licenses.length ? <ul>{status.attribution.licenses.map((license) => <li key={license}>{license}</li>)}</ul> : null}
           {status.attribution.notices.length ? <ul>{status.attribution.notices.map((notice) => <li key={notice}>{notice}</li>)}</ul> : null}
         </>
-      ) : <p className="muted">La atribución aparecerá acá cuando haya un snapshot activo.</p>}
+      ) : <p className="muted">La atribución aparecerá acá cuando haya datos cargados.</p>}
     </Card>
-    <Card title="Particiones importadas">
+    <Card title="Provincias cargadas">
       {status.partitions.length ? <Table rowKey="id" dataSource={status.partitions} pagination={{ pageSize: 10, responsive: true }} columns={[
         { title: "Provincia", dataIndex: "province_name" },
         { title: "Estado", render: (_: unknown, partition) => <StatusBadge label={partition.error ? "Con error" : partition.is_active ? "Activa" : "Importada"} level={partition.error ? "danger" : partition.is_active ? "success" : "inactive"} /> },
         { title: "Lugares", dataIndex: "place_count", render: (value: number) => <span className="data-text">{value}</span> },
         { title: "Importada", dataIndex: "imported_at", render: (value: string | null) => value ? <time className="data-text" dateTime={value}>{dateFormatter.format(new Date(value))}</time> : "Pendiente" },
-      ]} /> : <EmptyState headline="Todavía no hay particiones" explanation="Las particiones son los fragmentos por provincia de un snapshot verificado; cuando se importen, la cobertura aparecerá acá." actionLabel="Actualizar estado" onAction={refresh} />}
+      ]} /> : <EmptyState headline="Todavía no hay provincias cargadas" explanation="Cuando se carguen los datos de una provincia, aparece acá." actionLabel="Actualizar estado" onAction={refresh} />}
     </Card>
     <Card title="Detalles técnicos">
       <details className="integration-technical">

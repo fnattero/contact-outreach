@@ -47,7 +47,7 @@ export default function CatalogsPage() {
 
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Catálogos PDF" description="Archivos privados que se fijan en la aprobación de una campaña." primaryAction={<Button type="primary" onClick={() => setDrawerOpen(true)}>Subir catálogo</Button>} />
+      <PageHeader title="Catálogos" description="Los PDF que se adjuntan a la propuesta. Al aprobar una campaña quedan fijos." primaryAction={<Button type="primary" onClick={() => setDrawerOpen(true)}>Subir catálogo</Button>} />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       <Card title="Catálogos disponibles">
         {loading ? <LoadingState layout="list" /> : catalogs.length ? <Table<Catalog> rowKey="id" dataSource={catalogs} pagination={{ pageSize: 10, responsive: true }} columns={[

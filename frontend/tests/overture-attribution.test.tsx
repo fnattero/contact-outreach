@@ -52,6 +52,6 @@ describe("overture coverage page", () => {
 
     render(createElement(OvertureSettingsPage));
 
-    expect(await screen.findByText("La atribución aparecerá acá cuando haya un snapshot activo.")).toBeInTheDocument();
+    expect(await screen.findByText("La atribución aparecerá acá cuando haya datos cargados.")).toBeInTheDocument();
   });
 });

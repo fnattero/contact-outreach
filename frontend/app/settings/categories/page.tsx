@@ -76,7 +76,7 @@ export default function CategoriesPage() {
 
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Rubros de búsqueda" description="Configurá variantes literales que el backend usa para buscar lugares. Una variante por línea." primaryAction={<Button type="primary" onClick={() => setDrawerOpen(true)}>Crear rubro</Button>} />
+      <PageHeader title="Rubros" description="Los tipos de negocio que podés buscar. Cada rubro tiene frases que la búsqueda usa para encontrarlos, una por línea." primaryAction={<Button type="primary" onClick={() => setDrawerOpen(true)}>Crear rubro</Button>} />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       <Card title="Rubros">
         {loading ? <LoadingState layout="list" /> : categories.length ? <Collapse items={categories.map((category) => {
