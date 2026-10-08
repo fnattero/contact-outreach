@@ -130,18 +130,18 @@ export function ConfigurationForm() {
             ) : null}
           </div>
         </FormSection>
-        <FormSection icon={<EnvironmentOutlined />} tone="success" title="Búsqueda de negocios" description="De dónde salen los negocios de cada campaña.">
+        <FormSection icon={<EnvironmentOutlined />} title="Búsqueda de negocios" description="De dónde salen los negocios de cada campaña.">
           <div className="form-grid">
             <Form.Item name="extractor_provider" label="Fuente de datos"><Select options={[fake, { value: "overture", label: "Overture Maps Places" }]} /></Form.Item>
             <Form.Item name="overture_min_confidence" label="Confianza mínima" extra="Entre 0 y 1. Mide si el negocio existe, no si te sirve."><Input inputMode="decimal" /></Form.Item>
           </div>
         </FormSection>
-        <FormSection icon={<GlobalOutlined />} tone="success" title="Lectura de sitios web" description="Cómo la app lee el sitio de cada negocio para encontrar su correo.">
+        <FormSection icon={<GlobalOutlined />} title="Lectura de sitios web" description="Cómo la app lee el sitio de cada negocio para encontrar su correo.">
           <div className="form-grid">
             <Form.Item name="website_fetcher" label="Lectura de sitios" extra="La lectura real solo visita sitios públicos y bloquea redes internas."><Select options={[fake, { value: "http", label: "HTTP seguro" }]} /></Form.Item>
           </div>
         </FormSection>
-        <FormSection icon={<DatabaseOutlined />} tone="success" title="Búsqueda en tu información" description="Cómo la app encuentra, entre tus datos aprobados, los que sirven para contestar un correo.">
+        <FormSection icon={<DatabaseOutlined />} title="Búsqueda en tu información" description="Cómo la app encuentra, entre tus datos aprobados, los que sirven para contestar un correo.">
           <div className="form-grid">
             <Form.Item name="embedding_provider" label="Servicio"><Select options={[fake, { value: "openai-compatible", label: "Compatible con OpenAI" }]} /></Form.Item>
             <Form.Item name="embedding_model" label="Modelo"><Input maxLength={120} /></Form.Item>
