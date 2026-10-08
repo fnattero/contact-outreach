@@ -462,6 +462,18 @@ time {
   background: var(--danger-bg);
 }
 
+.send-mode-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-secondary);
+}
+
+.send-mode-password {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .problems {
   margin-bottom: 24px;
 }

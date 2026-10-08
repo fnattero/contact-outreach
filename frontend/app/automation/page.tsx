@@ -1,6 +1,7 @@
 "use client";
 
 import { Alert, Button, Collapse, Flex, Form, Input, Radio, Tag } from "antd";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
@@ -99,9 +100,7 @@ export default function AutomationPage() {
   }
 
   const blockedBy: string[] = [];
-  if (safety && (safety.send_mode !== "live" || safety.send_kill_switch)) {
-    blockedBy.push("el servidor está en modo simulación o con los envíos bloqueados");
-  }
+  if (safety && !safety.send_effective_live) blockedBy.push("los envíos reales están en simulación");
   if (safety?.auto_reply_kill_switch) blockedBy.push("las respuestas automáticas están bloqueadas desde el servidor");
 
   return (
@@ -126,7 +125,12 @@ export default function AutomationPage() {
           type="warning"
           showIcon
           message="Por ahora no sale ningún correo real"
-          description={`Aunque las enciendas, no se envía nada porque ${blockedBy.join(" y ")}. Para cambiarlo hay que modificar la configuración del servidor.`}
+          description={
+            <>
+              Aunque las enciendas, no se envía nada porque {blockedBy.join(" y ")}. El modo de envío se cambia en el{" "}
+              <Link href="/dashboard">Resumen</Link>; los bloqueos del servidor los cambia quien lo administra.
+            </>
+          }
         />
       ) : null}
         <Form layout="vertical" onFinish={() => void save()}>

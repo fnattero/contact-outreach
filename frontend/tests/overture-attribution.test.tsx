@@ -27,6 +27,8 @@ function status(overrides: Partial<OvertureStatus> = {}): OvertureStatus {
       licenses: ["CDLA Permissive 2.0"],
       notices: ["Los datos pueden contener errores."],
     },
+    provinces: [],
+    latest_verified_release: null,
     release_checks: [],
     partitions: [],
     ...overrides,

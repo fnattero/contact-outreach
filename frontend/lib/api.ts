@@ -479,7 +479,20 @@ export type OvertureAttribution = {
   notices: string[];
 };
 
+export type ProvinceCoverage = {
+  code: string;
+  name: string;
+  state: "READY" | "IMPORTING" | "FAILED" | "MISSING";
+  place_count: number;
+  release_id: string | null;
+  updated_at: string | null;
+  error: string;
+};
+
 export type OvertureStatus = {
+  provinces: ProvinceCoverage[];
+  /** The newest data version the maintenance check verified; null until one exists. */
+  latest_verified_release: string | null;
   latest_snapshot_id: string | null;
   active_snapshot_id: string | null;
   /** Overture's terms require this to stay visible; null until a snapshot is active. */
@@ -564,6 +577,12 @@ export type DashboardSummary = {
   safety: {
     send_mode: string;
     send_kill_switch: boolean;
+    /** The server's permission for real sending (its mode and kill switch). */
+    send_server_allows_live: boolean;
+    /** The administrator's own switch inside the app. */
+    send_app_enabled: boolean;
+    /** Both keys turned: real email can leave. */
+    send_effective_live: boolean;
     auto_reply_kill_switch: boolean;
     relationship_kill_switch: boolean;
   };
@@ -937,6 +956,28 @@ export function updateUserRole(id: number, role: "ADMIN" | "VENDEDOR"): Promise<
   });
 }
 
+export function deleteUser(id: number): Promise<void> {
+  return request<void>(`/api/v1/users/${id}/`, { method: "DELETE" });
+}
+
+export type SendMode = {
+  server_allows_live: boolean;
+  app_enabled: boolean;
+  effective_live: boolean;
+  enabled_by: string | null;
+};
+
+export function getSendMode(): Promise<SendMode> {
+  return request<SendMode>("/api/v1/send-mode/");
+}
+
+export function setSendLive(action: "enable-live" | "disable-live", confirmation?: string): Promise<SendMode> {
+  return request<SendMode>(`/api/v1/send-mode/actions/${action}/`, {
+    method: "POST",
+    body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
+  });
+}
+
 export function updateUserStatus(id: number, isActive: boolean): Promise<ManagedUser> {
   return request<ManagedUser>(`/api/v1/users/${id}/status/`, {
     method: "PATCH",
@@ -1106,10 +1147,10 @@ export function getAuditEvents(): Promise<ApiPage<AuditEvent[]>> {
   >;
 }
 
-export function syncOverture(releaseId: string, provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
+export function syncOverture(provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
   return request<{ status: string; celery_task_id: string; province_code: string }>("/api/v1/overture/sync/", {
     method: "POST",
-    body: JSON.stringify({ release_id: releaseId, province_code: provinceCode }),
+    body: JSON.stringify({ province_code: provinceCode }),
   });
 }
 

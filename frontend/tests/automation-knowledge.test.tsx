@@ -45,7 +45,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
       live_enabled_by: null,
     }),
     getDashboardSummary: vi.fn().mockResolvedValue({
-      safety: { send_mode: "dry-run", send_kill_switch: true, auto_reply_kill_switch: true, relationship_kill_switch: true },
+      safety: {
+        send_mode: "dry-run", send_kill_switch: true, send_server_allows_live: false, send_app_enabled: false,
+        send_effective_live: false, auto_reply_kill_switch: true, relationship_kill_switch: true,
+      },
     }),
     getKnowledgeContexts: vi.fn(),
     getKnowledgeFacts: vi.fn(),

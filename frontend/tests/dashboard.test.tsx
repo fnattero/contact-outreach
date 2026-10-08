@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "@/app/dashboard/page";
@@ -8,6 +8,8 @@ import {
   getAutomationConfiguration,
   getDashboardSummary,
   getInboundMessages,
+  reauthenticate,
+  setSendLive,
   type DashboardSummary,
 } from "@/lib/api";
 
@@ -33,6 +35,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getAutomationConfiguration: vi.fn(),
     getDashboardSummary: vi.fn(),
     getInboundMessages: vi.fn(),
+    reauthenticate: vi.fn(),
+    setSendLive: vi.fn(),
   };
 });
 
@@ -46,7 +50,10 @@ function summary(overrides: Partial<DashboardSummary> = {}): DashboardSummary {
     campaigns: [],
     summary: { campaigns: 0, catalogs: 0, categories: 0, zones: 0, responses: 0 },
     attention: { open_human_tasks: 0, paused_campaigns: 0 },
-    safety: { send_mode: "dry-run", send_kill_switch: true, auto_reply_kill_switch: true, relationship_kill_switch: true },
+    safety: {
+      send_mode: "dry-run", send_kill_switch: true, send_server_allows_live: false, send_app_enabled: false,
+      send_effective_live: false, auto_reply_kill_switch: true, relationship_kill_switch: true,
+    },
     admin: {
       profile_configured: true, gmail_connected: true, gmail_status: "CONNECTED", failed_sends: 0,
       problem_jobs: 0, prospects: 0, sent_messages: 0,
@@ -136,5 +143,61 @@ describe("dashboard page", () => {
     await screen.findByText("¿Es seguro operar ahora?");
     expect(screen.queryByRole("link", { name: "Cambiar" })).toBeNull();
     expect(getAutomationConfiguration).not.toHaveBeenCalled();
+  });
+});
+
+describe("send mode control", () => {
+  const live = { server: true, app: false, effective: false };
+
+  function safetyWith(state: { server: boolean; app: boolean; effective: boolean }): DashboardSummary["safety"] {
+    return {
+      send_mode: state.server ? "live" : "dry-run", send_kill_switch: !state.server,
+      send_server_allows_live: state.server, send_app_enabled: state.app, send_effective_live: state.effective,
+      auto_reply_kill_switch: true, relationship_kill_switch: true,
+    };
+  }
+
+  it("explains that the server must allow real sending first", async () => {
+    render(createElement(DashboardPage));
+
+    expect(await screen.findByText(/El servidor todavía no permite envíos reales/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pasar a envío real" })).toBeNull();
+    expect(screen.getByText("Envíos detenidos")).toBeInTheDocument();
+  });
+
+  it("turns real sending on only with the password and the typed word", async () => {
+    vi.mocked(getDashboardSummary).mockResolvedValue(summary({ safety: safetyWith(live) }));
+    vi.mocked(reauthenticate).mockResolvedValue({ reauthentication_active: true });
+    vi.mocked(setSendLive).mockResolvedValue({ server_allows_live: true, app_enabled: true, effective_live: true, enabled_by: "u" });
+    render(createElement(DashboardPage));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pasar a envío real" }));
+    const passwordDialog = await screen.findByRole("dialog");
+    expect(within(passwordDialog).getByRole("button", { name: "Continuar" })).toBeDisabled();
+    fireEvent.change(within(passwordDialog).getByLabelText("Contraseña actual"), { target: { value: "clave-segura" } });
+    fireEvent.click(within(passwordDialog).getByRole("button", { name: "Continuar" }));
+
+    const confirm = await screen.findByLabelText(/Escribí CONFIRMAR/);
+    expect(setSendLive).not.toHaveBeenCalled();
+    fireEvent.change(confirm, { target: { value: "CONFIRMAR" } });
+    const dialog = confirm.closest("[role=dialog]") as HTMLElement;
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Encender envíos reales" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Encender envíos reales" }));
+
+    await waitFor(() => expect(reauthenticate).toHaveBeenCalledWith("clave-segura"));
+    await waitFor(() => expect(setSendLive).toHaveBeenCalledWith("enable-live", "CONFIRMAR"));
+  });
+
+  it("goes back to simulation without any confirmation", async () => {
+    vi.mocked(getDashboardSummary).mockResolvedValue(
+      summary({ safety: safetyWith({ server: true, app: true, effective: true }) }),
+    );
+    vi.mocked(setSendLive).mockResolvedValue({ server_allows_live: true, app_enabled: false, effective_live: false, enabled_by: null });
+    render(createElement(DashboardPage));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Volver a simulación" }));
+
+    await waitFor(() => expect(setSendLive).toHaveBeenCalledWith("disable-live"));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
