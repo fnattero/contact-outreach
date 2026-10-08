@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
 from apps.audit.models import BackgroundJob
 from apps.audit.services import record_event
-from apps.campaigns.models import Campaign
+from apps.campaigns.models import Campaign, OutboundMessage
+from apps.catalogs.services import create_catalog
+from apps.mailbox.models import GmailConnection
 
 
 def _csrf(client: Client) -> str:
@@ -40,6 +43,63 @@ def test_dashboard_summary_is_authenticated_and_hides_admin_details_from_vendor(
     assert "metrics" in vendor_data
     assert "admin" not in vendor_data
     assert all(item["state"] != Campaign.State.DRAFT for item in vendor_data["campaigns"])
+
+
+@pytest.mark.django_db
+def test_dashboard_reports_whether_gmail_really_works_and_how_many_sends_failed(
+    owner: User, private_catalog_dir: object
+) -> None:
+    del private_catalog_dir
+    client = Client()
+    client.force_login(owner)
+    url = reverse("api-dashboard-summary")
+
+    missing = client.get(url).json()["data"]["admin"]
+    assert (missing["gmail_connected"], missing["gmail_status"]) == (False, "NONE")
+    assert missing["failed_sends"] == 0
+
+    connection = GmailConnection.objects.create(
+        workspace=owner.membership.workspace,
+        owner=owner,
+        email="cuenta@example.invalid",
+        status=GmailConnection.Status.ERROR,
+    )
+    broken = client.get(url).json()["data"]["admin"]
+    # A saved connection that is in error is not a working one.
+    assert (broken["gmail_connected"], broken["gmail_status"]) == (False, "ERROR")
+
+    connection.status = GmailConnection.Status.CONNECTED
+    connection.save(update_fields=("status",))
+    working = client.get(url).json()["data"]["admin"]
+    assert (working["gmail_connected"], working["gmail_status"]) == (True, "CONNECTED")
+
+    catalog = create_catalog(
+        name="Catálogo del resumen",
+        upload=SimpleUploadedFile(
+            "catalogo.pdf",
+            b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF",
+            content_type="application/pdf",
+        ),
+        actor=owner,
+    )
+    campaign = Campaign.objects.create(
+        workspace=owner.membership.workspace,
+        name="Con envío fallido",
+        catalog=catalog,
+        created_by=owner,
+    )
+    for state in (OutboundMessage.State.SEND_FAILED, OutboundMessage.State.SENT):
+        OutboundMessage.objects.create(
+            campaign=campaign,
+            kind=OutboundMessage.Kind.INITIAL,
+            state=state,
+            recipient=f"{state.lower()}@example.invalid",
+            recipient_normalized=f"{state.lower()}@example.invalid",
+            subject="Asunto",
+            body_text="Texto",
+            idempotency_key=f"dash:{state}",
+        )
+    assert client.get(url).json()["data"]["admin"]["failed_sends"] == 1
 
 
 @pytest.mark.django_db

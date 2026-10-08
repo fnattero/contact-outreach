@@ -125,9 +125,21 @@ class DashboardSummaryView(SchemaAPIView):
             },
         }
         if is_admin:
+            connection = GmailConnection.objects.filter(workspace=workspace).first()
+            gmail_status = connection.status if connection is not None else "NONE"
             data["admin"] = {
                 "profile_configured": BusinessProfile.objects.filter(workspace=workspace).exists(),
-                "gmail_connected": GmailConnection.objects.filter(workspace=workspace).exists(),
+                # A saved connection that is in error or was disconnected is not a working one.
+                "gmail_connected": gmail_status == GmailConnection.Status.CONNECTED,
+                "gmail_status": gmail_status,
+                "failed_sends": OutboundMessage.objects.filter(
+                    Q(campaign__workspace=workspace)
+                    | Q(contact__workspace=workspace)
+                    | Q(organization__workspace=workspace),
+                    state=OutboundMessage.State.SEND_FAILED,
+                )
+                .distinct()
+                .count(),
                 "problem_jobs": BackgroundJob.objects.filter(
                     state__in=(BackgroundJob.State.FAILED, BackgroundJob.State.RETRY_WAIT)
                 ).count(),

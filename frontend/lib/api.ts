@@ -570,6 +570,8 @@ export type DashboardSummary = {
   admin?: {
     profile_configured: boolean;
     gmail_connected: boolean;
+    gmail_status: "CONNECTED" | "ERROR" | "DISCONNECTED" | "NONE";
+    failed_sends: number;
     problem_jobs: number;
     prospects: number;
     sent_messages: number;
