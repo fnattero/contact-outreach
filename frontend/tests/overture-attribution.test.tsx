@@ -27,6 +27,8 @@ function status(overrides: Partial<OvertureStatus> = {}): OvertureStatus {
       licenses: ["CDLA Permissive 2.0"],
       notices: ["Los datos pueden contener errores."],
     },
+    provinces: [],
+    latest_verified_release: null,
     release_checks: [],
     partitions: [],
     ...overrides,
@@ -52,6 +54,6 @@ describe("overture coverage page", () => {
 
     render(createElement(OvertureSettingsPage));
 
-    expect(await screen.findByText("La atribución aparecerá acá cuando haya un snapshot activo.")).toBeInTheDocument();
+    expect(await screen.findByText("La atribución aparecerá acá cuando haya datos cargados.")).toBeInTheDocument();
   });
 });

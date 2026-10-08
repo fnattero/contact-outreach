@@ -7,6 +7,8 @@ export type PageHeaderProps = {
   status?: ReactNode;
   filters?: ReactNode;
   primaryAction?: ReactNode;
+  // Section tabs: they sit on the header's bottom border, below the filters.
+  tabs?: ReactNode;
 };
 
 export function PageHeader({
@@ -16,10 +18,11 @@ export function PageHeader({
   status,
   filters,
   primaryAction,
+  tabs,
 }: PageHeaderProps) {
   return (
     <header className="page-header">
-      <div className="page-header__inner">
+      <div className={`page-header__inner${tabs ? " page-header__inner--tabs" : ""}`}>
         {breadcrumbs ? <nav className="page-header__breadcrumbs" aria-label="Migas de pan">{breadcrumbs}</nav> : null}
         <div className="page-header__heading-row">
           <div className="page-header__copy">
@@ -34,6 +37,7 @@ export function PageHeader({
           ) : null}
         </div>
         {filters ? <div className="page-header__filters">{filters}</div> : null}
+        {tabs ? <div className="page-header__tabs">{tabs}</div> : null}
       </div>
     </header>
   );

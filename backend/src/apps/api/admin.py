@@ -4,7 +4,7 @@ from typing import cast
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import QuerySet
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound
@@ -17,10 +17,12 @@ from apps.accounts.services import (
     LastActiveAdminError,
     change_membership_role,
     create_managed_user,
+    delete_managed_user,
     issue_activation_token,
     set_user_active,
     unlock_login,
 )
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import ManageUsersPermission, authenticated_user
 from apps.api.schema import SchemaAPIView
 
@@ -161,6 +163,19 @@ class UserStatusView(SchemaAPIView):
             raise _validation_error(exc) from exc
         membership.refresh_from_db(fields=("role",))
         return Response({"data": ManagedUserSerializer(_user_data(membership)).data})
+
+
+class UserDetailView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageUsersPermission)
+
+    def delete(self, request: Request, user_id: int) -> Response:
+        actor = authenticated_user(request)
+        membership = _membership_for(actor, user_id)
+        try:
+            delete_managed_user(membership=membership, actor=actor)
+        except (ValidationError, PermissionDenied) as exc:
+            raise_domain_error(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserActivationLinkView(SchemaAPIView):

@@ -95,7 +95,9 @@ permission/idempotency/provider error.
 - Proxy Node streaming `/api/v1/*`, sólo server env, strip headers y neutral 502.
 - Auth/session provider con CSRF sólo memoria y handling 401/403/409/412/429/5xx.
 - Rutas: login/activate, dashboard, contacts/attention, campaigns, outbound, responses, catalogs,
-  automation, settings profile/templates/relevance/prompts/integrations/categories/overture/users, audit/jobs.
+  automation (estado, writing, knowledge; `settings/prompts` redirige a writing), prospects y settings
+  relevance (pestañas de Audiencia), settings profile/templates/integrations/categories/overture/
+  suppressions/users, audit/jobs.
 - ADMIN muta; VENDEDOR sólo ve proyecciones permitidas.
 - Ant Design responsive desde 320 px: drawer, cards/tables, full-screen mobile forms, touch 44 px,
   focus/keyboard/screen-reader/color-independent states.

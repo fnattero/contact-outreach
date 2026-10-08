@@ -411,7 +411,7 @@ def test_name_rules_are_accent_insensitive_exact_phrases_or_token_prefixes() -> 
         snapshot,
         zone,
         "phrase-not-token",
-        name="Reparación de Motoress",
+        name="Reparación de Motoresx",
         confidence=Decimal("0.9900"),
     )
     _catalog_place(
@@ -442,6 +442,39 @@ def test_name_rules_are_accent_insensitive_exact_phrases_or_token_prefixes() -> 
     ]
     assert batch.records[0].provider_data is not None
     assert batch.records[0].provider_data["matched_rule"]["name_terms"] == ["reparacion de motores"]
+
+
+@pytest.mark.django_db
+def test_a_plain_word_or_phrase_also_finds_the_plural_of_its_last_word() -> None:
+    snapshot, zone = _catalog()
+    for provider_id, name in (
+        ("singular", "Bobinado Pérez"),
+        ("plural", "Bobinados del Sur"),
+        ("plural-es", "Taller de motor eléctrico"),
+        ("phrase-plural", "Talleres de motores eléctricos"),
+        ("other-word", "Bobinadora Industrial"),
+        ("inside-word", "Rebobinado Express"),
+    ):
+        _catalog_place(snapshot, zone, provider_id, name=name, confidence=Decimal("0.9000"))
+    snapshot = _activate_catalog(snapshot)
+
+    batch = OverturePlacesProvider().search(
+        _request(
+            dataset_snapshot_id=str(snapshot.pk),
+            criteria={
+                "category_rules": [
+                    {"taxonomy_code": "", "name_terms": ["bobinado"]},
+                    {"taxonomy_code": "", "name_terms": ["motor eléctrico"]},
+                ]
+            },
+            limit=20,
+        )
+    )
+
+    found = {record.provider_id for record in batch.records}
+    # The singular and the plural of the last word match; a different word or a word that merely
+    # contains it does not.
+    assert found == {"singular", "plural", "plural-es"}
 
 
 @pytest.mark.django_db

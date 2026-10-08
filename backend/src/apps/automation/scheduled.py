@@ -36,6 +36,7 @@ from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.configuration.integrations import runtime_integration_configuration
 from apps.configuration.models import BusinessProfile, IntegrationConfiguration
+from apps.configuration.send_mode import live_sending_allowed
 from apps.contacts.models import CommunicationRestriction, Contact, Conversation, EmailAddress
 from apps.integrations.contracts import LLMProvider, ProviderError, ScheduledContactDraftRequest
 from apps.integrations.factory import get_llm_provider
@@ -288,7 +289,7 @@ def scheduled_contact_eligibility(
             "RELATIONSHIP_KILL_SWITCH",
             "Los contactos programados están detenidos por el bloqueo de seguridad.",
         )
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         return ScheduledEligibility(
             False,
             "GLOBAL_SEND_BLOCKED",

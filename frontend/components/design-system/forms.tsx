@@ -11,15 +11,18 @@ export type FormSectionProps = {
   title: string;
   description?: string;
   children: ReactNode;
-  /** Sections start open; the person can fold the ones they are not working on. */
+  /** Sections start folded; a page whose only job is one form opens it. */
   defaultOpen?: boolean;
+  /** Decorative mark that makes folded sections easy to tell apart. The title still carries the meaning. */
+  icon?: ReactNode;
+  tone?: "accent" | "success" | "warning" | "neutral";
 };
 
-export function FormSection({ title, description, children, defaultOpen = true }: FormSectionProps) {
+export function FormSection({ title, description, children, defaultOpen = false, icon, tone = "neutral" }: FormSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   const id = useId().replaceAll(":", "");
   return (
-    <section className={`form-section${open ? "" : " form-section--collapsed"}`} aria-labelledby={`${id}-title`}>
+    <section className={`form-section form-section--${tone}${open ? "" : " form-section--collapsed"}`} aria-labelledby={`${id}-title`}>
       <h2 className="form-section__heading" id={`${id}-title`}>
         <button
           type="button"
@@ -28,13 +31,14 @@ export function FormSection({ title, description, children, defaultOpen = true }
           aria-controls={`${id}-body`}
           onClick={() => setOpen((current) => !current)}
         >
-          <span className="type-title">{title}</span>
+          {icon ? <span className="form-section__icon" aria-hidden>{icon}</span> : null}
+          <span className="type-title form-section__title">{title}</span>
           <DownOutlined aria-hidden className="form-section__chevron" />
         </button>
       </h2>
+      {description ? <p className={`form-section__description${icon ? " form-section__description--indented" : ""}`}>{description}</p> : null}
       {/* Kept mounted while folded so form fields keep their values and validation. */}
       <div id={`${id}-body`} className="form-section__body" hidden={!open}>
-        {description ? <p className="form-section__description">{description}</p> : null}
         <div className="form-section__fields">{children}</div>
       </div>
     </section>

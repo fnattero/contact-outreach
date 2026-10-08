@@ -130,7 +130,7 @@ def test_fresh_database_has_only_overture_configuration_and_seeded_search_data()
         "source_licenses",
         "validation_results",
     } <= snapshot_fields
-    assert SearchCategory.objects.filter(archived_at__isnull=True).count() == 23
+    assert SearchCategory.objects.filter(archived_at__isnull=True).count() == 12
     assert SearchCategory.objects.exclude(rules__active=True).count() == 0
     assert SearchZone.objects.filter(kind="NEIGHBORHOOD", archived_at__isnull=True).count() == 48
     assert not SearchZone.objects.filter(

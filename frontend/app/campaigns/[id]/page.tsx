@@ -127,7 +127,7 @@ export default function CampaignDetailPage() {
         {isAdmin ? <Descriptions column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item label="Destinatarios"><span className="data-text">{campaign.metrics?.enrollments ?? "—"}</span></Descriptions.Item>
           <Descriptions.Item label="Prospectos"><span className="data-text">{campaign.metrics?.prospects ?? "—"}</span></Descriptions.Item>
-          <Descriptions.Item label="Rubros">{campaign.categories?.map((category) => category.name).join(", ") || "—"}</Descriptions.Item>
+          <Descriptions.Item label="Negocios a buscar">{campaign.categories?.map((category) => category.name).join(", ") || "—"}</Descriptions.Item>
           <Descriptions.Item label="Zonas">{campaign.zones?.map((zone) => zone.name).join(", ") || campaign.location_text || "—"}</Descriptions.Item>
         </Descriptions> : <p className="campaign-blocker">El detalle de audiencia está reservado para administración.</p>}
       </DetailSection>

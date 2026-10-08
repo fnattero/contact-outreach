@@ -3,7 +3,8 @@
 import { Button, Form, Input } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { ConfirmDangerModal, DisabledReason, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/design-system";
+import { ConfirmDangerModal, DisabledReason, EmptyState, ErrorState, LoadingState, PageHeader, SectionTabs, StatusBadge } from "@/components/design-system";
+import { MAIL_TABS } from "@/components/design-system/tabs-config";
 import { can,
   getAttention,
   getAutomationConfiguration,
@@ -104,7 +105,7 @@ export default function ResponsesPage() {
   if (error && !messages.length) return <ErrorState failed="No se pudieron cargar las respuestas" instruction={problemMessage(error as Problem)} onRetry={() => window.location.reload()} />;
 
   return <>
-    <PageHeader title="Respuestas" description="Conversaciones recibidas y clasificadas por el backend." />
+    <PageHeader title="Correos" description="Lo que te respondieron los negocios y lo que enviaste vos." tabs={<SectionTabs label="Correos" tabs={MAIL_TABS} />} />
     {error ? <div className="dashboard-inline-error" role="alert">{problemMessage(error as Problem)}</div> : null}
     {messages.length ? <div className="responses-inbox">
       <aside className="responses-inbox__list" aria-label="Lista de conversaciones">

@@ -137,7 +137,9 @@ ligada a `127.0.0.1` por defecto; no abrir host ni desactivar cookies secure par
 
 ## 7. Barreras de automatización y envío
 
-Envío inicial/live requiere simultáneamente `SEND_MODE=live`, `SEND_KILL_SWITCH=false`, campaign
+Envío inicial/live requiere simultáneamente `SEND_MODE=live`, `SEND_KILL_SWITCH=false`, el envío
+real encendido en la app por un admin (reautenticación y palabra de confirmación, auditado; un
+despliegue puede delegarlo al servidor con `SEND_REQUIRES_APP_ENABLE=false`), campaign
 mode/approval, Gmail, ventana/cupo, recipient elegible y adjuntos íntegros. Respuesta automática
 además exige `AUTO_REPLY_KILL_SWITCH=false`, mode LIVE calificado, Conversation activa, intent
 allowlisted, contexto/facts válidos y reservas de rate limit. La recuperación por embeddings sólo

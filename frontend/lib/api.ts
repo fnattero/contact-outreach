@@ -261,6 +261,9 @@ export type IntegrationConfiguration = {
   llm_provider: string;
   llm_model: string;
   relevance_llm_model: string;
+  /** Empty means the audience filter shares the reply connection. */
+  relevance_llm_provider: string;
+  relevance_llm_base_url: string;
   ollama_base_url: string;
   openai_compatible_base_url: string;
   embedding_provider: string;
@@ -270,16 +273,19 @@ export type IntegrationConfiguration = {
   gmail_oauth_client_id: string;
   /** Credentials are only ever reported as state; their values cannot be read back. */
   llm_credential: { configured: boolean; source: string };
+  relevance_llm_credential: { configured: boolean; source: string };
   gmail_credential: { configured: boolean; source: string };
   revision: number;
 };
 
 export type IntegrationConfigurationPatch = Partial<
-  Omit<IntegrationConfiguration, "llm_credential" | "gmail_credential" | "revision" | "embedding_dimensions">
+  Omit<IntegrationConfiguration, "llm_credential" | "relevance_llm_credential" | "gmail_credential" | "revision" | "embedding_dimensions">
 > & {
   embedding_dimensions?: number;
   llm_api_key?: string;
   remove_llm_api_key?: boolean;
+  relevance_llm_api_key?: string;
+  remove_relevance_llm_api_key?: boolean;
   gmail_oauth_client_secret?: string;
   remove_gmail_oauth_client_secret?: boolean;
 };
@@ -287,7 +293,15 @@ export type IntegrationConfigurationPatch = Partial<
 export type IntegrationStatus = {
   extractor: { provider: string; overture_min_confidence: string };
   website_fetcher: { provider: string };
-  llm: { provider: string; model: string; relevance_model: string; credential_source: string; configured: boolean };
+  llm: {
+    provider: string;
+    model: string;
+    relevance_model: string;
+    relevance_provider: string;
+    relevance_separate: boolean;
+    credential_source: string;
+    configured: boolean;
+  };
   embeddings: { provider: string; model: string; dimensions: number };
   gmail: {
     provider: string;
@@ -479,7 +493,20 @@ export type OvertureAttribution = {
   notices: string[];
 };
 
+export type ProvinceCoverage = {
+  code: string;
+  name: string;
+  state: "READY" | "IMPORTING" | "FAILED" | "MISSING";
+  place_count: number;
+  release_id: string | null;
+  updated_at: string | null;
+  error: string;
+};
+
 export type OvertureStatus = {
+  provinces: ProvinceCoverage[];
+  /** The newest data version the maintenance check verified; null until one exists. */
+  latest_verified_release: string | null;
   latest_snapshot_id: string | null;
   active_snapshot_id: string | null;
   /** Overture's terms require this to stay visible; null until a snapshot is active. */
@@ -564,12 +591,20 @@ export type DashboardSummary = {
   safety: {
     send_mode: string;
     send_kill_switch: boolean;
+    /** The server's permission for real sending (its mode and kill switch). */
+    send_server_allows_live: boolean;
+    /** The administrator's own switch inside the app. */
+    send_app_enabled: boolean;
+    /** Both keys turned: real email can leave. */
+    send_effective_live: boolean;
     auto_reply_kill_switch: boolean;
     relationship_kill_switch: boolean;
   };
   admin?: {
     profile_configured: boolean;
     gmail_connected: boolean;
+    gmail_status: "CONNECTED" | "ERROR" | "DISCONNECTED" | "NONE";
+    failed_sends: number;
     problem_jobs: number;
     prospects: number;
     sent_messages: number;
@@ -935,6 +970,28 @@ export function updateUserRole(id: number, role: "ADMIN" | "VENDEDOR"): Promise<
   });
 }
 
+export function deleteUser(id: number): Promise<void> {
+  return request<void>(`/api/v1/users/${id}/`, { method: "DELETE" });
+}
+
+export type SendMode = {
+  server_allows_live: boolean;
+  app_enabled: boolean;
+  effective_live: boolean;
+  enabled_by: string | null;
+};
+
+export function getSendMode(): Promise<SendMode> {
+  return request<SendMode>("/api/v1/send-mode/");
+}
+
+export function setSendLive(action: "enable-live" | "disable-live", confirmation?: string): Promise<SendMode> {
+  return request<SendMode>(`/api/v1/send-mode/actions/${action}/`, {
+    method: "POST",
+    body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
+  });
+}
+
 export function updateUserStatus(id: number, isActive: boolean): Promise<ManagedUser> {
   return request<ManagedUser>(`/api/v1/users/${id}/status/`, {
     method: "PATCH",
@@ -1104,10 +1161,10 @@ export function getAuditEvents(): Promise<ApiPage<AuditEvent[]>> {
   >;
 }
 
-export function syncOverture(releaseId: string, provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
+export function syncOverture(provinceCode: string): Promise<{ status: string; celery_task_id: string; province_code: string }> {
   return request<{ status: string; celery_task_id: string; province_code: string }>("/api/v1/overture/sync/", {
     method: "POST",
-    body: JSON.stringify({ release_id: releaseId, province_code: provinceCode }),
+    body: JSON.stringify({ province_code: provinceCode }),
   });
 }
 

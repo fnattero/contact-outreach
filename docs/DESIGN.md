@@ -35,9 +35,13 @@ Precise, dense, instrument-like. Every value below is fixed. If a value you need
 ```
 
 Rules:
-- These are the only colors in the application. No tints, no opacity variants, no gradients anywhere.
+- These are the only colors in the application. No new hues, no opacity variants, no gradients anywhere. Tints are the `-bg` tokens above, nothing else.
 - Semantic colors are **never** the only signal. Every status needs an icon or a word alongside the color.
-- `--accent` is for interactive and navigational elements only. It is never decorative and never a background fill for a large area.
+- Color may be decorative when it earns its place and stays rare. It earns its place when it does one of these jobs: tell apart sections or groups a person scans repeatedly (a folded settings list), mark a category that has no state of its own, or give an otherwise empty area a single point of focus. "It looks plain" is not a justification.
+- Keep decorative color small and quiet: an icon tile, a left stripe of at most 4px, a tinted badge or one illustration accent. Never a tinted background on a whole card or page region, never more than three tones on one screen, and never the same tone for unrelated things.
+- Decorative color is a topic marker, never a status. Do not use `--success` or `--danger` decoratively where it could read as "working" or "failing"; prefer `--accent` and `--warning` tones, and leave a group neutral rather than reach for `--success`. The title or label is always the signal, so the screen still works in grayscale.
+- `--accent` stays primary for interactive and navigational elements. Using it decoratively is allowed only under the rules above and never as a large fill.
+- A `FormSection` may carry a `tone` (`accent`, `warning` or `success`) that colors its icon tile and left stripe with the matching token, so folded sections of a long settings screen are easy to tell apart. Form sections start folded unless the page's only job is that form.
 - Do not use green for "blocked," "paused," or "stopped," even when stopped is the safe state. Use `--inactive` for stopped, `--success` only for "working correctly."
 
 ### Typography
@@ -106,13 +110,13 @@ Sticky headers and sticky save bars use a 1px `--border-strong` bottom/top edge,
 ### Density
 
 ```
-Sidebar expanded          240px
+Sidebar expanded          256px   (the longest menu label must fit on one line)
 Sidebar collapsed         64px
 Topbar height             52px
 Table row height          40px
 Table header height       36px
 Content max-width         1360px
-Form column max-width     640px   (a phone field must never be 1500px wide)
+Form column max-width     960px   (a phone field must never be 1500px wide; short fields share a row)
 Reading text max-width    68ch
 Minimum tap target        36px desktop, 44px touch
 ```
@@ -250,7 +254,7 @@ The agent must not produce any of these:
 
 ## Icon rules
 
-`@ant-design/icons` only — it's already a dependency and stylistically consistent. 16px in navigation and buttons, 14px inline in text. One icon per nav item, one per status badge, one per action button where the action is ambiguous. No icons in headings, no icons in body text, no icons purely for visual rhythm.
+`@ant-design/icons` only — it's already a dependency and stylistically consistent. 16px in navigation and buttons, 14px inline in text. One icon per nav item, one per status badge, one per action button where the action is ambiguous. No icons in headings (the one exception is the decorative icon tile of a `FormSection`), no icons in body text, no icons purely for visual rhythm.
 
 ## Self-review checklist
 

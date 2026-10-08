@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ArrowRightOutlined, ExclamationCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Select, Table } from "antd";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -14,12 +14,17 @@ import {
   type SemanticLevel,
 } from "@/components/design-system";
 import { useAuth } from "@/components/auth-provider";
+import { automationState } from "@/app/automation/automation-labels";
+import { buildProblems } from "./dashboard-helpers";
+import { SendModeControl } from "./send-mode-control";
 import { can,
   getAttention,
+  getAutomationConfiguration,
   getDashboardSummary,
   getInboundMessages,
   problemMessage,
   type AttentionTask,
+  type AutomationConfiguration,
   type DashboardCampaign,
   type DashboardSummary,
   type InboundMessage,
@@ -96,6 +101,9 @@ export default function DashboardPage() {
   const [campaignId, setCampaignId] = useState<string>();
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [automation, setAutomation] = useState<AutomationConfiguration | null>(null);
+  const [reload, setReload] = useState(0);
+  const canSeeAutomation = can(session, "manage_automation");
 
   useEffect(() => {
     let cancelled = false;
@@ -114,7 +122,13 @@ export default function DashboardPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [campaignId]);
+  }, [campaignId, reload]);
+
+  useEffect(() => {
+    if (!canSeeAutomation) return;
+    // An extra the summary does not depend on: if it fails the card simply keeps its older wording.
+    void getAutomationConfiguration().then(setAutomation).catch(() => undefined);
+  }, [canSeeAutomation]);
 
   const attentionItems = useMemo(() => buildAttentionItems(tasks, messages), [tasks, messages]);
 
@@ -124,10 +138,12 @@ export default function DashboardPage() {
   }
   if (!summary) return null;
 
-  const mode = summary.safety.send_mode === "dry-run" || summary.safety.send_mode === "live" ? displayValueMap[summary.safety.send_mode] : null;
-  const isSimulation = summary.safety.send_mode === "dry-run";
+  const isSimulation = !summary.safety.send_effective_live;
+  const canChangeSend = can(session, "manage_integrations");
   const isAdmin = can(session, "manage_campaigns");
   const activeCampaigns = summary.campaigns.filter((campaign) => activeCampaignStates.has(campaign.state));
+  const problems = buildProblems(summary);
+  const automationNow = automation ? automationState(automation.mode) : null;
   const campaignOptions = summary.campaigns.map((campaign) => ({ label: campaign.name, value: campaign.id }));
 
   return (
@@ -140,15 +156,30 @@ export default function DashboardPage() {
 
       {error ? <div className="dashboard-inline-error" role="alert">{problemMessage(error as Problem)}</div> : null}
 
+      {problems.length ? (
+        <section className="problems" aria-labelledby="problems-heading">
+          <h2 className="type-title" id="problems-heading">Para resolver</h2>
+          <ul className="problems__list">
+            {problems.map((problem) => (
+              <li className={`problems__item problems__item--${problem.level}`} key={problem.id}>
+                <ExclamationCircleOutlined aria-hidden />
+                <div className="problems__copy"><strong>{problem.title}</strong><span>{problem.detail}</span></div>
+                <Link className="problems__action" href={problem.href}>{problem.action} <ArrowRightOutlined aria-hidden /></Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className={`safety-band${isSimulation ? " safety-band--simulation" : ""}`} aria-labelledby="safety-heading">
         <div className="safety-band__heading">
           <SafetyCertificateOutlined aria-hidden />
           <div><p className="type-micro">Primero, seguridad</p><h2 className="type-title" id="safety-heading">¿Es seguro operar ahora?</h2></div>
         </div>
         <div className="safety-band__items">
-          <div className="safety-band__item"><span className="safety-band__label">Modo de envío</span><span className="safety-band__status">{mode ? <StatusBadge value={summary.safety.send_mode as "dry-run" | "live"} /> : <StatusBadge label="Modo no disponible" level="warning" />}</span><span className="safety-band__explanation">{mode?.explanation || "No se pudo confirmar el modo actual."}</span></div>
-          <div className="safety-band__item"><span className="safety-band__label">Envío protegido</span><span className="safety-band__status"><StatusBadge label={summary.safety.send_kill_switch ? "Protegido" : "No protegido"} level={summary.safety.send_kill_switch ? "success" : "danger"} /></span><span className="safety-band__explanation">{summary.safety.send_kill_switch ? "El interruptor de seguridad bloquea cualquier envío." : "El interruptor de seguridad permite envíos si las demás condiciones se cumplen."}</span></div>
-          <div className="safety-band__item"><span className="safety-band__label">Respuestas automáticas</span><span className="safety-band__status"><StatusBadge label={summary.safety.auto_reply_kill_switch ? "Detenidas" : "Habilitadas"} level={summary.safety.auto_reply_kill_switch ? "inactive" : isSimulation ? "info" : "warning"} /></span><span className="safety-band__explanation">{summary.safety.auto_reply_kill_switch ? "No se redactan ni envían respuestas automáticas." : "El sistema puede redactar respuestas según la configuración vigente."}</span></div>
+          <div className="safety-band__item"><span className="safety-band__label">Modo de envío</span><span className="safety-band__status"><StatusBadge value={summary.safety.send_effective_live ? "live" : "dry-run"} /></span><span className="safety-band__explanation">{summary.safety.send_effective_live ? displayValueMap.live.explanation : displayValueMap["dry-run"].explanation}{canChangeSend ? <> <SendModeControl safety={summary.safety} onChanged={() => setReload((current) => current + 1)} /></> : null}</span></div>
+          <div className="safety-band__item"><span className="safety-band__label">Bloqueo del servidor</span><span className="safety-band__status"><StatusBadge label={summary.safety.send_kill_switch ? "Envíos detenidos" : "Envíos permitidos"} level={summary.safety.send_kill_switch ? "warning" : "success"} /></span><span className="safety-band__explanation">{summary.safety.send_kill_switch ? "El servidor tiene los envíos bloqueados: no sale ningún correo real." : "El servidor permite enviar si las demás condiciones se cumplen."}</span></div>
+          <div className="safety-band__item"><span className="safety-band__label">Respuestas automáticas</span><span className="safety-band__status">{automationNow ? <StatusBadge label={automationNow.title} level={automationNow.level} /> : <StatusBadge label={summary.safety.auto_reply_kill_switch ? "Detenidas" : "Habilitadas"} level={summary.safety.auto_reply_kill_switch ? "inactive" : isSimulation ? "info" : "warning"} />}</span><span className="safety-band__explanation">{summary.safety.auto_reply_kill_switch ? "Bloqueadas desde el servidor: no se prepara ni se envía ninguna respuesta." : automationNow ? automationNow.explanation : "El sistema puede preparar respuestas según la configuración vigente."}{canSeeAutomation ? <> <Link href="/automation">Cambiar</Link></> : null}</span></div>
         </div>
       </section>
 

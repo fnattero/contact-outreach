@@ -19,6 +19,7 @@ from apps.automation.models import HumanTask
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.catalogs.models import Catalog
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone
+from apps.configuration.send_mode import send_mode_state
 from apps.dashboard.metrics import SummaryMetrics, workspace_summary_metrics
 from apps.mailbox.models import GmailConnection, InboundMessage
 from apps.prospects.models import Prospect
@@ -71,6 +72,7 @@ class DashboardSummaryView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSummaryPermission)
 
     def get(self, request: Request) -> Response:
+        send_state = send_mode_state()
         query = DashboardQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         user = authenticated_user(request)
@@ -120,14 +122,29 @@ class DashboardSummaryView(SchemaAPIView):
             "safety": {
                 "send_mode": settings.SEND_MODE,
                 "send_kill_switch": settings.SEND_KILL_SWITCH,
+                "send_server_allows_live": send_state.server_allows_live,
+                "send_app_enabled": send_state.app_enabled,
+                "send_effective_live": send_state.effective_live,
                 "auto_reply_kill_switch": settings.AUTO_REPLY_KILL_SWITCH,
                 "relationship_kill_switch": settings.RELATIONSHIP_KILL_SWITCH,
             },
         }
         if is_admin:
+            connection = GmailConnection.objects.filter(workspace=workspace).first()
+            gmail_status = connection.status if connection is not None else "NONE"
             data["admin"] = {
                 "profile_configured": BusinessProfile.objects.filter(workspace=workspace).exists(),
-                "gmail_connected": GmailConnection.objects.filter(workspace=workspace).exists(),
+                # A saved connection that is in error or was disconnected is not a working one.
+                "gmail_connected": gmail_status == GmailConnection.Status.CONNECTED,
+                "gmail_status": gmail_status,
+                "failed_sends": OutboundMessage.objects.filter(
+                    Q(campaign__workspace=workspace)
+                    | Q(contact__workspace=workspace)
+                    | Q(organization__workspace=workspace),
+                    state=OutboundMessage.State.SEND_FAILED,
+                )
+                .distinct()
+                .count(),
                 "problem_jobs": BackgroundJob.objects.filter(
                     state__in=(BackgroundJob.State.FAILED, BackgroundJob.State.RETRY_WAIT)
                 ).count(),

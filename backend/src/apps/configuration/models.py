@@ -151,6 +151,21 @@ class IntegrationConfiguration(TimestampedUUIDModel):
     llm_model = models.CharField(max_length=120, default="fake-deterministic")
     # Blank means the audience filter uses llm_model; a cheaper model can be set here.
     relevance_llm_model = models.CharField(max_length=120, blank=True, default="")
+    # Blank means the audience filter shares the reply connection (provider, address and key).
+    # A provider here makes the filter use its own connection: its own address and its own key.
+    relevance_llm_provider = models.CharField(
+        max_length=30,
+        choices=LLMProvider.choices,
+        blank=True,
+        default="",
+    )
+    relevance_llm_base_url = models.URLField(blank=True)
+    relevance_llm_api_key_encrypted = models.TextField(blank=True, editable=False)
+    relevance_llm_api_key_source = models.CharField(
+        max_length=20,
+        choices=SecretSource.choices,
+        default=SecretSource.NONE,
+    )
     llm_api_key_encrypted = models.TextField(blank=True, editable=False)
     llm_api_key_source = models.CharField(
         max_length=20,
@@ -192,6 +207,11 @@ class IntegrationConfiguration(TimestampedUUIDModel):
             models.CheckConstraint(
                 condition=~Q(llm_api_key_source="ENCRYPTED") | ~Q(llm_api_key_encrypted=""),
                 name="integration_llm_cipher_required",
+            ),
+            models.CheckConstraint(
+                condition=~Q(relevance_llm_api_key_source="ENCRYPTED")
+                | ~Q(relevance_llm_api_key_encrypted=""),
+                name="integration_relevance_llm_cipher_required",
             ),
             models.CheckConstraint(
                 condition=Q(embedding_dimensions__gte=64, embedding_dimensions__lte=3072),
@@ -246,6 +266,40 @@ class PromptConfiguration(TimestampedUUIDModel):
         if not self.workspace_id and self.owner_id:
             self.workspace_id = self.owner.membership.workspace_id
         super().save(*args, **kwargs)
+
+
+class SendModeSetting(TimestampedUUIDModel):
+    """The administrator's own switch for real sending: the app's key next to the server's."""
+
+    workspace = models.OneToOneField(
+        "accounts.Workspace",
+        on_delete=models.PROTECT,
+        related_name="send_mode_setting",
+    )
+    live_enabled = models.BooleanField(default=False)
+    live_enabled_at = models.DateTimeField(blank=True, null=True)
+    live_enabled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="enabled_real_sending",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        live_enabled=True,
+                        live_enabled_at__isnull=False,
+                        live_enabled_by__isnull=False,
+                    )
+                    | Q(live_enabled=False)
+                ),
+                name="send_mode_live_activation_recorded",
+            )
+        ]
 
 
 class WorkspaceMessageTemplateRevision(TimestampedUUIDModel):

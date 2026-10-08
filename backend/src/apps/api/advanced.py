@@ -85,6 +85,52 @@ class HumanTaskActionView(SchemaAPIView):
         return Response({"data": {"id": str(saved.pk), "status": saved.status}})
 
 
+def _latest_verified_release() -> str | None:
+    check = (
+        OvertureReleaseCheck.objects.filter(status=OvertureReleaseCheck.Status.SUCCEEDED)
+        .exclude(latest_release="")
+        .order_by("-created_at")
+        .first()
+    )
+    return check.latest_release if check else None
+
+
+def _province_states(workspace_id: UUID | str) -> list[dict[str, object]]:
+    """Every province the app knows, with whether its business data is ready to search."""
+
+    partitions = list(
+        OvertureCoveragePartition.objects.select_related("release").order_by("-created_at")
+    )
+    rows: list[dict[str, object]] = []
+    provinces = SearchZone.objects.filter(
+        workspace_id=workspace_id,
+        level=SearchZone.Level.PROVINCE,
+        active=True,
+        archived_at__isnull=True,
+    ).order_by("name")
+    for province in provinces:
+        own = [item for item in partitions if item.province_code == province.official_code]
+        ready = next((item for item in own if item.is_active and item.status == "READY"), None)
+        importing = next((item for item in own if item.status == "IMPORTING"), None)
+        failed = own[0] if own and own[0].status == "FAILED" else None
+        state = (
+            "READY" if ready else "IMPORTING" if importing else "FAILED" if failed else "MISSING"
+        )
+        shown = ready or importing or failed
+        rows.append(
+            {
+                "code": province.official_code,
+                "name": province.name,
+                "state": state,
+                "place_count": ready.place_count if ready else 0,
+                "release_id": shown.release.release_id if shown else None,
+                "updated_at": (shown.imported_at or shown.updated_at) if shown else None,
+                "error": failed.error if failed else "",
+            }
+        )
+    return rows
+
+
 class OvertureStatusView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
 
@@ -94,6 +140,10 @@ class OvertureStatusView(SchemaAPIView):
         return Response(
             {
                 "data": {
+                    "provinces": _province_states(
+                        authenticated_user(request).membership.workspace_id
+                    ),
+                    "latest_verified_release": _latest_verified_release(),
                     "latest_snapshot_id": str(latest.pk) if latest else None,
                     "active_snapshot_id": str(active.pk) if active else None,
                     # Overture's terms require the attribution and notices to stay visible.
@@ -142,12 +192,23 @@ class OvertureSyncView(SchemaAPIView):
     def post(self, request: Request) -> Response:
         actor = authenticated_user(request)
         body = json_object(request)
-        release_id = cast(str, body.get("release_id", ""))
         province_code = cast(str, body.get("province_code", ""))
+        # Without an explicit version, load the newest one the maintenance check verified.
+        release_id = cast(str, body.get("release_id", "")) or (_latest_verified_release() or "")
+        if not release_id:
+            raise serializers.ValidationError(
+                "Todavía no hay una versión de datos verificada. Probá de nuevo en unos minutos."
+            )
         try:
             release_id = validate_release_id(release_id)
         except ValidationError as exc:
             raise serializers.ValidationError(str(exc)) from exc
+        if OvertureCoveragePartition.objects.filter(
+            status=OvertureCoveragePartition.Status.IMPORTING
+        ).exists():
+            raise serializers.ValidationError(
+                "Ya hay una carga de datos en curso. Esperá a que termine para cargar otra."
+            )
         if not OvertureReleaseCheck.objects.filter(
             status=OvertureReleaseCheck.Status.SUCCEEDED,
             latest_release=release_id,

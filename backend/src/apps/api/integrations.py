@@ -36,7 +36,9 @@ def _status_data(request: Request) -> dict[str, object]:
         "llm": {
             "provider": runtime.llm_provider,
             "model": runtime.llm_model,
-            "relevance_model": runtime.relevance_llm_model,
+            "relevance_model": runtime.relevance_model(),
+            "relevance_provider": runtime.relevance_connection()[0],
+            "relevance_separate": runtime.relevance_separate,
             "credential_source": runtime.llm_credential_source,
             "configured": runtime.llm_credential_configured,
         },
@@ -86,6 +88,14 @@ class IntegrationConfigurationInputSerializer(serializers.Serializer[dict[str, A
     llm_provider = serializers.ChoiceField(choices=IntegrationConfiguration.LLMProvider.choices)
     llm_model = serializers.CharField(max_length=120)
     relevance_llm_model = serializers.CharField(max_length=120, allow_blank=True)
+    relevance_llm_provider = serializers.ChoiceField(
+        choices=IntegrationConfiguration.LLMProvider.choices, allow_blank=True
+    )
+    relevance_llm_base_url = serializers.CharField(max_length=500, allow_blank=True)
+    relevance_llm_api_key = serializers.CharField(
+        max_length=4096, allow_blank=True, write_only=True
+    )
+    remove_relevance_llm_api_key = serializers.BooleanField()
     ollama_base_url = serializers.CharField(max_length=500)
     openai_compatible_base_url = serializers.CharField(max_length=500, allow_blank=True)
     llm_api_key = serializers.CharField(max_length=4096, allow_blank=True, write_only=True)
@@ -112,6 +122,8 @@ def _configuration_data(request: Request) -> dict[str, object]:
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
         "relevance_llm_model": runtime.relevance_llm_model,
+        "relevance_llm_provider": runtime.relevance_llm_provider,
+        "relevance_llm_base_url": runtime.relevance_llm_base_url,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
         "embedding_provider": runtime.embedding_provider,
@@ -123,6 +135,10 @@ def _configuration_data(request: Request) -> dict[str, object]:
         "llm_credential": {
             "configured": runtime.llm_credential_configured,
             "source": runtime.llm_credential_source,
+        },
+        "relevance_llm_credential": {
+            "configured": runtime.relevance_llm_credential_configured,
+            "source": runtime.relevance_llm_credential_source,
         },
         "gmail_credential": {
             "configured": runtime.gmail_credential_configured,

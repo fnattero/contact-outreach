@@ -144,4 +144,14 @@ describe("audience filter settings page", () => {
 
     expect(screen.getByText("35/1200")).toBeInTheDocument();
   });
+
+  it("asks before leaving for the other Audiencia tab with unsaved changes", async () => {
+    inApp(createElement(RelevanceSettingsPage));
+    const box = (await screen.findByLabelText("Describí a quién le vendés")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "Otro texto." } });
+
+    fireEvent.click(screen.getByRole("link", { name: "Negocios" }));
+
+    expect(await screen.findByText("Lo que editaste se perderá si cambiás de pestaña.")).toBeInTheDocument();
+  });
 });

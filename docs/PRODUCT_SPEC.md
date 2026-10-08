@@ -218,8 +218,9 @@ muestra: “Se pasó al próximo día permitido para evitar correos duplicados.�
 adicional entre campañas y una dirección sin respuesta puede participar en una campaña posterior.
 Las respuestas y comunicaciones de Contactos no usan esta reserva de campaña.
 
-Ningún efecto live ocurre salvo `SEND_MODE=live`, kill switch de envío desactivado, campaña
-autorizada, cuotas/horario válidos y Gmail conectado. Una ambigüedad se reconcilia por Message-ID;
+Ningún efecto live ocurre salvo `SEND_MODE=live`, kill switch de envío desactivado, envío real
+encendido por un admin dentro de la app (Resumen, con contraseña y palabra de confirmación; el servidor
+sigue siendo el techo), campaña autorizada, cuotas/horario válidos y Gmail conectado. Una ambigüedad se reconcilia por Message-ID;
 nunca se reenvía a ciegas.
 
 ### FR-09 Un recordatorio sin respuesta
@@ -378,8 +379,14 @@ campaña ni vuelve elegible a un Contacto.
 
 ### FR-16 UI Contactos y conversaciones
 
-La navegación principal reemplaza Prospectos/Supresiones/Respuestas por `Contactos` y `Necesita
-atención`; la audiencia prospectiva queda dentro de cada campaña. La lista muestra empresa/nombre,
+La navegación principal se agrupa por tarea. “Día a día”: Resumen, Campañas, Correos (Recibidos y
+Enviados), Contactos, Audiencia (Negocios y Filtro) y Respuestas automáticas (Estado, Cómo escribe y
+Qué sabe). “Mi empresa”: Perfil comercial, Mensajes de campaña, Catálogos y Rubros. “Avanzado”, plegable
+y recordado por usuario: Integraciones, Correos bloqueados, Actividad del sistema, Zonas con datos,
+Usuarios y Auditoría. Las secciones con pestañas usan rutas reales, cada una con su protección; una
+pestaña que la persona no puede abrir se oculta. `Necesita atención` deja de ser una entrada del menú y
+se resuelve desde el Resumen, que además lista lo que impide operar (Gmail, envíos fallidos, perfil
+incompleto, campañas detenidas) con el lugar que lo arregla. La lista muestra empresa/nombre,
 email preferido, checkbox “No contactar”, temas aprobados, última interacción y badge de atención.
 
 El detalle presenta cronología agrupada por hilo, canales y proveniencia, campañas, restricciones,

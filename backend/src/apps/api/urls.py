@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_protect
 from apps.api.admin import (
     UnlockLoginView,
     UserActivationLinkView,
+    UserDetailView,
     UserListView,
     UserRoleView,
     UserStatusView,
@@ -29,6 +30,8 @@ from apps.api.auth import (
 from apps.api.automation import (
     AutomationConfigurationView,
     AutomationLiveActionView,
+    SendModeActionView,
+    SendModeView,
     WritingInstructionsView,
 )
 from apps.api.campaigns import (
@@ -133,6 +136,7 @@ urlpatterns = [
     path("users/", UserListView.as_view(), name="api-users"),
     path("users/unlock-login/", UnlockLoginView.as_view(), name="api-users-unlock-login"),
     path("users/<int:user_id>/role/", UserRoleView.as_view(), name="api-user-role"),
+    path("users/<int:user_id>/", UserDetailView.as_view(), name="api-user-detail"),
     path("users/<int:user_id>/status/", UserStatusView.as_view(), name="api-user-status"),
     path(
         "users/<int:user_id>/activation-link/",
@@ -160,6 +164,12 @@ urlpatterns = [
         "automation/actions/<str:action>/",
         AutomationLiveActionView.as_view(),
         name="api-automation-action",
+    ),
+    path("send-mode/", SendModeView.as_view(), name="api-send-mode"),
+    path(
+        "send-mode/actions/<str:action>/",
+        SendModeActionView.as_view(),
+        name="api-send-mode-action",
     ),
     path("knowledge/facts/", KnowledgeFactListView.as_view(), name="api-knowledge-facts"),
     path(

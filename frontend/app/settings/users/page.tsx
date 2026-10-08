@@ -9,7 +9,7 @@ import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
 import { LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { can, createUser, getUsers, problemMessage, updateUserRole, updateUserStatus, type CreatedUser, type ManagedUser, type Problem } from "@/lib/api";
+import { can, createUser, deleteUser, getUsers, problemMessage, updateUserRole, updateUserStatus, type CreatedUser, type ManagedUser, type Problem } from "@/lib/api";
 
 type UserForm = { username: string; email: string; role: ManagedUser["role"] };
 
@@ -26,6 +26,8 @@ export default function UsersSettingsPage() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [roleDrafts, setRoleDrafts] = useState<Record<number, ManagedUser["role"]>>({});
   const [roleSaving, setRoleSaving] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<ManagedUser | null>(null);
 
   function refresh() {
@@ -62,6 +64,16 @@ export default function UsersSettingsPage() {
     finally { setRoleSaving(null); }
   }
 
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true); setError(null);
+    try {
+      await deleteUser(deleteTarget.id);
+      setUsers((current) => current.filter((item) => item.id !== deleteTarget.id));
+    } catch (problem) { setError(problem); }
+    finally { setDeleting(false); setDeleteTarget(null); }
+  }
+
   function closeCreate() { if (createDirty) setCancelOpen(true); else setDrawerOpen(false); }
   function discardCreate() { form.resetFields(); setCreateDirty(false); setCancelOpen(false); setDrawerOpen(false); }
 
@@ -78,13 +90,13 @@ export default function UsersSettingsPage() {
           { title: "Rol", dataIndex: "role", render: (_: ManagedUser["role"], user) => <Flex align="center" gap="small"><Select value={roleDrafts[user.id] ?? user.role} onChange={(role: ManagedUser["role"]) => setRoleDrafts((current) => ({ ...current, [user.id]: role }))} options={[{ value: "VENDEDOR", label: "Vendedor/a" }, { value: "ADMIN", label: "Administrador/a" }]} aria-label={`Rol de ${user.username}`} /><DisabledReason disabled={(roleDrafts[user.id] ?? user.role) === user.role || roleSaving === user.id} reason={roleSaving === user.id ? "El cambio de rol se está guardando." : "Elegí un rol diferente para guardar."}><Button onClick={() => void saveRole(user)} loading={roleSaving === user.id}>Guardar rol</Button></DisabledReason></Flex> },
           { title: "Estado", dataIndex: "is_active", render: (value: boolean) => <StatusBadge label={value ? "Activo" : "Inactivo"} level={value ? "success" : "inactive"} /> },
           { title: "Última actividad", render: () => <span className="catalog-reference-unavailable">No disponible por la API</span> },
-          { title: "Acción", render: (_: unknown, user) => <DisabledReason disabled={user.id === session?.id} reason="No podés desactivar tu propio usuario."><Button danger={user.is_active} onClick={() => setDeactivateTarget(user)}>{user.is_active ? "Desactivar" : "Activar"}</Button></DisabledReason> },
+          { title: "Acción", render: (_: unknown, user) => <Flex gap="small" wrap><DisabledReason disabled={user.id === session?.id} reason="No podés desactivar tu propio usuario."><Button danger={user.is_active} onClick={() => setDeactivateTarget(user)}>{user.is_active ? "Desactivar" : "Activar"}</Button></DisabledReason><DisabledReason disabled={user.id === session?.id} reason="No podés eliminar tu propio usuario."><Button danger onClick={() => setDeleteTarget(user)}>Eliminar</Button></DisabledReason></Flex> },
         ]} />
       </Card>
       <Drawer title="Crear usuario" open={drawerOpen} onClose={closeCreate} width={520}>
         <p className="drawer-explanation">La persona recibirá un enlace único para activar su cuenta. El enlace vence según la política del espacio.</p>
         <Form form={form} layout="vertical" validateTrigger="onBlur" onValuesChange={() => setCreateDirty(true)} onFinish={(values) => void submit(values)}>
-          <FormSection title="Datos de acceso" description="Definí la identidad, el correo y el rol inicial.">
+          <FormSection defaultOpen title="Datos de acceso" description="Definí la identidad, el correo y el rol inicial.">
             <Form.Item label="Usuario" name="username" rules={[{ required: true, message: "Indicá un usuario." }]}><Input autoComplete="off" /></Form.Item>
             <Form.Item label="Email" name="email" rules={[{ required: true, type: "email", message: "Indicá un email válido." }]}><Input type="email" autoComplete="email" /></Form.Item>
             <Form.Item label="Rol" name="role" initialValue="VENDEDOR" extra="El rol define qué puede consultar y modificar." rules={[{ required: true }]}><Select options={[{ value: "VENDEDOR", label: "Vendedor/a" }, { value: "ADMIN", label: "Administrador/a" }]} /></Form.Item>
@@ -94,6 +106,20 @@ export default function UsersSettingsPage() {
       </Drawer>
       <Modal open={cancelOpen} title="Descartar usuario sin guardar" onCancel={() => setCancelOpen(false)} onOk={discardCreate} okText="Descartar cambios" cancelText="Seguir editando" okButtonProps={{ danger: true }}><p>Los datos ingresados se perderán si cerrás este panel.</p></Modal>
       <ConfirmDangerModal open={deactivateTarget !== null} title="Desactivar usuario" consequences={["La persona perderá el acceso al espacio de trabajo.", "No podrá iniciar sesión ni ejecutar acciones hasta que un administrador la active nuevamente.", "Sus registros y acciones auditadas se conservarán."]} confirmationWord="DESACTIVAR" dangerLabel="Desactivar usuario" confirming={roleSaving === deactivateTarget?.id} onCancel={() => setDeactivateTarget(null)} onConfirm={() => void confirmDeactivate()} />
+      <ConfirmDangerModal
+        open={deleteTarget !== null}
+        title={`Eliminar a ${deleteTarget?.username ?? ""}`}
+        consequences={[
+          "La cuenta se borra y no se puede recuperar.",
+          "Solo se puede eliminar a quien nunca hizo nada en la app. Si tiene campañas, catálogos o configuración a su nombre, te lo vamos a avisar y lo que corresponde es desactivarlo.",
+          "El registro de auditoría conserva que la cuenta existió y quién la eliminó.",
+        ]}
+        confirmationWord="ELIMINAR"
+        dangerLabel="Eliminar usuario"
+        confirming={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </Flex>
   );
 }

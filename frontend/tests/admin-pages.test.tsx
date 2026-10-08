@@ -12,7 +12,9 @@ import { sessionFor } from "./session";
 import {
   createSuppression,
   deleteSearchCategory,
+  createSearchCategory,
   getSearchCategories,
+  updateSearchCategoryRules,
   getSuppressions,
   toggleSearchCategory,
   type SearchCategory,
@@ -45,7 +47,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getCatalogs: vi.fn().mockResolvedValue([]),
     getGmailConnection: vi.fn().mockResolvedValue({ connected: false, email: null, status: "DISCONNECTED" }),
     getIntegrationStatus: vi.fn().mockResolvedValue(new Promise(() => undefined)),
+    createSearchCategory: vi.fn(),
     getSearchCategories: vi.fn(),
+    updateSearchCategoryRules: vi.fn(),
     getSuppressions: vi.fn(),
     toggleSearchCategory: vi.fn(),
   };
@@ -118,7 +122,7 @@ describe("suppressions page", () => {
 
     inApp(createElement(SuppressionsPage));
 
-    expect(screen.getByText("No tenés permisos para administrar supresiones.")).toBeInTheDocument();
+    expect(screen.getByText("No tenés permisos para administrar los correos bloqueados.")).toBeInTheDocument();
     await waitFor(() => expect(getSuppressions).not.toHaveBeenCalled());
   });
 
@@ -154,52 +158,84 @@ describe("suppressions page", () => {
 });
 
 describe("category management", () => {
-  async function openPanel(name: string) {
-    fireEvent.click(await screen.findByText(name));
-  }
-
-  it("shows inactive categories as such so they can be switched back on", async () => {
+  it("lists each business to search with its words and shows a paused one as such", async () => {
     vi.mocked(getSearchCategories).mockResolvedValue([category(), category({ id: "cat-2", name: "Ferreterías", active: false })]);
 
     inApp(createElement(CategoriesPage));
 
     expect(await screen.findByText("Ferreterías")).toBeInTheDocument();
-    expect(screen.getByText("Inactivo")).toBeInTheDocument();
+    expect(screen.getAllByText("taller mecanico")).toHaveLength(2);
+    expect(screen.getByText("Pausado")).toBeInTheDocument();
+    expect(screen.queryByText(/variante/i)).toBeNull();
     expect(getSearchCategories).toHaveBeenCalledWith(true);
   });
 
-  it("toggles a category through the API and reflects the new state", async () => {
+  it("pauses a business through the API and offers to activate it again", async () => {
     vi.mocked(getSearchCategories).mockResolvedValue([category()]);
     vi.mocked(toggleSearchCategory).mockResolvedValue(category({ active: false }));
     inApp(createElement(CategoriesPage));
-    await openPanel("Talleres");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar rubro" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pausar" }));
 
     await waitFor(() => expect(toggleSearchCategory).toHaveBeenCalledWith("cat-1"));
-    expect(await screen.findByText("Inactivo")).toBeInTheDocument();
-    // A button that is still loading carries an extra icon label, so match the name loosely.
-    expect(await screen.findByRole("button", { name: /Activar rubro/ })).toBeInTheDocument();
+    expect(await screen.findByText("Pausado")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Activar/ })).toBeInTheDocument();
   });
 
   it("deletes only after the confirmation word is typed", async () => {
     vi.mocked(getSearchCategories).mockResolvedValue([category()]);
     vi.mocked(deleteSearchCategory).mockResolvedValue({ outcome: "deleted" });
     inApp(createElement(CategoriesPage));
-    await openPanel("Talleres");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Eliminar rubro" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Eliminar" }));
     const dialog = await screen.findByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: "Eliminar rubro" });
+    const confirm = within(dialog).getByRole("button", { name: "Eliminar" });
     expect(confirm).toBeDisabled();
     expect(deleteSearchCategory).not.toHaveBeenCalled();
 
     fireEvent.change(within(dialog).getByLabelText(/Escribí ELIMINAR/), { target: { value: "ELIMINAR" } });
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Eliminar rubro" })).toBeEnabled());
-    fireEvent.click(within(dialog).getByRole("button", { name: "Eliminar rubro" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Eliminar" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Eliminar" }));
 
     await waitFor(() => expect(deleteSearchCategory).toHaveBeenCalledWith("cat-1"));
     await waitFor(() => expect(screen.queryByText("Talleres")).not.toBeInTheDocument());
+  });
+
+  it("adds a business with its words, one rule per word, and counts a word still in the box", async () => {
+    vi.mocked(getSearchCategories).mockResolvedValue([]);
+    vi.mocked(createSearchCategory).mockResolvedValue(category({ id: "new", name: "Bobinado de motores", rules: [] }));
+    vi.mocked(updateSearchCategoryRules).mockResolvedValue(
+      category({ id: "new", name: "Bobinado de motores", rules: [
+        { id: "a", taxonomy_code: "", name_terms: ["bobinado"], active: true, sort_order: 0 },
+        { id: "b", taxonomy_code: "", name_terms: ["rebobinado"], active: true, sort_order: 1 },
+      ] }),
+    );
+    inApp(createElement(CategoriesPage));
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Agregar negocio a buscar" }))[0]);
+    const name = await screen.findByLabelText("¿Qué negocio querés encontrar?");
+    fireEvent.change(name, { target: { value: "Bobinado de motores" } });
+    const word = screen.getByLabelText("Palabras que aparecen en su nombre");
+    fireEvent.change(word, { target: { value: "bobinado" } });
+    fireEvent.keyDown(word, { key: "Enter", code: "Enter", keyCode: 13 });
+    fireEvent.change(word, { target: { value: "rebobinado" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(createSearchCategory).toHaveBeenCalledWith("Bobinado de motores"));
+    await waitFor(() =>
+      expect(updateSearchCategoryRules).toHaveBeenCalledWith("new", [{ name_terms: ["bobinado"] }, { name_terms: ["rebobinado"] }]),
+    );
+  });
+
+  it("fills in an example to start from", async () => {
+    vi.mocked(getSearchCategories).mockResolvedValue([]);
+    inApp(createElement(CategoriesPage));
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Agregar negocio a buscar" }))[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Autoelectricidad" }));
+
+    expect((screen.getByLabelText("¿Qué negocio querés encontrar?") as HTMLInputElement).value).toBe("Autoelectricidad");
+    expect(within(screen.getByLabelText("Palabras elegidas")).getByText("autoelectricidad")).toBeInTheDocument();
   });
 });
 

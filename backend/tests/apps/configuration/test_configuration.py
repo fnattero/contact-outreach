@@ -45,7 +45,7 @@ def profile_values(**overrides: object) -> dict[str, object]:
 
 @pytest.mark.django_db
 def test_seed_contains_documented_categories_and_caba_zones() -> None:
-    assert SearchCategory.objects.filter(archived_at__isnull=True).count() == 23
+    assert SearchCategory.objects.filter(archived_at__isnull=True).count() == 12
     assert (
         SearchZone.objects.filter(
             level=SearchZone.Level.PROVINCE,

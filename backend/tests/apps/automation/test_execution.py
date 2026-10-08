@@ -51,6 +51,7 @@ from apps.campaigns.models import (
     OutboundMessage,
 )
 from apps.catalogs.models import Catalog
+from apps.configuration.models import BusinessProfile
 from apps.configuration.services import save_automatic_reply_prompt
 from apps.contacts.models import (
     CampaignEnrollment,
@@ -556,6 +557,43 @@ def test_safe_reply_is_durable_idempotent_and_stays_in_original_thread(
     SEND_KILL_SWITCH=False,
     AUTO_REPLY_KILL_SWITCH=False,
 )
+def test_the_system_ends_an_automatic_reply_with_the_company_signature(
+    owner,
+    private_catalog_dir,
+    monkeypatch,
+) -> None:
+    scenario = _scenario(owner, private_catalog_dir=private_catalog_dir)
+    _allow_test_live_gate(monkeypatch)
+    BusinessProfile.objects.create(
+        workspace=owner.membership.workspace,
+        owner=owner,
+        company_name="Componentes del Sur",
+        salesperson_name="Vendedor",
+        address="Calle 1, CABA",
+        signature="Equipo comercial\nComponentes del Sur",
+    )
+    provider = FakeGmailProvider(persist=True)
+
+    assert execute_reply_decision(scenario.decision.pk, provider=provider) == (
+        ReplyDecision.State.COMPLETED
+    )
+
+    message = OutboundMessage.objects.get(kind=OutboundMessage.Kind.AUTOMATIC_REPLY)
+    # The model's text is kept as proposed; the fixed signature is added by the system when sending.
+    assert message.body_text == scenario.decision.proposed_body
+    assert message.signature_snapshot == "Equipo comercial\nComponentes del Sur"
+    fake = FakeGmailMessage.objects.get(rfc_message_id=message.message_id)
+    parsed = BytesParser(policy=policy.default).parsebytes(bytes(fake.raw_message))
+    sent = parsed.get_content().replace("\r\n", "\n").strip()
+    assert sent == f"{scenario.decision.proposed_body}\n\nEquipo comercial\nComponentes del Sur"
+
+
+@pytest.mark.django_db
+@override_settings(
+    SEND_MODE="live",
+    SEND_KILL_SWITCH=False,
+    AUTO_REPLY_KILL_SWITCH=False,
+)
 def test_cross_thread_automatic_reply_after_decision_does_not_stale_policy_recheck(
     owner,
     private_catalog_dir,
@@ -980,7 +1018,7 @@ def test_ambiguous_redirect_ack_is_reconciled_without_a_duplicate(
     SEND_KILL_SWITCH=False,
     AUTO_REPLY_KILL_SWITCH=False,
 )
-def test_direct_contact_reply_profile_and_global_context_survive_policy_recheck(
+def test_direct_contact_reply_profile_survives_policy_recheck(
     owner,
     private_catalog_dir,
     monkeypatch,
@@ -1005,9 +1043,9 @@ def test_direct_contact_reply_profile_and_global_context_survive_policy_recheck(
     scenario.decision.context_manifest = context.manifest
     scenario.decision.context_hash = context.context_hash
     scenario.decision.save(update_fields=("context_manifest", "context_hash", "updated_at"))
-    assert {"CONTACT_RECORD", "GLOBAL_APPROVED_CONTEXT"}.issubset(
-        {block["provenance"] for block in context.manifest["blocks"]}
-    )
+    provenances = {block["provenance"] for block in context.manifest["blocks"]}
+    assert "CONTACT_RECORD" in provenances
+    assert "GLOBAL_APPROVED_CONTEXT" not in provenances
     _allow_test_live_gate(monkeypatch)
 
     authorized = authorize_reply_decision(scenario.decision.pk)

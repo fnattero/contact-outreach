@@ -3,6 +3,7 @@ import { App } from "antd";
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AutomationPage from "@/app/automation/page";
+import KnowledgePage from "@/app/automation/knowledge/page";
 import {
   approveKnowledgeContext,
   approveKnowledgeFact,
@@ -11,6 +12,7 @@ import {
   getKnowledgeFacts,
   reauthenticate,
   setAutomationLive,
+  updateAutomationMode,
   type KnowledgeContextRevision,
   type KnowledgeFactRevision,
 } from "@/lib/api";
@@ -43,12 +45,16 @@ vi.mock("@/lib/api", async (importOriginal) => {
       live_enabled_by: null,
     }),
     getDashboardSummary: vi.fn().mockResolvedValue({
-      safety: { send_mode: "dry-run", send_kill_switch: true, auto_reply_kill_switch: true, relationship_kill_switch: true },
+      safety: {
+        send_mode: "dry-run", send_kill_switch: true, send_server_allows_live: false, send_app_enabled: false,
+        send_effective_live: false, auto_reply_kill_switch: true, relationship_kill_switch: true,
+      },
     }),
     getKnowledgeContexts: vi.fn(),
     getKnowledgeFacts: vi.fn(),
     reauthenticate: vi.fn(),
     setAutomationLive: vi.fn(),
+    updateAutomationMode: vi.fn(),
   };
 });
 
@@ -84,6 +90,10 @@ function context(overrides: Partial<KnowledgeContextRevision> = {}): KnowledgeCo
 }
 
 function renderPage() {
+  return render(createElement(App, null, createElement(KnowledgePage)));
+}
+
+function renderStatus() {
   return render(createElement(App, null, createElement(AutomationPage)));
 }
 
@@ -98,8 +108,27 @@ describe("knowledge approval", () => {
   it("shows a saved fact as an unapproved draft with an approve action", async () => {
     renderPage();
     expect(await screen.findByText("Garantía · v1")).toBeInTheDocument();
-    expect(screen.getAllByText("Borrador sin aprobar").length).toBe(2);
+    expect(screen.getAllByText("Borrador sin aprobar").length).toBe(1);
     expect(screen.queryByText("Aprobada")).not.toBeInTheDocument();
+  });
+
+  it("explains how the information reaches the AI and drops the general context form", async () => {
+    renderPage();
+    await screen.findByText("Garantía · v1");
+
+    expect(screen.getByText("Cómo usa la IA esta información")).toBeInTheDocument();
+    expect(screen.getByText(/Toma hasta 3/)).toBeInTheDocument();
+    expect(screen.queryByText("Contexto general")).toBeNull();
+    expect(screen.queryByLabelText("Contexto")).toBeNull();
+  });
+
+  it("shows an approved general context as no longer used instead of hiding it", async () => {
+    vi.mocked(getKnowledgeContexts).mockResolvedValue([context({ state: "APPROVED", approved: true })]);
+    renderPage();
+
+    expect(await screen.findByText("El contexto general dejó de usarse")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Ver el texto que tenías aprobado"));
+    expect(await screen.findByText("Somos una empresa de componentes.")).toBeInTheDocument();
   });
 
   it("approves a fact only after the confirmation word is typed", async () => {
@@ -143,42 +172,77 @@ const shadow = {
   live_enabled_by: null,
 };
 
-describe("LIVE confirmation", () => {
+describe("automatic replies status", () => {
   beforeEach(() => {
-    vi.mocked(getKnowledgeFacts).mockReset().mockResolvedValue([]);
-    vi.mocked(getKnowledgeContexts).mockReset().mockResolvedValue([]);
     vi.mocked(getAutomationConfiguration).mockReset().mockResolvedValue(shadow);
     vi.mocked(reauthenticate).mockReset().mockResolvedValue({ reauthentication_active: true });
     vi.mocked(setAutomationLive).mockReset();
+    vi.mocked(updateAutomationMode).mockReset();
   });
 
-  it("sends the typed word with the password check when enabling LIVE", async () => {
+  it("explains the three states without the internal names", async () => {
+    renderStatus();
+
+    expect(await screen.findByRole("radio", { name: /Apagadas/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Practicando/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Encendidas/ })).toBeInTheDocument();
+    expect(screen.queryByText(/SHADOW|LIVE|kill switch/)).toBeNull();
+  });
+
+  it("says why no real email goes out when the server is in simulation", async () => {
+    renderStatus();
+
+    expect(await screen.findByText("Por ahora no sale ningún correo real")).toBeInTheDocument();
+  });
+
+  it("sends the typed word with the password check when turning the replies on", async () => {
     vi.mocked(setAutomationLive).mockResolvedValue({ ...shadow, mode: "LIVE", mode_label: "Activas" });
-    renderPage();
+    renderStatus();
+    fireEvent.click(await screen.findByRole("radio", { name: /Encendidas/ }));
     fireEvent.change(await screen.findByLabelText("Contraseña actual"), { target: { value: "clave-segura" } });
-    fireEvent.click(screen.getByRole("button", { name: "Revisar y activar LIVE" }));
+    fireEvent.click(screen.getByRole("button", { name: "Revisar y encender" }));
 
     const dialog = await screen.findByRole("dialog");
+    expect(reauthenticate).not.toHaveBeenCalled();
     fireEvent.change(within(dialog).getByLabelText(/Escribí CONFIRMAR/), { target: { value: "CONFIRMAR" } });
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Activar Envío real" })).toBeEnabled());
-    fireEvent.click(within(dialog).getByRole("button", { name: "Activar Envío real" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Encender respuestas" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Encender respuestas" }));
 
     await waitFor(() => expect(reauthenticate).toHaveBeenCalledWith("clave-segura"));
     await waitFor(() => expect(setAutomationLive).toHaveBeenCalledWith("enable-live", "CONFIRMAR"));
   });
 
-  it("asks for confirmation before switching LIVE off", async () => {
+  it("needs the password before the replies can be turned on", async () => {
+    renderStatus();
+    fireEvent.click(await screen.findByRole("radio", { name: /Encendidas/ }));
+
+    expect(await screen.findByRole("button", { name: "Revisar y encender" })).toBeDisabled();
+  });
+
+  it("asks for confirmation before leaving the on state", async () => {
     vi.mocked(getAutomationConfiguration).mockResolvedValue({ ...shadow, mode: "LIVE", mode_label: "Activas" });
     vi.mocked(setAutomationLive).mockResolvedValue(shadow);
-    renderPage();
+    renderStatus();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar LIVE" }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Practicando/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambio" }));
     const dialog = await screen.findByRole("dialog");
     expect(setAutomationLive).not.toHaveBeenCalled();
     fireEvent.change(within(dialog).getByLabelText(/Escribí CONFIRMAR/), { target: { value: "CONFIRMAR" } });
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Desactivar Envío real" })).toBeEnabled());
-    fireEvent.click(within(dialog).getByRole("button", { name: "Desactivar Envío real" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Dejar de contestar" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Dejar de contestar" }));
 
     await waitFor(() => expect(setAutomationLive).toHaveBeenCalledWith("disable-live"));
+  });
+
+  it("switches between the two safe states without a confirmation", async () => {
+    vi.mocked(updateAutomationMode).mockResolvedValue({ ...shadow, mode: "OFF", mode_label: "Desactivada" });
+    renderStatus();
+
+    fireEvent.click(await screen.findByRole("radio", { name: /Apagadas/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambio" }));
+
+    await waitFor(() => expect(updateAutomationMode).toHaveBeenCalledWith("OFF"));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

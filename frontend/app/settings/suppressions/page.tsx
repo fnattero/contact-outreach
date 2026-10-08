@@ -65,7 +65,7 @@ export default function SuppressionsPage() {
     return () => { cancelled = true; };
   }, [isAdmin, page, search, reloadKey]);
 
-  if (!isAdmin) return <AuthError error={{ detail: "No tenés permisos para administrar supresiones." }} />;
+  if (!isAdmin) return <AuthError error={{ detail: "No tenés permisos para administrar los correos bloqueados." }} />;
   if (error && !rows.length && !loading) return <AuthError error={error} />;
 
   async function add(values: SuppressionForm) {
@@ -73,7 +73,7 @@ export default function SuppressionsPage() {
     setError(null);
     try {
       await createSuppression({ ...values, evidence: values.evidence ?? "" });
-      void message.success("Correo agregado a la lista de supresión.");
+      void message.success("Correo agregado a los bloqueados.");
       form.resetFields();
       setDirty(false);
       setDrawerOpen(false);
@@ -91,8 +91,8 @@ export default function SuppressionsPage() {
   return (
     <Flex vertical gap="large">
       <PageHeader
-        title="Lista de supresión"
-        description="Todo correo listado queda bloqueado globalmente. Una baja es permanente y no puede anularse."
+        title="Correos bloqueados"
+        description="Correos a los que nunca se vuelve a escribir: bajas (permanentes), rebotes y bloqueos que agregues."
         primaryAction={<Button type="primary" onClick={() => setDrawerOpen(true)}>Agregar correo</Button>}
         filters={
           <Input.Search
@@ -112,7 +112,7 @@ export default function SuppressionsPage() {
         type="warning"
         showIcon
         message="Control prioritario"
-        description="La elegibilidad consulta las supresiones al preparar, encolar y justo antes de enviar."
+        description="La app revisa esta lista al preparar cada campaña y justo antes de enviar."
       />
       <Card>
         {loading ? (
@@ -142,7 +142,7 @@ export default function SuppressionsPage() {
         ) : (
           <EmptyState
             headline="La lista está vacía"
-            explanation="No hay supresiones registradas. Las bajas y los rebotes se agregan al procesar respuestas."
+            explanation="Todavía no hay correos bloqueados. Las bajas y los rebotes se agregan solos cuando llegan las respuestas."
             actionLabel="Agregar el primer correo"
             onAction={() => setDrawerOpen(true)}
           />
@@ -158,7 +158,7 @@ export default function SuppressionsPage() {
           onValuesChange={() => setDirty(true)}
           onFinish={(values) => void add(values)}
         >
-          <FormSection title="Nuevo bloqueo" description="El correo se normaliza antes de guardarse.">
+          <FormSection defaultOpen title="Nuevo bloqueo" description="El correo se normaliza antes de guardarse.">
             <Form.Item
               name="email"
               label="Correo electrónico"

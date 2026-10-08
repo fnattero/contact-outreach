@@ -418,6 +418,10 @@ SEND_MODE = os.getenv("SEND_MODE", "dry-run")
 SEND_KILL_SWITCH = env_bool("SEND_KILL_SWITCH", True)
 AUTO_REPLY_KILL_SWITCH = env_bool("AUTO_REPLY_KILL_SWITCH", True)
 RELATIONSHIP_KILL_SWITCH = env_bool("RELATIONSHIP_KILL_SWITCH", True)
+# Real sending needs two keys: the server must allow it (SEND_MODE and the kill switch above) and an
+# administrator must then turn it on inside the app. Setting this to false lets the server alone
+# decide, which is how deployments behaved before the in-app switch existed.
+SEND_REQUIRES_APP_ENABLE = env_bool("SEND_REQUIRES_APP_ENABLE", True)
 AUTOMATIC_REPLY_CONVERSATION_DAILY_LIMIT = int(
     os.getenv("AUTOMATIC_REPLY_CONVERSATION_DAILY_LIMIT", "3")
 )
