@@ -103,3 +103,31 @@ describe("ConfigurationForm", () => {
     expect(saveIntegrationConfiguration).not.toHaveBeenCalled();
   });
 });
+
+describe("ConfigurationForm layout", () => {
+  it("opens with the AI service and keeps the rest folded as advanced options", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
+    render(createElement(App, null, createElement(ConfigurationForm)));
+
+    expect(await screen.findByRole("button", { name: "Inteligencia artificial" })).toHaveAttribute("aria-expanded", "true");
+    for (const title of ["Búsqueda y lectura de sitios", "Búsqueda en tu información", "Credenciales de Gmail"]) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(screen.getByText("Opciones avanzadas")).toBeInTheDocument();
+  });
+
+  it("asks for the service address only for the service that needs one", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config({ llm_provider: "openai-compatible" }));
+    render(createElement(App, null, createElement(ConfigurationForm)));
+
+    expect(await screen.findByLabelText("Dirección del servicio")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Dirección de Ollama")).toBeNull();
+  });
+
+  it("offers the audience-filter model next to the main one", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
+    render(createElement(App, null, createElement(ConfigurationForm)));
+
+    expect(await screen.findByLabelText("Modelo para el filtro de audiencia")).toBeInTheDocument();
+  });
+});

@@ -763,6 +763,14 @@ time {
   line-height: 18px;
 }
 
+.advanced-heading {
+  margin: 32px 0 4px;
+}
+
+.advanced-intro {
+  margin: 0 0 16px;
+}
+
 .integration-technical summary {
   cursor: pointer;
   color: var(--accent);

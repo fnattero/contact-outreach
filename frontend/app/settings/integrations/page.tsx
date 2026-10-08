@@ -25,11 +25,6 @@ function configured(value: boolean): string {
   return value ? "Configurada" : "No configurada";
 }
 
-function percent(value: string): string {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? `${Math.round(parsed * 100)}%` : "—";
-}
-
 export default function IntegrationsSettingsPage() {
   const { session } = useAuth();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
@@ -39,6 +34,17 @@ export default function IntegrationsSettingsPage() {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [technicalOpen, setTechnicalOpen] = useState(false);
   const technicalRef = useRef<HTMLDetailsElement>(null);
+  // Google sends the person back here with the result of the authorization.
+  const [gmailResult, setGmailResult] = useState<"connected" | "oauth_failed" | null>(() => {
+    if (typeof window === "undefined") return null;
+    const result = new URLSearchParams(window.location.search).get("gmail");
+    return result === "connected" || result === "oauth_failed" ? result : null;
+  });
+
+  useEffect(() => {
+    // Keep the address clean once the result has been read.
+    if (gmailResult) window.history.replaceState(null, "", window.location.pathname);
+  }, [gmailResult]);
 
   useEffect(() => {
     void Promise.all([getIntegrationStatus(), getGmailConnection()])
@@ -108,32 +114,16 @@ export default function IntegrationsSettingsPage() {
 
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Integraciones" description="Estado de las conexiones y configuración de proveedores. Las credenciales se guardan cifradas y nunca se muestran." />
+      <PageHeader title="Integraciones" description="Conectá tu cuenta de Gmail y el servicio de inteligencia artificial. Las credenciales se guardan cifradas y nunca se muestran." />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
-      <Card title="Servicios conectados">
+      {gmailResult === "connected" ? <Alert type="success" showIcon closable onClose={() => setGmailResult(null)} message="Gmail quedó conectado." /> : null}
+      {gmailResult === "oauth_failed" ? <Alert type="error" showIcon closable onClose={() => setGmailResult(null)} message="No se pudo conectar Gmail" description="Google no autorizó la conexión. Podés volver a intentarlo con “Conectar Gmail”." /> : null}
+      <Card title="Conexiones">
         <div className="integration-list">
-          <div className="integration-row">
-            <div className="integration-row__name"><strong>Búsqueda de negocios</strong><span>Encuentra los negocios de cada campaña por rubro y zona.</span></div>
-            <StatusBadge label="Disponible" level="success" />
-            <span className="integration-row__account">Configuración del backend</span>
-            {technicalAction}
-          </div>
-          <div className="integration-row">
-            <div className="integration-row__name"><strong>Lectura de sitios web</strong><span>Lee el sitio de cada negocio para encontrar su correo.</span></div>
-            <StatusBadge label="Disponible" level="success" />
-            <span className="integration-row__account">Configuración del backend</span>
-            {technicalAction}
-          </div>
           <div className="integration-row">
             <div className="integration-row__name"><strong>Inteligencia artificial</strong><span>Revisa la audiencia y propone respuestas a los correos que llegan.</span></div>
             <StatusBadge label={status.llm.configured ? "Configurado" : "No configurado"} level={status.llm.configured ? "success" : "warning"} />
-            <span className="integration-row__account">{status.llm.configured ? "Credencial del backend" : "Sin credencial disponible"}</span>
-            {technicalAction}
-          </div>
-          <div className="integration-row">
-            <div className="integration-row__name"><strong>Búsqueda en tu información</strong><span>Encuentra los datos aprobados que sirven para contestar.</span></div>
-            <StatusBadge label="Disponible" level="success" />
-            <span className="integration-row__account">Configuración del backend</span>
+            <span className="integration-row__account">{status.llm.configured ? "Clave guardada" : "Sin clave"}</span>
             {technicalAction}
           </div>
           <div className="integration-row">
@@ -161,9 +151,6 @@ export default function IntegrationsSettingsPage() {
         />
       ) : null}
       <ConfigurationForm />
-      <Card title="Confianza de búsqueda">
-        <div className="integration-confidence"><strong>{percent(status.extractor.overture_min_confidence)}</strong><span>Confianza mínima</span><p>Define el mínimo de confianza requerido para aceptar resultados de búsqueda.</p></div>
-      </Card>
       <Card title="Detalles técnicos">
         <details ref={technicalRef} open={technicalOpen} onToggle={(event) => setTechnicalOpen(event.currentTarget.open)} className="integration-technical">
           <summary>Mostrar proveedor, modelo y configuración interna</summary>
