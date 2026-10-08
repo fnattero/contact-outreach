@@ -112,7 +112,7 @@ Topbar height             52px
 Table row height          40px
 Table header height       36px
 Content max-width         1360px
-Form column max-width     640px   (a phone field must never be 1500px wide)
+Form column max-width     960px   (a phone field must never be 1500px wide; short fields share a row)
 Reading text max-width    68ch
 Minimum tap target        36px desktop, 44px touch
 ```

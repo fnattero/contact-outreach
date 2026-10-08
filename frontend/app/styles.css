@@ -305,6 +305,28 @@ time {
   white-space: nowrap;
 }
 
+.nav-group__toggle {
+  width: calc(100% - 16px);
+  min-height: 36px;
+  justify-content: space-between;
+  padding-inline: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: start;
+}
+
+.nav-group__chevron {
+  font-size: 10px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.nav-group__toggle[aria-expanded="false"] .nav-group__chevron {
+  transform: rotate(-90deg);
+}
+
 .nav-group--collapsed .nav-group__label span {
   position: absolute;
   width: 1px;
@@ -2001,6 +2023,52 @@ div.campaign-choice-group > label {
   color: var(--ink-secondary);
   font-size: 13px;
   line-height: 18px;
+}
+
+.section-tabs {
+  display: flex;
+  max-width: 100%;
+  gap: 24px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-tabs__tab {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+  transition: color var(--dur-base) var(--ease);
+}
+
+.section-tabs__tab:hover {
+  color: var(--ink);
+}
+
+.section-tabs__tab--active {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 768px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-grid__full {
+    grid-column: 1 / -1;
+  }
 }
 
 .form-section {

@@ -1,6 +1,7 @@
 export { ConfirmDangerModal, type ConfirmDangerModalProps } from "./confirm-danger-modal";
 export { DisabledReason, type DisabledReasonProps } from "./disabled-reason";
 export { FormSection, StickySaveBar, type FormSectionProps, type StickySaveBarProps } from "./forms";
+export { SectionTabs, type SectionTab, type SectionTabsProps } from "./section-tabs";
 export { PageHeader, type PageHeaderProps } from "./page-header";
 export {
   displayValueMap,
