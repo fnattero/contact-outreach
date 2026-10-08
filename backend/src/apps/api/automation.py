@@ -10,10 +10,20 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.api.auth import _reauthentication_active
-from apps.api.permissions import ManageAutomationPermission, authenticated_user
+from apps.api.errors import raise_domain_error
+from apps.api.permissions import (
+    ManageAutomationPermission,
+    ManageIntegrationsPermission,
+    authenticated_user,
+)
 from apps.api.schema import SchemaAPIView
 from apps.automation.models import ReplyAutomationConfiguration
 from apps.automation.services import set_live_mode, set_non_live_mode
+from apps.configuration.send_mode import (
+    disable_live_sending,
+    enable_live_sending,
+    send_mode_state,
+)
 from apps.configuration.services import runtime_prompt_configuration, save_automatic_reply_prompt
 
 
@@ -37,9 +47,7 @@ class LiveConfirmationSerializer(serializers.Serializer[dict[str, object]]):
 
     def validate_confirmation(self, value: str) -> str:
         if value != LIVE_CONFIRMATION_WORD:
-            raise serializers.ValidationError(
-                f"Escribí {LIVE_CONFIRMATION_WORD} para activar las respuestas automáticas."
-            )
+            raise serializers.ValidationError(f"Escribí {LIVE_CONFIRMATION_WORD} para confirmar.")
         return value
 
 
@@ -152,3 +160,44 @@ class WritingInstructionsView(SchemaAPIView):
         except (PermissionDenied, ValidationError) as exc:
             raise serializers.ValidationError(str(exc)) from exc
         return Response({"data": {"automatic_reply_prompt": saved.automatic_reply_prompt}})
+
+
+def _send_mode_data() -> dict[str, object]:
+    state = send_mode_state()
+    return {
+        "server_allows_live": state.server_allows_live,
+        "app_enabled": state.app_enabled,
+        "effective_live": state.effective_live,
+        "enabled_by": state.enabled_by,
+    }
+
+
+class SendModeView(SchemaAPIView):
+    """Whether real email may leave the app. Reading it is part of operating the app."""
+
+    permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
+
+    def get(self, request: Request) -> Response:
+        return Response({"data": _send_mode_data()})
+
+
+class SendModeActionView(SchemaAPIView):
+    permission_classes = (IsAuthenticated, ManageIntegrationsPermission)
+
+    def post(self, request: Request, action: str) -> Response:
+        actor = authenticated_user(request)
+        if action not in {"enable-live", "disable-live"}:
+            raise serializers.ValidationError({"action": "La acción no existe."})
+        try:
+            if action == "enable-live":
+                if not _reauthentication_active(request):
+                    raise ApiPermissionDenied(
+                        "Volvé a ingresar tu contraseña antes de activar los envíos reales."
+                    )
+                LiveConfirmationSerializer(data=request.data).is_valid(raise_exception=True)
+                enable_live_sending(actor=actor, reauthenticated=True)
+            else:
+                disable_live_sending(actor=actor)
+        except (PermissionDenied, ValidationError) as exc:
+            raise_domain_error(exc)
+        return Response({"data": _send_mode_data()}, status=status.HTTP_200_OK)

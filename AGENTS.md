@@ -41,7 +41,7 @@ Use timezone-aware datetimes. Store timestamps in UTC and use `America/Argentina
 - Never let the AI draft or edit outreach body copy. A campaign's initial message and reminder are fixed, human-approved text, identical for the whole audience, with no per-recipient variables. The AI may analyse persisted inbound replies and draft scheduled communications to existing Contacts; it may not write a first contact.
 - Never let the AI choose who receives a first contact. The audience comes from deterministic rubro and zone rules plus eligibility. The audience filter is **veto-only**: it may remove a discovered prospect that does not match the operator's written criteria, and it may never add, promote, rank or reinstate one. Only a person reinstates a removed prospect, that decision is durable, and a person still approves the campaign before anything is sent. A provider error, a timeout or an invalid output keeps the prospect.
 - Never invent prospect facts, products, people, or claims in generated copy.
-- Never call Gmail send/reply unless effective `SEND_MODE=live`, the relevant independent kill switch is disabled, and the durable campaign/reply/contact policy permits live delivery.
+- Never call Gmail send/reply unless effective `SEND_MODE=live`, the relevant independent kill switch is disabled, an administrator has turned real sending on inside the app (unless the deployment sets `SEND_REQUIRES_APP_ENABLE=false`), and the durable campaign/reply/contact policy permits live delivery.
 - Never log credentials, OAuth tokens, API keys, or unredacted sensitive payloads.
 - Never bypass Gmail quotas, limits, or anti-abuse controls.
 - Never make live HTTP, DNS, Gmail, Overture dataset, or LLM calls from automated tests.

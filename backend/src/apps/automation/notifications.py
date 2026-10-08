@@ -15,6 +15,7 @@ from apps.audit.services import record_event
 from apps.automation.models import HumanTask, NotificationDelivery
 from apps.compliance.services import normalize_email
 from apps.configuration.integrations import redact_provider_error
+from apps.configuration.send_mode import live_sending_allowed
 from apps.integrations.contracts import (
     AmbiguousProviderError,
     AuthenticationError,
@@ -128,7 +129,7 @@ def _notification_preflight_error(
     expected_url = _task_url(delivery.task)
     if not expected_url or delivery.secure_url != expected_url:
         return "El enlace seguro del aviso no está disponible."
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         return "El envío en vivo está desactivado por la configuración general."
     if connection is None or not connection.is_ready:
         return "Gmail no está conectado y probado."

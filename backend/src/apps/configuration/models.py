@@ -248,6 +248,40 @@ class PromptConfiguration(TimestampedUUIDModel):
         super().save(*args, **kwargs)
 
 
+class SendModeSetting(TimestampedUUIDModel):
+    """The administrator's own switch for real sending: the app's key next to the server's."""
+
+    workspace = models.OneToOneField(
+        "accounts.Workspace",
+        on_delete=models.PROTECT,
+        related_name="send_mode_setting",
+    )
+    live_enabled = models.BooleanField(default=False)
+    live_enabled_at = models.DateTimeField(blank=True, null=True)
+    live_enabled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="enabled_real_sending",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        live_enabled=True,
+                        live_enabled_at__isnull=False,
+                        live_enabled_by__isnull=False,
+                    )
+                    | Q(live_enabled=False)
+                ),
+                name="send_mode_live_activation_recorded",
+            )
+        ]
+
+
 class WorkspaceMessageTemplateRevision(TimestampedUUIDModel):
     """An approved, placeholder-free workspace default for deterministic outreach."""
 

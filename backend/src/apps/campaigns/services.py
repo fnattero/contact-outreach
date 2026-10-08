@@ -31,6 +31,7 @@ from apps.configuration.models import (
     SearchCategoryRule,
     SearchZone,
 )
+from apps.configuration.send_mode import live_sending_allowed
 from apps.configuration.services import (
     profile_snapshot,
     runtime_prompt_configuration,
@@ -522,7 +523,7 @@ def _preflight(
                 "La copia local de datos de Overture fijada ya no está disponible."
             )
     if campaign.delivery_mode == Campaign.DeliveryMode.LIVE:
-        if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+        if not live_sending_allowed():
             raise ValidationError(
                 "El envío en vivo está bloqueado por los controles generales de seguridad."
             )

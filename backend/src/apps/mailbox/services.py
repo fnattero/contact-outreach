@@ -16,6 +16,7 @@ from django.utils import timezone
 from apps.accounts.permissions import Capability, require_user_capability
 from apps.audit.services import record_event
 from apps.configuration.integrations import runtime_integration_configuration
+from apps.configuration.send_mode import live_sending_allowed
 from apps.integrations.contracts import GmailProvider, GmailSendRequest, ProviderError
 from apps.integrations.factory import get_gmail_provider
 from apps.integrations.gmail import GMAIL_SCOPES
@@ -114,7 +115,7 @@ def provider_for_connection(
 @transaction.atomic
 def test_gmail_connection(*, owner: User) -> GmailConnection:
     membership = require_user_capability(owner, Capability.MANAGE_INTEGRATIONS)
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         raise ValidationError(
             "La configuración global de envío o el bloqueo general impiden la prueba de Gmail."
         )

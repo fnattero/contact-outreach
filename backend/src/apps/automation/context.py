@@ -20,7 +20,6 @@ from apps.automation.models import (
 )
 from apps.automation.retrieval import (
     MAX_RAG_FACTS,
-    current_global_context_revision,
     retrieve_relevant_fact_revisions,
 )
 from apps.campaigns.models import OutboundMessage
@@ -300,18 +299,15 @@ def _memory_blocks(
 
 
 def _global_context_blocks(workspace_id: uuid.UUID | str) -> list[ReplyContextBlock]:
-    revision = current_global_context_revision(workspace_id)
-    if revision is None:
-        return []
-    return [
-        _message_block(
-            source_id=revision.pk,
-            role="WORKSPACE",
-            provenance="GLOBAL_APPROVED_CONTEXT",
-            text=revision.context_text,
-            mandatory=True,
-        )
-    ]
+    """Approved general context is no longer sent to the model (A-064).
+
+    It only oriented tone and scope and could not be quoted, which the writing instructions already
+    cover; what a reply may assert comes from the approved facts alone. Existing revisions stay
+    readable but are not used.
+    """
+
+    del workspace_id
+    return []
 
 
 def reply_candidate_refs(inbound: InboundMessage) -> tuple[EmailCandidateRef, ...]:

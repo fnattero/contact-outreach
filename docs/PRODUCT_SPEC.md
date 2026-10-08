@@ -218,8 +218,9 @@ muestra: “Se pasó al próximo día permitido para evitar correos duplicados.�
 adicional entre campañas y una dirección sin respuesta puede participar en una campaña posterior.
 Las respuestas y comunicaciones de Contactos no usan esta reserva de campaña.
 
-Ningún efecto live ocurre salvo `SEND_MODE=live`, kill switch de envío desactivado, campaña
-autorizada, cuotas/horario válidos y Gmail conectado. Una ambigüedad se reconcilia por Message-ID;
+Ningún efecto live ocurre salvo `SEND_MODE=live`, kill switch de envío desactivado, envío real
+encendido por un admin dentro de la app (Resumen, con contraseña y palabra de confirmación; el servidor
+sigue siendo el techo), campaña autorizada, cuotas/horario válidos y Gmail conectado. Una ambigüedad se reconcilia por Message-ID;
 nunca se reenvía a ciegas.
 
 ### FR-09 Un recordatorio sin respuesta

@@ -29,6 +29,8 @@ from apps.api.auth import (
 from apps.api.automation import (
     AutomationConfigurationView,
     AutomationLiveActionView,
+    SendModeActionView,
+    SendModeView,
     WritingInstructionsView,
 )
 from apps.api.campaigns import (
@@ -160,6 +162,12 @@ urlpatterns = [
         "automation/actions/<str:action>/",
         AutomationLiveActionView.as_view(),
         name="api-automation-action",
+    ),
+    path("send-mode/", SendModeView.as_view(), name="api-send-mode"),
+    path(
+        "send-mode/actions/<str:action>/",
+        SendModeActionView.as_view(),
+        name="api-send-mode-action",
     ),
     path("knowledge/facts/", KnowledgeFactListView.as_view(), name="api-knowledge-facts"),
     path(

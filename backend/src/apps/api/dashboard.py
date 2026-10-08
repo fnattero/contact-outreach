@@ -19,6 +19,7 @@ from apps.automation.models import HumanTask
 from apps.campaigns.models import Campaign, OutboundMessage
 from apps.catalogs.models import Catalog
 from apps.configuration.models import BusinessProfile, SearchCategory, SearchZone
+from apps.configuration.send_mode import send_mode_state
 from apps.dashboard.metrics import SummaryMetrics, workspace_summary_metrics
 from apps.mailbox.models import GmailConnection, InboundMessage
 from apps.prospects.models import Prospect
@@ -71,6 +72,7 @@ class DashboardSummaryView(SchemaAPIView):
     permission_classes = (IsAuthenticated, ViewSummaryPermission)
 
     def get(self, request: Request) -> Response:
+        send_state = send_mode_state()
         query = DashboardQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         user = authenticated_user(request)
@@ -120,6 +122,9 @@ class DashboardSummaryView(SchemaAPIView):
             "safety": {
                 "send_mode": settings.SEND_MODE,
                 "send_kill_switch": settings.SEND_KILL_SWITCH,
+                "send_server_allows_live": send_state.server_allows_live,
+                "send_app_enabled": send_state.app_enabled,
+                "send_effective_live": send_state.effective_live,
                 "auto_reply_kill_switch": settings.AUTO_REPLY_KILL_SWITCH,
                 "relationship_kill_switch": settings.RELATIONSHIP_KILL_SWITCH,
             },

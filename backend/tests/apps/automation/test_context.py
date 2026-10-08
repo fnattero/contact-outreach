@@ -308,7 +308,7 @@ def test_reply_context_for_direct_inbound_uses_contact_profile(owner: User) -> N
 
 
 @pytest.mark.django_db
-def test_reply_context_includes_approved_global_context(owner: User) -> None:
+def test_reply_context_no_longer_carries_the_approved_general_context(owner: User) -> None:
     inbound, _, _ = _reply_context_fixture(owner)
     assert inbound.contact is not None
     revision = create_global_knowledge_context_revision(
@@ -327,11 +327,10 @@ def test_reply_context_includes_approved_global_context(owner: User) -> None:
         embedding_provider=LowSimilarityEmbeddingProvider(),
     )
 
-    global_blocks = [
-        block for block in context.blocks if block.provenance == "GLOBAL_APPROVED_CONTEXT"
-    ]
-    assert len(global_blocks) == 1
-    assert global_blocks[0].mandatory is True
+    # What a reply may assert comes from approved facts; the general context stays readable but is
+    # not sent to the model.
+    assert not [block for block in context.blocks if block.provenance == "GLOBAL_APPROVED_CONTEXT"]
+    assert "empresa de componentes" not in str(context.blocks)
     assert "empresa de componentes" not in str(context.manifest)
 
 

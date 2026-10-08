@@ -12,6 +12,9 @@ SEND_MODE = "dry-run"
 SEND_KILL_SWITCH = True
 AUTO_REPLY_KILL_SWITCH = True
 RELATIONSHIP_KILL_SWITCH = True
+# Existing delivery tests choose live with the server settings alone; the in-app switch has its own
+# tests that turn this on.
+SEND_REQUIRES_APP_ENABLE = False
 WEBSITE_FETCHER = "fake"
 CONTACT_EMAIL_MX_RESOLVER = "mock"
 LLM_PROVIDER = "fake"

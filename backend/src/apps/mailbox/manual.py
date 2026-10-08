@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from email.utils import parseaddr
 from functools import partial
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -20,6 +19,7 @@ from apps.campaigns.models import Campaign, OutboundMessage
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
 from apps.configuration.integrations import redact_provider_error
+from apps.configuration.send_mode import live_sending_allowed
 from apps.contacts.models import CommunicationRestriction, Contact, EmailAddress, Organization
 from apps.integrations.contracts import (
     AmbiguousProviderError,
@@ -193,7 +193,7 @@ def _validate_authorization(
         raise ValidationError(
             "No se puede responder manualmente a un rebote o respuesta automática."
         )
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         raise ValidationError(
             "La configuración global de envío o el bloqueo general impiden la respuesta manual."
         )
@@ -439,7 +439,7 @@ def _effect_eligibility_error(
     message: OutboundMessage,
     connection: GmailConnection | None,
 ) -> str:
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         return "La configuración global de envío o el bloqueo general impiden la respuesta manual."
     campaign = message.campaign
     if message.delivery_mode != Campaign.DeliveryMode.LIVE or (

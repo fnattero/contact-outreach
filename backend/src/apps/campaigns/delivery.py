@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -26,6 +25,7 @@ from apps.catalogs.services import verify_catalog
 from apps.compliance.models import ContactLedger
 from apps.compliance.services import lock_email_eligibility
 from apps.configuration.integrations import redact_provider_error
+from apps.configuration.send_mode import live_sending_allowed
 from apps.contacts.models import CampaignEnrollment
 from apps.contacts.services import outbound_eligibility_error
 from apps.integrations.contracts import (
@@ -673,7 +673,7 @@ def _prepare_live_effect(message_id: uuid.UUID | str, now: datetime) -> SendEffe
         message.save(update_fields=("state", "updated_at"))
     if message.next_attempt_at and message.next_attempt_at > now:
         return None
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         _pause_campaign(
             campaign.pk,
             "La configuración global de envío o el bloqueo general impidieron la entrega en vivo.",
@@ -1103,8 +1103,7 @@ def _execute_external_effect(
         and campaign.delivery_mode == Campaign.DeliveryMode.LIVE
         and message.approved_at is not None
         and message.approved_by_id is not None
-        and settings.SEND_MODE == "live"
-        and not settings.SEND_KILL_SWITCH
+        and live_sending_allowed()
         and connection_ready
     ):
         if provider is None:

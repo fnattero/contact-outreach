@@ -42,7 +42,8 @@ from apps.catalogs.services import verify_catalog
 from apps.compliance.models import SuppressionEntry
 from apps.compliance.services import lock_email_eligibility, normalize_email
 from apps.configuration.integrations import redact_provider_error
-from apps.configuration.models import IntegrationConfiguration
+from apps.configuration.models import BusinessProfile, IntegrationConfiguration
+from apps.configuration.send_mode import live_sending_allowed
 from apps.configuration.services import runtime_prompt_configuration
 from apps.contacts.models import CommunicationRestriction, Contact, Conversation, EmailAddress
 from apps.integrations.contracts import (
@@ -304,7 +305,7 @@ def _decision_policy_error(
     allowed_outbound_ids: tuple[uuid.UUID, ...] = (),
 ) -> str:
     inbound = decision.inbound
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         return "El envío en vivo está desactivado por la configuración general."
     if settings.AUTO_REPLY_KILL_SWITCH:
         return "El bloqueo independiente de respuestas automáticas está activado."
@@ -612,6 +613,13 @@ def _reply_thread_fields(decision: ReplyDecision) -> tuple[str, tuple[str, ...],
     return in_reply_to, references, inbound.gmail_thread_id
 
 
+def _reply_signature(workspace_id: uuid.UUID | str) -> str:
+    """The company signature the system (never the model) puts at the end of an automatic reply."""
+
+    profile = BusinessProfile.objects.filter(workspace_id=workspace_id).first()
+    return profile.signature.strip() if profile is not None else ""
+
+
 def _base_outbound_values(
     decision: ReplyDecision,
     *,
@@ -792,6 +800,7 @@ def authorize_reply_decision(decision_id: uuid.UUID | str) -> OutboundMessage | 
         )
         values.update(
             {
+                "signature_snapshot": _reply_signature(decision.workspace_id),
                 "conversation": decision.conversation,
                 "in_reply_to": in_reply_to,
                 "references": list(references),
@@ -1101,7 +1110,7 @@ def _automatic_outbound_integrity_error(
         if (
             message.subject != (root.subject if root is not None else decision.inbound.subject)
             or message.body_text != _proposed_reply_body(decision)
-            or message.signature_snapshot
+            or message.signature_snapshot != _reply_signature(decision.workspace_id)
             or message.content_hash
         ):
             return "Cambió el contenido de la respuesta automática autorizada."
@@ -1367,7 +1376,7 @@ def _attachment_payloads(message: OutboundMessage) -> tuple[PdfAttachment, ...]:
 
 
 def _scheduled_message_error(message: OutboundMessage) -> str:
-    if settings.SEND_MODE != "live" or settings.SEND_KILL_SWITCH:
+    if not live_sending_allowed():
         return "El envío en vivo está desactivado por la configuración general."
     if settings.RELATIONSHIP_KILL_SWITCH:
         return "El bloqueo independiente de contactos programados está activado."
@@ -1533,6 +1542,8 @@ def _build_effect(message: OutboundMessage, connection: GmailConnection) -> Outb
             raise ValidationError("El contenido programado cambió después de su autorización.")
         if message.signature_snapshot.strip():
             body_text = f"{message.body_text.strip()}\n\n{message.signature_snapshot.strip()}"
+    if message.kind == OutboundMessage.Kind.AUTOMATIC_REPLY and message.signature_snapshot.strip():
+        body_text = f"{message.body_text.strip()}\n\n{message.signature_snapshot.strip()}"
     if message.kind in REPLY_KINDS:
         built = build_reply_message(
             sender=connection.email,
