@@ -157,6 +157,7 @@ export default function RelevanceSettingsPage() {
       >
         <div className="form-column">
           <FormSection
+            defaultOpen
             title="¿Cuándo descartar un negocio?"
             description="El filtro sólo puede descartar. Nunca agrega un negocio que la búsqueda no encontró, y vos seguís aprobando la campaña antes de que salga cualquier mensaje."
           >
@@ -177,6 +178,7 @@ export default function RelevanceSettingsPage() {
             </p>
           </FormSection>
           <FormSection
+            defaultOpen
             title="¿Qué negocios te sirven?"
             description="Acá afinás cómo se juzga cada negocio. Arriba elegís qué pasa con los dudosos."
           >

@@ -112,6 +112,7 @@ export default function ProfileSettingsPage() {
       >
         <div className="form-column">
           <FormSection
+            defaultOpen
             title="Tu empresa"
             description="Los tres primeros datos identifican quién envía y son obligatorios para lanzar campañas. No se agregan solos al correo: si querés que aparezcan, escribilos en la firma."
           >

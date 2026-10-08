@@ -96,7 +96,7 @@ export default function UsersSettingsPage() {
       <Drawer title="Crear usuario" open={drawerOpen} onClose={closeCreate} width={520}>
         <p className="drawer-explanation">La persona recibirá un enlace único para activar su cuenta. El enlace vence según la política del espacio.</p>
         <Form form={form} layout="vertical" validateTrigger="onBlur" onValuesChange={() => setCreateDirty(true)} onFinish={(values) => void submit(values)}>
-          <FormSection title="Datos de acceso" description="Definí la identidad, el correo y el rol inicial.">
+          <FormSection defaultOpen title="Datos de acceso" description="Definí la identidad, el correo y el rol inicial.">
             <Form.Item label="Usuario" name="username" rules={[{ required: true, message: "Indicá un usuario." }]}><Input autoComplete="off" /></Form.Item>
             <Form.Item label="Email" name="email" rules={[{ required: true, type: "email", message: "Indicá un email válido." }]}><Input type="email" autoComplete="email" /></Form.Item>
             <Form.Item label="Rol" name="role" initialValue="VENDEDOR" extra="El rol define qué puede consultar y modificar." rules={[{ required: true }]}><Select options={[{ value: "VENDEDOR", label: "Vendedor/a" }, { value: "ADMIN", label: "Administrador/a" }]} /></Form.Item>

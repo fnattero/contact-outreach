@@ -289,6 +289,10 @@ time {
   margin-top: 16px;
 }
 
+.nav-group:first-child .nav-group__label {
+  border-top: 0;
+}
+
 .nav-group__label {
   display: flex;
   align-items: center;
@@ -2278,11 +2282,50 @@ div.campaign-choice-group > label {
 }
 
 .form-section {
+  --section-tone: var(--ink-muted);
+  --section-tone-bg: var(--surface-sunken);
   margin: 0;
   padding: 16px 24px;
   border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--section-tone);
   border-radius: var(--r-md);
   background: var(--surface);
+}
+
+.form-section--accent {
+  --section-tone: var(--accent);
+  --section-tone-bg: var(--accent-quiet);
+}
+
+.form-section--success {
+  --section-tone: var(--success);
+  --section-tone-bg: var(--success-bg);
+}
+
+.form-section--warning {
+  --section-tone: var(--warning);
+  --section-tone-bg: var(--warning-bg);
+}
+
+.form-section__icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md);
+  background: var(--section-tone-bg);
+  color: var(--section-tone);
+  font-size: 16px;
+}
+
+.form-section__title {
+  flex: 1;
+}
+
+.form-section__toggle:hover .form-section__title {
+  color: var(--accent);
 }
 
 .form-section + .form-section {
@@ -2322,8 +2365,12 @@ div.campaign-choice-group > label {
   padding-top: 8px;
 }
 
+.form-section__description--indented {
+  padding-inline-start: 44px;
+}
+
 .form-section__description {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   color: var(--ink-secondary);
   font-size: 13px;
   line-height: 18px;

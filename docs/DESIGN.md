@@ -38,6 +38,7 @@ Rules:
 - These are the only colors in the application. No tints, no opacity variants, no gradients anywhere.
 - Semantic colors are **never** the only signal. Every status needs an icon or a word alongside the color.
 - `--accent` is for interactive and navigational elements only. It is never decorative and never a background fill for a large area.
+- One decorative exception: a `FormSection` may carry a `tone` (`accent`, `warning` or `success`) that colors its icon tile and left stripe with the matching `-bg` token, so folded sections of a long settings screen are easy to tell apart. The tone groups sections by topic and says nothing about state; the title is always the signal. Form sections start folded unless the page's only job is that form.
 - Do not use green for "blocked," "paused," or "stopped," even when stopped is the safe state. Use `--inactive` for stopped, `--success` only for "working correctly."
 
 ### Typography

@@ -120,6 +120,7 @@ export default function WritingPage() {
       </Card>
       <div className="form-column">
         <FormSection
+          defaultOpen
           title="Instrucciones de escritura"
           description="Reglas para redactar respuestas cuando la política permite una propuesta automática."
         >

@@ -105,21 +105,35 @@ describe("ConfigurationForm", () => {
 });
 
 describe("ConfigurationForm layout", () => {
-  it("lists every integration by purpose in one place, with no separate advanced block", async () => {
+  it("lists every integration by purpose, folded, with a separate model for replies and for the audience", async () => {
     vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
     render(createElement(App, null, createElement(ConfigurationForm)));
 
-    await screen.findByRole("button", { name: "IA: revisar la audiencia y proponer respuestas" });
+    await screen.findByRole("button", { name: "IA: contestar correos" });
     for (const title of [
       "Gmail: enviar y recibir correos",
-      "IA: revisar la audiencia y proponer respuestas",
+      "IA: conexión",
+      "IA: contestar correos",
+      "IA: revisar la audiencia",
       "Búsqueda de negocios",
       "Lectura de sitios web",
       "Búsqueda en tu información",
     ]) {
-      expect(screen.getByRole("button", { name: title })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute("aria-expanded", "false");
     }
     expect(screen.queryByText("Opciones avanzadas")).toBeNull();
+    const replies = screen.getByLabelText("Modelo para las respuestas");
+    const audience = screen.getByLabelText("Modelo para revisar la audiencia");
+    expect(replies.closest("section")).not.toBe(audience.closest("section"));
+  });
+
+  it("unfolds a section when its title is clicked", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
+    render(createElement(App, null, createElement(ConfigurationForm)));
+
+    fireEvent.click(await screen.findByRole("button", { name: "IA: conexión" }));
+
+    expect(screen.getByRole("button", { name: "IA: conexión" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("shows the save bar only after something changed", async () => {

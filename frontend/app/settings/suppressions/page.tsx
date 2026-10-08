@@ -158,7 +158,7 @@ export default function SuppressionsPage() {
           onValuesChange={() => setDirty(true)}
           onFinish={(values) => void add(values)}
         >
-          <FormSection title="Nuevo bloqueo" description="El correo se normaliza antes de guardarse.">
+          <FormSection defaultOpen title="Nuevo bloqueo" description="El correo se normaliza antes de guardarse.">
             <Form.Item
               name="email"
               label="Correo electrónico"
