@@ -77,8 +77,8 @@ describe("ConfigurationForm", () => {
 
   it("asks for the password and confirms it before saving", async () => {
     render(createElement(App, null, createElement(ConfigurationForm)));
-    fireEvent.change(await screen.findByLabelText("Modelo", { selector: "#llm_model" }), { target: { value: "otro" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    fireEvent.change(await screen.findByLabelText("Modelo para las respuestas", { selector: "#llm_model" }), { target: { value: "otro" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(saveIntegrationConfiguration).not.toHaveBeenCalled();
@@ -93,8 +93,8 @@ describe("ConfigurationForm", () => {
   it("does not save when the password is wrong", async () => {
     vi.mocked(reauthenticate).mockRejectedValue({ status: 401, detail: "La contraseña no es válida." });
     render(createElement(App, null, createElement(ConfigurationForm)));
-    fireEvent.change(await screen.findByLabelText("Modelo", { selector: "#llm_model" }), { target: { value: "otro" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    fireEvent.change(await screen.findByLabelText("Modelo para las respuestas", { selector: "#llm_model" }), { target: { value: "otro" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Contraseña actual"), { target: { value: "mala" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Confirmar y guardar/ }));
@@ -105,15 +105,32 @@ describe("ConfigurationForm", () => {
 });
 
 describe("ConfigurationForm layout", () => {
-  it("opens with the AI service and keeps the rest folded as advanced options", async () => {
+  it("lists every integration by purpose in one place, with no separate advanced block", async () => {
     vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
     render(createElement(App, null, createElement(ConfigurationForm)));
 
-    expect(await screen.findByRole("button", { name: "Inteligencia artificial" })).toHaveAttribute("aria-expanded", "true");
-    for (const title of ["Búsqueda y lectura de sitios", "Búsqueda en tu información", "Credenciales de Gmail"]) {
-      expect(screen.getByRole("button", { name: title })).toHaveAttribute("aria-expanded", "false");
+    await screen.findByRole("button", { name: "IA: revisar la audiencia y proponer respuestas" });
+    for (const title of [
+      "Gmail: enviar y recibir correos",
+      "IA: revisar la audiencia y proponer respuestas",
+      "Búsqueda de negocios",
+      "Lectura de sitios web",
+      "Búsqueda en tu información",
+    ]) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute("aria-expanded", "true");
     }
-    expect(screen.getByText("Opciones avanzadas")).toBeInTheDocument();
+    expect(screen.queryByText("Opciones avanzadas")).toBeNull();
+  });
+
+  it("shows the save bar only after something changed", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
+    render(createElement(App, null, createElement(ConfigurationForm)));
+    const model = await screen.findByLabelText("Modelo para las respuestas");
+    expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).toBeNull();
+
+    fireEvent.change(model, { target: { value: "otro" } });
+
+    expect(await screen.findByRole("region", { name: "Cambios sin guardar" })).toBeInTheDocument();
   });
 
   it("asks for the service address only for the service that needs one", async () => {
@@ -124,10 +141,10 @@ describe("ConfigurationForm layout", () => {
     expect(screen.queryByLabelText("Dirección de Ollama")).toBeNull();
   });
 
-  it("offers the audience-filter model next to the main one", async () => {
+  it("offers the audience-review model next to the reply one", async () => {
     vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
     render(createElement(App, null, createElement(ConfigurationForm)));
 
-    expect(await screen.findByLabelText("Modelo para el filtro de audiencia")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Modelo para revisar la audiencia")).toBeInTheDocument();
   });
 });

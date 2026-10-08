@@ -122,7 +122,7 @@ export default function IntegrationsSettingsPage() {
       <Card title="Conexiones">
         <div className="integration-list">
           <div className="integration-row">
-            <div className="integration-row__name"><strong>Inteligencia artificial</strong><span>Revisa la audiencia y propone respuestas a los correos que llegan.</span></div>
+            <div className="integration-row__name"><strong>IA</strong><span>Revisa la audiencia y propone respuestas a los correos que llegan.</span></div>
             <StatusBadge label={status.llm.configured ? "Configurado" : "No configurado"} level={status.llm.configured ? "success" : "warning"} />
             <span className="integration-row__account">{status.llm.configured ? "Clave guardada" : "Sin clave"}</span>
             {technicalAction}

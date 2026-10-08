@@ -185,9 +185,9 @@ export default function AutomationPage() {
                 <p className="integration-muted">Estos controles los revisa el servidor antes de cada envío. Esta pantalla no los modifica.</p>
                 {safety ? (
                   <div className="automation-safety-grid">
-                    <div><span className="type-micro">Envíos</span><StatusBadge label={safety.send_kill_switch ? "Protegidos" : "Habilitados"} level={safety.send_kill_switch ? "success" : "danger"} /><p>{safety.send_kill_switch ? "El bloqueo impide cualquier envío." : "El bloqueo permite envíos si las demás condiciones se cumplen."}</p></div>
+                    <div><span className="type-micro">Envíos</span><StatusBadge label={safety.send_kill_switch ? "Bloqueados" : "Habilitados"} level={safety.send_kill_switch ? "warning" : "danger"} /><p>{safety.send_kill_switch ? "El bloqueo impide cualquier envío." : "El bloqueo permite envíos si las demás condiciones se cumplen."}</p></div>
                     <div><span className="type-micro">Respuestas automáticas</span><StatusBadge label={safety.auto_reply_kill_switch ? "Detenidas" : "Habilitadas"} level={safety.auto_reply_kill_switch ? "inactive" : "warning"} /><p>{safety.auto_reply_kill_switch ? "No se preparan ni se envían respuestas automáticas." : "Se pueden preparar según la configuración vigente."}</p></div>
-                    <div><span className="type-micro">Relaciones</span><StatusBadge label={safety.relationship_kill_switch ? "Protegidas" : "Habilitadas"} level={safety.relationship_kill_switch ? "success" : "warning"} /><p>{safety.relationship_kill_switch ? "Los mensajes programados a contactos están bloqueados." : "Los mensajes programados siguen las políticas vigentes."}</p></div>
+                    <div><span className="type-micro">Relaciones</span><StatusBadge label={safety.relationship_kill_switch ? "Bloqueadas" : "Habilitadas"} level={safety.relationship_kill_switch ? "inactive" : "warning"} /><p>{safety.relationship_kill_switch ? "Los mensajes programados a contactos están bloqueados." : "Los mensajes programados siguen las políticas vigentes."}</p></div>
                   </div>
                 ) : null}
                 <Flex gap="small" wrap>

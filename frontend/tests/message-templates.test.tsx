@@ -59,6 +59,15 @@ describe("campaign messages page", () => {
     expect(screen.queryByText(/revisi[oó]n/i)).toBeNull();
   });
 
+  it("links each message to where it is used, and the signature to the profile", async () => {
+    render(createElement(App, null, createElement(MessageTemplatesPage)));
+    await screen.findByText("Hola, te escribimos por los carbones.");
+
+    expect(screen.getByRole("link", { name: "Crear una campaña" })).toHaveAttribute("href", "/campaigns/new");
+    expect(screen.getByRole("link", { name: "Ver campañas" })).toHaveAttribute("href", "/campaigns");
+    expect(screen.getByRole("link", { name: "perfil comercial" })).toHaveAttribute("href", "/settings/profile");
+  });
+
   it("edits a message starting from its current text and saves it as the new one", async () => {
     vi.mocked(createMessageTemplate).mockResolvedValue(
       template({ id: "t-2", revision: 3, body: "Texto nuevo." }),

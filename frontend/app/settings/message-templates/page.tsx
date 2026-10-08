@@ -1,6 +1,7 @@
 "use client";
 
 import { Alert, Button, Card, Collapse, Drawer, Flex, Form, Input, Modal } from "antd";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { StickySaveBar } from "@/components/design-system/forms";
@@ -21,24 +22,33 @@ type Feedback =
   | { state: "idle" | "saving"; message?: string }
   | { state: "saved" | "error"; message: string };
 
-const KINDS: ReadonlyArray<{ kind: Kind; title: string; when: string; hasSubject: boolean }> = [
+const KINDS: ReadonlyArray<{ kind: Kind; title: string; when: string; hasSubject: boolean; where: string; href: string; linkLabel: string }> = [
   {
     kind: "INITIAL",
     title: "Propuesta inicial",
     when: "El primer correo que recibe cada negocio de la campaña.",
     hasSubject: true,
+    where: "Se elige al crear cada campaña.",
+    href: "/campaigns/new",
+    linkLabel: "Crear una campaña",
   },
   {
     kind: "REMINDER",
     title: "Recordatorio",
     when: "Se envía una sola vez, en el mismo hilo, si el negocio no respondió. Usa el asunto de la propuesta.",
     hasSubject: false,
+    where: "Se activa en cada campaña, con los días de espera que elijas.",
+    href: "/campaigns",
+    linkLabel: "Ver campañas",
   },
   {
     kind: "REFERRED_PROPOSAL",
     title: "Propuesta reenviada",
     when: "Se usa cuando alguien te pide que le escribas a otra persona: la propuesta va a esa nueva dirección.",
     hasSubject: true,
+    where: "No se elige en las campañas: se usa al derivar la propuesta, desde los correos recibidos.",
+    href: "/responses",
+    linkLabel: "Ver correos recibidos",
   },
 ];
 
@@ -129,6 +139,9 @@ export default function MessageTemplatesPage() {
               extra={<Button onClick={() => startEditing(item.kind)}>{current ? "Editar" : "Escribir"}</Button>}
             >
               <p className="muted">{item.when}</p>
+              <p className="muted">
+                {item.where} <Link href={item.href}>{item.linkLabel}</Link>
+              </p>
               {current ? (
                 <div className="message-preview">
                   {item.hasSubject ? (
@@ -145,7 +158,9 @@ export default function MessageTemplatesPage() {
           );
         })}
       </div>
-      <p className="muted">La firma se agrega sola al final de cada mensaje, desde el perfil comercial.</p>
+      <p className="muted">
+        La firma se agrega sola al final de cada mensaje. Se escribe en el <Link href="/settings/profile">perfil comercial</Link>.
+      </p>
       {previous.length ? (
         <Collapse
           items={[
