@@ -156,6 +156,7 @@ def test_seller_is_refused_every_effect_bearing_action(seller_world: dict[str, o
         ("post", reverse("api-suppressions")),
         ("post", reverse("api-prospect-restore", args=(ABSENT,))),
         ("post", reverse("api-send-mode-action", args=("enable-live",))),
+        ("delete", reverse("api-user-detail", args=(1,))),
     )
     for method, url in forbidden:
         assert _send(seller_world, method, url).status_code == 403, f"{method.upper()} {url}"

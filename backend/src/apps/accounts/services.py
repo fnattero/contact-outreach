@@ -13,7 +13,7 @@ from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
-from django.db.models import QuerySet
+from django.db.models import ProtectedError, QuerySet
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
@@ -382,6 +382,54 @@ def set_user_active(*, membership: Membership, active: bool, actor: User) -> Use
         after={"is_active": active},
     )
     return locked.user
+
+
+@dataclass(frozen=True, slots=True)
+class _DeletedUser:
+    pk: int
+
+
+@transaction.atomic
+def delete_managed_user(*, membership: Membership, actor: User) -> None:
+    """Remove a user who never did anything. Anyone with history is deactivated, not erased.
+
+    A person who created a campaign, uploaded a catalog or saved a setting is referenced from that
+    record, and erasing them would leave the history without an author, so those users are refused
+    and can still be deactivated.
+    """
+
+    actor_membership = require_user_capability(
+        actor, Capability.MANAGE_USERS, workspace_id=membership.workspace_id
+    )
+    locked = Membership.objects.select_for_update().select_related("user").get(pk=membership.pk)
+    if locked.workspace_id != actor_membership.workspace_id:
+        raise PermissionDenied
+    if locked.user_id == actor.pk:
+        raise ValidationError("No podés eliminar tu propio usuario.")
+    # The actor is an active administrator and is never the target, so at least one remains.
+    Workspace.objects.select_for_update().get(pk=actor_membership.workspace_id)
+    user = locked.user
+    user_id, username, role = user.pk, user.get_username(), locked.role
+    try:
+        with transaction.atomic():
+            invalidate_user_sessions(user)
+            locked.delete()
+            user.delete()
+    except ProtectedError as exc:
+        raise ValidationError(
+            "Este usuario tiene actividad registrada (campañas, catálogos o configuración) y no se "
+            "puede eliminar sin perder su historial. Desactivalo en su lugar."
+        ) from exc
+    from apps.audit.services import record_event
+
+    record_event(
+        action="accounts.user_deleted",
+        entity=_DeletedUser(pk=user_id),
+        entity_type="User",
+        actor=actor,
+        before={"username": username, "role": role},
+        after={},
+    )
 
 
 @transaction.atomic

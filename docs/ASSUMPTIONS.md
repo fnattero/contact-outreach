@@ -71,6 +71,9 @@ seguridad no se relajan desde el dashboard.
 | A-064 | El contexto general aprobado ya no se envía al modelo: sólo orientaba tono y alcance y no se podía citar, y las instrucciones de escritura ya lo cubren. Lo que una respuesta puede afirmar sale únicamente de los datos aprobados. Las revisiones existentes quedan legibles y sin uso. | Producto / costo |
 | A-065 | La firma del perfil comercial la agrega el sistema al final de las respuestas automáticas, igual que en las propuestas, recordatorios y mensajes programados. El modelo recibe la orden de no firmar. La firma se congela en el mensaje y se vuelve a comparar con la del perfil antes de enviar. | Producto / seguridad |
 | A-066 | El envío real necesita dos llaves: el servidor lo permite (`SEND_MODE=live` y bloqueo de envíos apagado) y un admin lo enciende en la app (`SendModeSetting`, con reautenticación, palabra de confirmación y auditoría). Sin fila, la app está en simulación. `SEND_REQUIRES_APP_ENABLE=false` devuelve la decisión al servidor, como antes. Apagarlo no requiere confirmación. | Seguridad |
+| A-067 | Las palabras de un rubro encuentran también el plural de su última palabra (bobinado y bobinados), así quien las escribe no necesita comodines. Los ejemplos por defecto de rubros se reemplazaron por negocios que usan motores; sólo se reemplazan los originales sin editar (los usados por una campaña se archivan, los demás se borran) y nunca los que el equipo creó o modificó. | Producto |
+| A-068 | Un usuario sin actividad registrada se puede eliminar (con palabra de confirmación, auditado). Quien creó campañas, catálogos o configuración queda referenciado por ese historial y sólo se puede desactivar. | Integridad |
+| A-069 | La pantalla de zonas con datos lista todas las provincias con su estado y permite cargar una por vez; sin versión explícita usa la última verificada por mantenimiento. | Operación |
 
 ## Calidad de audiencia y scoring pendiente
 

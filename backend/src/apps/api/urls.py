@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_protect
 from apps.api.admin import (
     UnlockLoginView,
     UserActivationLinkView,
+    UserDetailView,
     UserListView,
     UserRoleView,
     UserStatusView,
@@ -135,6 +136,7 @@ urlpatterns = [
     path("users/", UserListView.as_view(), name="api-users"),
     path("users/unlock-login/", UnlockLoginView.as_view(), name="api-users-unlock-login"),
     path("users/<int:user_id>/role/", UserRoleView.as_view(), name="api-user-role"),
+    path("users/<int:user_id>/", UserDetailView.as_view(), name="api-user-detail"),
     path("users/<int:user_id>/status/", UserStatusView.as_view(), name="api-user-status"),
     path(
         "users/<int:user_id>/activation-link/",

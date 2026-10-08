@@ -124,8 +124,16 @@ def _rule_filter(rule: dict[str, Any]) -> Q:
         # `name_search` is accent-folded and padded with spaces at import time.
         # A leading space therefore marks an exact token boundary. A literal
         # phrase also requires its trailing boundary; a prefix deliberately does not.
-        needle = f" {literal}" if is_prefix else f" {literal} "
-        rule_filter &= Q(name_search__contains=needle)
+        if is_prefix:
+            rule_filter &= Q(name_search__contains=f" {literal}")
+            continue
+        # A plain word or phrase also finds the plural of its last word, so the people writing
+        # rules do not have to list "bobinado" and "bobinados" separately.
+        rule_filter &= (
+            Q(name_search__contains=f" {literal} ")
+            | Q(name_search__contains=f" {literal}s ")
+            | Q(name_search__contains=f" {literal}es ")
+        )
     return rule_filter
 
 
