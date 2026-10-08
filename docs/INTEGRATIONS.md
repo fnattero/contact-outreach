@@ -161,8 +161,13 @@ caracteres), con schema estricto, `temperature=0` y validación local siempre.
   parte del hash de entrada, así que cambiar de modo reutiliza el veredicto guardado.
 - Un solo intento, sin batch: cualquier falla del proveedor conserva el prospecto y queda registrada
   y redactada en `ProspectRelevanceVerdict`.
-- El modelo puede configurarse aparte del de las respuestas (`relevance_llm_model`); vacío usa el
-  modelo general.
+- El filtro puede usar su propio modelo (`relevance_llm_model`) y, opcionalmente, su propio servicio
+  (`relevance_llm_provider`, `relevance_llm_base_url` y clave cifrada propia). Con el proveedor vacío
+  comparte la conexión de las respuestas. Con proveedor propio el modelo es obligatorio y la clave de
+  las respuestas solo se reutiliza si el servicio y la dirección son los mismos: una clave nunca
+  viaja a un servicio para el que no se cargó. La campaña congela proveedor, dirección y modelo en
+  `prompt_snapshot["prospect_screening"]`, nunca la clave; una campaña congelada antes de este cambio
+  usa la conexión de las respuestas.
 
 ### 4.2 ReplyDecisionRequest
 

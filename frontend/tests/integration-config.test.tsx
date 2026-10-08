@@ -19,17 +19,20 @@ vi.mock("@/lib/api", async (importOriginal) => {
 function config(overrides: Partial<IntegrationConfiguration> = {}): IntegrationConfiguration {
   return {
     extractor_provider: "fake", overture_min_confidence: "0.750", website_fetcher: "fake", llm_provider: "fake",
-    llm_model: "fake-deterministic", relevance_llm_model: "", ollama_base_url: "http://127.0.0.1:11434", openai_compatible_base_url: "",
+    llm_model: "fake-deterministic", relevance_llm_model: "", relevance_llm_provider: "", relevance_llm_base_url: "",
+    ollama_base_url: "http://127.0.0.1:11434", openai_compatible_base_url: "",
     embedding_provider: "fake", embedding_model: "text-embedding-3-small", embedding_dimensions: 1536,
     gmail_provider: "fake", gmail_oauth_client_id: "",
-    llm_credential: { configured: false, source: "NONE" }, gmail_credential: { configured: false, source: "NONE" },
+    llm_credential: { configured: false, source: "NONE" },
+    relevance_llm_credential: { configured: false, source: "NONE" }, gmail_credential: { configured: false, source: "NONE" },
     revision: 1, ...overrides,
   };
 }
 const values = (c: IntegrationConfiguration) => ({
   extractor_provider: c.extractor_provider, overture_min_confidence: c.overture_min_confidence,
   website_fetcher: c.website_fetcher, llm_provider: c.llm_provider, llm_model: c.llm_model,
-  relevance_llm_model: c.relevance_llm_model,
+  relevance_llm_model: c.relevance_llm_model, relevance_llm_provider: c.relevance_llm_provider,
+  relevance_llm_base_url: c.relevance_llm_base_url,
   ollama_base_url: c.ollama_base_url, openai_compatible_base_url: c.openai_compatible_base_url,
   embedding_provider: c.embedding_provider, embedding_model: c.embedding_model,
   embedding_dimensions: c.embedding_dimensions, gmail_provider: c.gmail_provider,
@@ -41,6 +44,24 @@ describe("buildConfigurationPatch", () => {
     const current = config();
     expect(buildConfigurationPatch({ ...values(current), llm_model: "otro" }, current)).toEqual({ llm_model: "otro" });
     expect(hasChanges(buildConfigurationPatch(values(current), current))).toBe(false);
+  });
+
+  it("sends the audience filter's own connection and key only when they changed", () => {
+    const current = config();
+    expect(buildConfigurationPatch({
+      ...values(current),
+      relevance_llm_provider: "openai-compatible",
+      relevance_llm_base_url: "https://api.audiencia.example/v1",
+      relevance_llm_model: "barato",
+      relevance_llm_api_key: " sk-audiencia ",
+    }, current)).toEqual({
+      relevance_llm_provider: "openai-compatible",
+      relevance_llm_base_url: "https://api.audiencia.example/v1",
+      relevance_llm_model: "barato",
+      relevance_llm_api_key: "sk-audiencia",
+    });
+    expect(buildConfigurationPatch({ ...values(current), remove_relevance_llm_api_key: true }, current))
+      .toEqual({ remove_relevance_llm_api_key: true });
   });
 
   it("treats a blank secret as keep-current and sends a new one trimmed", () => {
@@ -112,7 +133,6 @@ describe("ConfigurationForm layout", () => {
     await screen.findByRole("button", { name: "IA: contestar correos" });
     for (const title of [
       "Gmail: enviar y recibir correos",
-      "IA: conexión",
       "IA: contestar correos",
       "IA: revisar la audiencia",
       "Búsqueda de negocios",
@@ -131,9 +151,9 @@ describe("ConfigurationForm layout", () => {
     vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
     render(createElement(App, null, createElement(ConfigurationForm)));
 
-    fireEvent.click(await screen.findByRole("button", { name: "IA: conexión" }));
+    fireEvent.click(await screen.findByRole("button", { name: "IA: contestar correos" }));
 
-    expect(screen.getByRole("button", { name: "IA: conexión" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "IA: contestar correos" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("shows the save bar only after something changed", async () => {
@@ -145,6 +165,27 @@ describe("ConfigurationForm layout", () => {
     fireEvent.change(model, { target: { value: "otro" } });
 
     expect(await screen.findByRole("region", { name: "Cambios sin guardar" })).toBeInTheDocument();
+  });
+
+  it("keeps the audience review on the reply service until another one is chosen", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config());
+    render(createElement(App, null, createElement(ConfigurationForm)));
+
+    await screen.findByLabelText("Modelo para revisar la audiencia");
+    expect(screen.queryByLabelText("Nueva clave de API para revisar la audiencia")).toBeNull();
+    expect(screen.getByText("El mismo que para contestar correos")).toBeInTheDocument();
+  });
+
+  it("asks for the audience service's own address and key when it is a different one", async () => {
+    vi.mocked(getIntegrationConfiguration).mockResolvedValue(config({
+      relevance_llm_provider: "openai-compatible",
+      relevance_llm_credential: { configured: true, source: "ENCRYPTED" },
+    }));
+    render(createElement(App, null, createElement(ConfigurationForm)));
+
+    expect(await screen.findByLabelText("Nueva clave de API para revisar la audiencia")).toHaveValue("");
+    expect(screen.getAllByLabelText("Dirección del servicio").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Estado actual: Configurada \(almacenamiento cifrado\)/)).toBeInTheDocument();
   });
 
   it("asks for the service address only for the service that needs one", async () => {

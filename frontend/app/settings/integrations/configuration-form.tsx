@@ -1,6 +1,6 @@
 "use client";
 
-import { DatabaseOutlined, EnvironmentOutlined, FilterOutlined, GlobalOutlined, KeyOutlined, MailOutlined, MessageOutlined } from "@ant-design/icons";
+import { DatabaseOutlined, EnvironmentOutlined, FilterOutlined, GlobalOutlined, MailOutlined, MessageOutlined } from "@ant-design/icons";
 import { Alert, Checkbox, Form, Input, InputNumber, Modal, Select } from "antd";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
@@ -18,9 +18,14 @@ import { buildConfigurationPatch, credentialStatus, hasChanges, type Configurati
 
 const FIELDS = [
   "extractor_provider", "overture_min_confidence", "website_fetcher", "llm_provider", "llm_model", "relevance_llm_model",
+  "relevance_llm_provider", "relevance_llm_base_url", "relevance_llm_api_key",
   "ollama_base_url", "openai_compatible_base_url", "llm_api_key", "embedding_provider", "embedding_model",
   "embedding_dimensions", "gmail_provider", "gmail_oauth_client_id", "gmail_oauth_client_secret",
 ] as const;
+const BLANK_SECRETS = {
+  llm_api_key: "", gmail_oauth_client_secret: "", relevance_llm_api_key: "",
+  remove_llm_api_key: false, remove_gmail_oauth_client_secret: false, remove_relevance_llm_api_key: false,
+};
 const fake = { value: "fake", label: "Simulado (sin red)" };
 
 export function ConfigurationForm() {
@@ -34,6 +39,7 @@ export function ConfigurationForm() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const provider = Form.useWatch("llm_provider", form);
+  const relevanceProvider = Form.useWatch("relevance_llm_provider", form) ?? "";
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +60,7 @@ export function ConfigurationForm() {
       await reauthenticate(password);
       const next = await saveIntegrationConfiguration(buildConfigurationPatch(pending, current));
       setCurrent(next);
-      form.setFieldsValue({ ...next, llm_api_key: "", gmail_oauth_client_secret: "", remove_llm_api_key: false, remove_gmail_oauth_client_secret: false });
+      form.setFieldsValue({ ...next, ...BLANK_SECRETS });
       setSaved(true);
       setDirty(false);
       setPending(null);
@@ -91,25 +97,37 @@ export function ConfigurationForm() {
             <Form.Item className="form-grid__full" name="remove_gmail_oauth_client_secret" valuePropName="checked"><Checkbox>Eliminar el secreto guardado</Checkbox></Form.Item>
           </div>
         </FormSection>
-        <FormSection icon={<KeyOutlined />} tone="warning" title="IA: conexión" description="El servicio y la clave que usan las dos tareas de IA de abajo. Cada tarea puede usar su propio modelo.">
+        <FormSection icon={<MessageOutlined />} tone="warning" title="IA: contestar correos" description="Analiza los correos que llegan y prepara la respuesta. Nunca redacta el primer contacto.">
           <div className="form-grid">
             <Form.Item name="llm_provider" label="Servicio de IA" extra="Con “Sin conectar” la app usa respuestas de prueba y no evalúa nada de verdad.">
               <Select options={[{ value: "fake", label: "Sin conectar (modo de prueba)" }, { value: "openai-compatible", label: "Compatible con OpenAI" }, { value: "ollama", label: "Ollama (en tu equipo)" }]} />
             </Form.Item>
             {provider === "openai-compatible" ? <Form.Item name="openai_compatible_base_url" label="Dirección del servicio" extra="Debe empezar con https://"><Input /></Form.Item> : null}
             {provider === "ollama" ? <Form.Item name="ollama_base_url" label="Dirección de Ollama"><Input /></Form.Item> : null}
+            <Form.Item name="llm_model" label="Modelo para las respuestas" extra="Conviene uno capaz: lee la conversación y la información que aprobaste."><Input maxLength={120} /></Form.Item>
             <Form.Item className="form-grid__full" name="llm_api_key" label="Nueva clave de API" extra={`Estado actual: ${credentialStatus(current.llm_credential)}. Dejala vacía para conservarla; nunca vuelve a mostrarse.`}><Input.Password autoComplete="new-password" spellCheck={false} /></Form.Item>
             <Form.Item className="form-grid__full" name="remove_llm_api_key" valuePropName="checked"><Checkbox>Eliminar la clave guardada</Checkbox></Form.Item>
           </div>
         </FormSection>
-        <FormSection icon={<MessageOutlined />} tone="warning" title="IA: contestar correos" description="Analiza los correos que llegan y prepara la respuesta. Nunca redacta el primer contacto.">
+        <FormSection icon={<FilterOutlined />} tone="warning" title="IA: revisar la audiencia" description="Decide qué negocios descartar según el criterio que escribiste en Audiencia → Filtro. Es una tarea simple que se repite por cada negocio: puede usar otro servicio, más económico.">
           <div className="form-grid">
-            <Form.Item name="llm_model" label="Modelo para las respuestas" extra="Conviene uno capaz: lee la conversación y la información que aprobaste."><Input maxLength={120} /></Form.Item>
-          </div>
-        </FormSection>
-        <FormSection icon={<FilterOutlined />} tone="warning" title="IA: revisar la audiencia" description="Decide qué negocios descartar según el criterio que escribiste en Audiencia → Filtro. Es una tarea simple y se repite por cada negocio.">
-          <div className="form-grid">
-            <Form.Item name="relevance_llm_model" label="Modelo para revisar la audiencia" extra="Uno más económico alcanza. Si lo dejás vacío, usa el modelo de las respuestas."><Input maxLength={120} placeholder="Mismo que el de las respuestas" /></Form.Item>
+            <Form.Item className="form-grid__full" name="relevance_llm_provider" label="Servicio de IA" extra="Por defecto usa el mismo que para contestar correos, con su dirección y su clave.">
+              <Select options={[
+                { value: "", label: "El mismo que para contestar correos" },
+                { value: "openai-compatible", label: "Otro servicio compatible con OpenAI" },
+                { value: "ollama", label: "Ollama (en tu equipo)" },
+              ]} />
+            </Form.Item>
+            {relevanceProvider ? (
+              <Form.Item name="relevance_llm_base_url" label="Dirección del servicio" extra={relevanceProvider === "ollama" ? "Vacío usa la dirección de Ollama de arriba." : "Vacío usa la dirección del servicio de arriba. Debe empezar con https://"}><Input /></Form.Item>
+            ) : null}
+            <Form.Item name="relevance_llm_model" label="Modelo para revisar la audiencia" extra={relevanceProvider ? "Obligatorio: este servicio no puede heredar el modelo de las respuestas." : "Uno más económico alcanza. Si lo dejás vacío, usa el modelo de las respuestas."}><Input maxLength={120} placeholder={relevanceProvider ? "" : "Mismo que el de las respuestas"} /></Form.Item>
+            {relevanceProvider === "openai-compatible" ? (
+              <>
+                <Form.Item className="form-grid__full" name="relevance_llm_api_key" label="Nueva clave de API para revisar la audiencia" extra={`Estado actual: ${credentialStatus(current.relevance_llm_credential)}. Una clave de las respuestas solo se reutiliza si es el mismo servicio. Dejala vacía para conservar la actual; nunca vuelve a mostrarse.`}><Input.Password autoComplete="new-password" spellCheck={false} /></Form.Item>
+                <Form.Item className="form-grid__full" name="remove_relevance_llm_api_key" valuePropName="checked"><Checkbox>Eliminar la clave guardada de este servicio</Checkbox></Form.Item>
+              </>
+            ) : null}
           </div>
         </FormSection>
         <FormSection icon={<EnvironmentOutlined />} tone="success" title="Búsqueda de negocios" description="De dónde salen los negocios de cada campaña.">
@@ -135,7 +153,7 @@ export function ConfigurationForm() {
           feedback={saving ? { state: "saving", message: "Guardando…" } : { state: "idle", message: "Hay cambios sin guardar." }}
           onSave={() => void form.submit()}
           onCancel={() => {
-            form.setFieldsValue({ ...current, llm_api_key: "", gmail_oauth_client_secret: "", remove_llm_api_key: false, remove_gmail_oauth_client_secret: false });
+            form.setFieldsValue({ ...current, ...BLANK_SECRETS });
             setDirty(false);
           }}
         />

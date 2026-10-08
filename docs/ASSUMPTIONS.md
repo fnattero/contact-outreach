@@ -74,6 +74,8 @@ seguridad no se relajan desde el dashboard.
 | A-067 | Las palabras de un rubro encuentran también el plural de su última palabra (bobinado y bobinados), así quien las escribe no necesita comodines. Los ejemplos por defecto de rubros se reemplazaron por negocios que usan motores; sólo se reemplazan los originales sin editar (los usados por una campaña se archivan, los demás se borran) y nunca los que el equipo creó o modificó. | Producto |
 | A-068 | Un usuario sin actividad registrada se puede eliminar (con palabra de confirmación, auditado). Quien creó campañas, catálogos o configuración queda referenciado por ese historial y sólo se puede desactivar. | Integridad |
 | A-069 | La pantalla de zonas con datos lista todas las provincias con su estado y permite cargar una por vez; sin versión explícita usa la última verificada por mantenimiento. | Operación |
+| A-070 | El filtro de audiencia puede usar un servicio de IA distinto del de las respuestas, con dirección y clave propias. La clave de las respuestas solo se comparte si es exactamente el mismo servicio y dirección; si no, hace falta una clave propia. Volver a la conexión compartida borra la clave propia. | Costo / seguridad |
+| A-071 | El modo automático (envío real) de una campaña solo se ofrece si los envíos reales están habilitados (servidor y aplicación); si no, se muestra deshabilitado con el motivo. Exige una confirmación explícita y la campaña igual requiere aprobación de una persona. El borrador de una campaña a medio crear se guarda en el navegador (sessionStorage) y nunca incluye esa confirmación. | Seguridad / UX |
 
 ## Calidad de audiencia y scoring pendiente
 

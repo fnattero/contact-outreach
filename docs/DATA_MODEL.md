@@ -64,7 +64,7 @@ respuestas y comunicación con Contactos. Además guarda instrucciones de redacc
 automáticas y la configuración del filtro de audiencia (modo, default `LENIENT`, y criterio de
 hasta 1.200 caracteres, auditado por hash); esos textos orientan tono, estructura y criterio y no
 pueden modificar policy, datos permitidos ni reglas de búsqueda. Integration admite además un
-modelo propio para el filtro (`relevance_llm_model`). Root keys, barreras live e infraestructura no se guardan.
+modelo propio para el filtro (`relevance_llm_model`) y una conexión propia opcional (`relevance_llm_provider`, `relevance_llm_base_url`, clave cifrada con su propio propósito). Root keys, barreras live e infraestructura no se guardan.
 
 ### WorkspaceMessageTemplateRevision
 

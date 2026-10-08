@@ -261,6 +261,9 @@ export type IntegrationConfiguration = {
   llm_provider: string;
   llm_model: string;
   relevance_llm_model: string;
+  /** Empty means the audience filter shares the reply connection. */
+  relevance_llm_provider: string;
+  relevance_llm_base_url: string;
   ollama_base_url: string;
   openai_compatible_base_url: string;
   embedding_provider: string;
@@ -270,16 +273,19 @@ export type IntegrationConfiguration = {
   gmail_oauth_client_id: string;
   /** Credentials are only ever reported as state; their values cannot be read back. */
   llm_credential: { configured: boolean; source: string };
+  relevance_llm_credential: { configured: boolean; source: string };
   gmail_credential: { configured: boolean; source: string };
   revision: number;
 };
 
 export type IntegrationConfigurationPatch = Partial<
-  Omit<IntegrationConfiguration, "llm_credential" | "gmail_credential" | "revision" | "embedding_dimensions">
+  Omit<IntegrationConfiguration, "llm_credential" | "relevance_llm_credential" | "gmail_credential" | "revision" | "embedding_dimensions">
 > & {
   embedding_dimensions?: number;
   llm_api_key?: string;
   remove_llm_api_key?: boolean;
+  relevance_llm_api_key?: string;
+  remove_relevance_llm_api_key?: boolean;
   gmail_oauth_client_secret?: string;
   remove_gmail_oauth_client_secret?: boolean;
 };
@@ -287,7 +293,15 @@ export type IntegrationConfigurationPatch = Partial<
 export type IntegrationStatus = {
   extractor: { provider: string; overture_min_confidence: string };
   website_fetcher: { provider: string };
-  llm: { provider: string; model: string; relevance_model: string; credential_source: string; configured: boolean };
+  llm: {
+    provider: string;
+    model: string;
+    relevance_model: string;
+    relevance_provider: string;
+    relevance_separate: boolean;
+    credential_source: string;
+    configured: boolean;
+  };
   embeddings: { provider: string; model: string; dimensions: number };
   gmail: {
     provider: string;
