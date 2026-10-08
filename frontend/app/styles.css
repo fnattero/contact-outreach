@@ -1848,6 +1848,22 @@ div.campaign-choice-group > label {
   margin-top: 16px;
 }
 
+.page-header__inner--tabs {
+  padding-bottom: 0;
+}
+
+.page-header__tabs {
+  margin-top: 12px;
+}
+
+.page-header .section-tabs {
+  border-bottom: 0;
+}
+
+.page-header .section-tabs__tab {
+  margin-bottom: 0;
+}
+
 .status-badge {
   display: inline-flex;
   min-height: 24px;

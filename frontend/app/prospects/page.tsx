@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { DisabledReason } from "@/components/design-system/disabled-reason";
 import { PageHeader } from "@/components/design-system/page-header";
+import { AUDIENCE_TABS } from "@/components/design-system/tabs-config";
+import { SectionTabs } from "@/components/design-system/section-tabs";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
 import { can,
@@ -107,8 +109,9 @@ export default function ProspectsPage() {
   return (
     <Flex vertical gap="large">
       <PageHeader
-        title="Audiencia de campañas"
-        description="Consultá los negocios encontrados, el correo elegido y si están listos para recibir la propuesta fija."
+        title="Audiencia"
+        description="Los negocios que encontró la búsqueda, el correo elegido de cada uno y si ya están listos para recibir la propuesta."
+        tabs={<SectionTabs label="Audiencia" tabs={AUDIENCE_TABS} />}
         primaryAction={<Button href={prospectsExportUrl(filtersFromForm(applied, 1, PAGE_SIZE))}>Exportar tabla</Button>}
       />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}

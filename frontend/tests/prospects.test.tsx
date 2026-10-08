@@ -298,4 +298,14 @@ describe("prospects page", () => {
     await waitFor(() => expect(restoreProspect).toHaveBeenCalledWith("a"));
     await waitFor(() => expect(getProspects).toHaveBeenCalledTimes(2));
   });
+
+  it("shares the Audiencia header with the filter, through tabs", async () => {
+    vi.mocked(getProspects).mockResolvedValue({ data: [prospect()], meta: { page: 1, page_size: 25, total: 1 } });
+
+    render(createElement(ProspectsPage));
+
+    const tabs = await screen.findByRole("navigation", { name: "Audiencia" });
+    expect(within(tabs).getByRole("link", { name: "Negocios" })).toHaveAttribute("aria-current", "page");
+    expect(within(tabs).getByRole("link", { name: "Filtro" })).toHaveAttribute("href", "/settings/relevance");
+  });
 });

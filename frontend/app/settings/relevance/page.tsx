@@ -7,6 +7,8 @@ import { AuthError, useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { PageHeader } from "@/components/design-system/page-header";
+import { AUDIENCE_TABS } from "@/components/design-system/tabs-config";
+import { SectionTabs } from "@/components/design-system/section-tabs";
 import { LoadingState } from "@/components/design-system/states";
 import {
   can,
@@ -124,8 +126,9 @@ export default function RelevanceSettingsPage() {
   return (
     <Flex vertical gap="large">
       <PageHeader
-        title="Filtro de audiencia"
+        title="Audiencia"
         description="Decidí qué negocios encontrados se descartan antes de que entren a una campaña."
+        tabs={<SectionTabs label="Audiencia" tabs={AUDIENCE_TABS} dirty={dirty} />}
       />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       {realProvider === false ? (
