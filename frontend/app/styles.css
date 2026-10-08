@@ -763,6 +763,12 @@ time {
   line-height: 18px;
 }
 
+.integration-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .advanced-heading {
   margin: 32px 0 4px;
 }
@@ -2465,6 +2471,7 @@ div.campaign-choice-group > label {
 }
 
 .overture-snapshot-state .type-micro {
+  display: block;
   color: var(--ink-muted);
 }
 

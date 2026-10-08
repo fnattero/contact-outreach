@@ -118,6 +118,7 @@ export default function IntegrationsSettingsPage() {
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       {gmailResult === "connected" ? <Alert type="success" showIcon closable onClose={() => setGmailResult(null)} message="Gmail quedó conectado." /> : null}
       {gmailResult === "oauth_failed" ? <Alert type="error" showIcon closable onClose={() => setGmailResult(null)} message="No se pudo conectar Gmail" description="Google no autorizó la conexión. Podés volver a intentarlo con “Conectar Gmail”." /> : null}
+      <div className="form-column integration-stack">
       <Card title="Conexiones">
         <div className="integration-list">
           <div className="integration-row">
@@ -166,6 +167,7 @@ export default function IntegrationsSettingsPage() {
           </dl>
         </details>
       </Card>
+      </div>
     </Flex>
   );
 }

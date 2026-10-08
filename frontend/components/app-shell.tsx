@@ -351,7 +351,7 @@ export function AppShell({ session, onSignOut, children }: AppShellProps) {
         <Drawer
           className="app-shell__drawer"
           placement="left"
-          width={240}
+          width={256}
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           closable={false}
@@ -362,7 +362,7 @@ export function AppShell({ session, onSignOut, children }: AppShellProps) {
       ) : (
         <Layout.Sider
           className="app-shell__sider"
-          width={240}
+          width={256}
           collapsedWidth={64}
           collapsed={collapsed}
           trigger={null}

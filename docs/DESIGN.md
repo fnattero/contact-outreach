@@ -106,7 +106,7 @@ Sticky headers and sticky save bars use a 1px `--border-strong` bottom/top edge,
 ### Density
 
 ```
-Sidebar expanded          240px
+Sidebar expanded          256px   (the longest menu label must fit on one line)
 Sidebar collapsed         64px
 Topbar height             52px
 Table row height          40px

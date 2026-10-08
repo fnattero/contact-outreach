@@ -112,6 +112,7 @@ export default function AutomationPage() {
         tabs={<SectionTabs label="Respuestas automáticas" tabs={AUTOMATION_TABS} />}
       />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
+      <div className="form-column integration-stack">
       <section className={`automation-mode-block automation-mode-block--${configuration.mode.toLowerCase()}`} aria-labelledby="automation-mode-heading">
         <div className="automation-mode-block__heading">
           <span className="type-micro">Estado actual</span>
@@ -128,7 +129,6 @@ export default function AutomationPage() {
           description={`Aunque las enciendas, no se envía nada porque ${blockedBy.join(" y ")}. Para cambiarlo hay que modificar la configuración del servidor.`}
         />
       ) : null}
-      <div className="form-column">
         <Form layout="vertical" onFinish={() => void save()}>
           <Form.Item label="¿Qué querés que haga la app con los correos que llegan?">
             <Radio.Group className="campaign-choice-group" value={selected} onChange={(event) => setChoice(event.target.value as Mode)}>
