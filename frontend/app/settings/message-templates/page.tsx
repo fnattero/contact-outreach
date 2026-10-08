@@ -15,6 +15,7 @@ import {
   type MessageTemplate,
   type Problem,
 } from "@/lib/api";
+import { useHasCampaignDraft } from "@/lib/campaign-draft";
 
 type Kind = MessageTemplate["kind"];
 type FormValues = { subject: string; body: string };
@@ -70,6 +71,7 @@ export default function MessageTemplatesPage() {
   const [saving, setSaving] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>({ state: "idle" });
+  const hasCampaignDraft = useHasCampaignDraft();
 
   useEffect(() => {
     if (!allowed) return;
@@ -125,6 +127,14 @@ export default function MessageTemplatesPage() {
         title="Mensajes de campaña"
         description="Los textos que reciben todos los negocios de una campaña. Si cambiás uno, las campañas que ya aprobaste conservan el texto que tenían."
       />
+      {hasCampaignDraft ? (
+        <Alert
+          type="info"
+          showIcon
+          message="Tenés una campaña a medio crear"
+          description={<span>Lo que completaste se guardó. Cuando termines de editar, <Link href="/campaigns/new">volvé a la campaña</Link> y seguí desde donde estabas.</span>}
+        />
+      ) : null}
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       {feedback.state === "saved" ? (
         <p className="form-save-feedback form-save-feedback--saved" role="status">{feedback.message}</p>

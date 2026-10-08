@@ -19,6 +19,7 @@ import { can,
   createCampaign,
   getCatalogs,
   getMessageTemplates,
+  getSendMode,
   getSearchCategories,
   getSearchZones,
   problemMessage,
@@ -27,11 +28,13 @@ import { can,
   type Problem,
   type SearchCategory,
   type SearchZone,
+  type SendMode,
 } from "@/lib/api";
+import { clearCampaignDraft, readCampaignDraft, saveCampaignDraft } from "@/lib/campaign-draft";
 
 type CampaignFormValues = {
   name: string;
-  delivery_mode: "DRY_RUN" | "REVIEW_ONLY";
+  delivery_mode: "DRY_RUN" | "REVIEW_ONLY" | "LIVE";
   approval_mode: "CAMPAIGN" | "PER_MESSAGE";
   categories: string[];
   provinces: string[];
@@ -49,6 +52,7 @@ type CampaignFormValues = {
   timezone_name: string;
   reminder_enabled: boolean;
   reminder_delay_days: number;
+  confirm_live: boolean;
 };
 
 type SetupBlocker = {
@@ -78,10 +82,78 @@ const initialValues: CampaignFormValues = {
   timezone_name: "America/Argentina/Buenos_Aires",
   reminder_enabled: false,
   reminder_delay_days: 3,
+  confirm_live: false,
 };
 
-function activeInitialTemplate(templates: MessageTemplate[]): MessageTemplate | undefined {
-  return templates.find((template) => template.kind === "INITIAL" && template.active);
+function activeTemplate(templates: MessageTemplate[], kind: MessageTemplate["kind"]): MessageTemplate | undefined {
+  return templates.find((template) => template.kind === kind && template.active);
+}
+
+function keepKnown(saved: unknown, known: string[]): string[] {
+  return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string" && known.includes(id)) : [];
+}
+
+/** A half-written campaign comes back as it was, minus whatever no longer exists or is no longer allowed. */
+function restoreDraft(
+  options: { categories: SearchCategory[]; provinces: SearchZone[]; zones: SearchZone[]; catalogs: Catalog[]; liveAvailable: boolean },
+): CampaignFormValues {
+  const saved = readCampaignDraft();
+  if (!saved) return initialValues;
+  const provinces = keepKnown(saved.provinces, options.provinces.map((item) => item.id));
+  const zones = pruneZoneSelection(keepKnown(saved.zones, options.zones.map((item) => item.id)), options.zones, provinces);
+  const merged = { ...initialValues, ...saved } as CampaignFormValues;
+  return {
+    ...merged,
+    categories: keepKnown(saved.categories, options.categories.map((item) => item.id)),
+    provinces,
+    zones,
+    catalogs: keepKnown(saved.catalogs, options.catalogs.map((item) => item.id)),
+    delivery_mode: merged.delivery_mode === "LIVE" && !options.liveAvailable ? "DRY_RUN" : merged.delivery_mode,
+    confirm_live: false,
+  };
+}
+
+function liveBlockedReason(sendMode: SendMode | null): string {
+  if (!sendMode) return "Los envíos reales los activa una persona administradora desde el Resumen.";
+  if (!sendMode.server_allows_live) return "El servidor todavía no permite envíos reales. Quien lo administra tiene que habilitarlos.";
+  return "Los envíos reales están apagados. Se encienden desde el Resumen, con contraseña.";
+}
+
+function TemplatePreview({
+  heading,
+  template,
+  subjectNote,
+  missing,
+  onEdit,
+}: {
+  heading: string;
+  template: MessageTemplate | undefined;
+  subjectNote?: string;
+  missing: string;
+  onEdit: () => void;
+}) {
+  return (
+    <article className="campaign-template-preview" aria-label={heading}>
+      <div className="campaign-template-preview__heading">
+        <div>
+          <span className="type-micro">Mensaje predeterminado</span>
+          <h3>{heading}</h3>
+        </div>
+        <Button size="small" onClick={onEdit}>Editar mensaje</Button>
+      </div>
+      {template ? (
+        <>
+          <dl className="campaign-template-preview__meta">
+            <div><dt>Asunto</dt><dd>{subjectNote ?? (template.subject || "Sin asunto")}</dd></div>
+            <div><dt>Revisión</dt><dd>{template.revision}</dd></div>
+          </dl>
+          <pre className="campaign-template-preview__body">{template.body}</pre>
+        </>
+      ) : (
+        <p className="campaign-template-preview__missing">{missing}</p>
+      )}
+    </article>
+  );
 }
 
 export default function NewCampaignPage() {
@@ -93,12 +165,15 @@ export default function NewCampaignPage() {
   const [zones, setZones] = useState<SearchZone[]>([]);
   const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [initial, setInitial] = useState<CampaignFormValues>(initialValues);
+  const [sendMode, setSendMode] = useState<SendMode | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const selectedProvinceIds = Form.useWatch("provinces", form) ?? [];
   const reminderEnabled = Form.useWatch("reminder_enabled", form) ?? false;
   const deliveryMode = Form.useWatch("delivery_mode", form) ?? initialValues.delivery_mode;
+  const liveAvailable = sendMode?.effective_live ?? false;
 
   useEffect(() => {
     let cancelled = false;
@@ -108,21 +183,34 @@ export default function NewCampaignPage() {
       getSearchZones(),
       getCatalogs(),
       getMessageTemplates(),
+      // Only administrators may read it; for anyone else real sending simply is not offered.
+      Promise.resolve().then(getSendMode).catch(() => null),
     ])
-      .then(([nextCategories, nextProvinces, nextZones, nextCatalogs, nextTemplates]) => {
+      .then(([nextCategories, nextProvinces, nextZones, nextCatalogs, nextTemplates, nextSendMode]) => {
         if (cancelled) return;
+        const selectableZones = nextZones.filter((zone) => zone.selectable);
+        const activeCatalogs = nextCatalogs.filter((catalog) => !catalog.missing && catalog.active);
         setCategories(nextCategories);
         setProvinces(nextProvinces);
-        setZones(nextZones.filter((zone) => zone.selectable));
-        setCatalogs(nextCatalogs.filter((catalog) => !catalog.missing && catalog.active));
+        setZones(selectableZones);
+        setCatalogs(activeCatalogs);
         setTemplates(nextTemplates);
+        setSendMode(nextSendMode);
+        setInitial(restoreDraft({
+          categories: nextCategories,
+          provinces: nextProvinces,
+          zones: selectableZones,
+          catalogs: activeCatalogs,
+          liveAvailable: nextSendMode?.effective_live ?? false,
+        }));
       })
       .catch((problem) => { if (!cancelled) setError(problem); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
-  const template = useMemo(() => activeInitialTemplate(templates), [templates]);
+  const template = useMemo(() => activeTemplate(templates, "INITIAL"), [templates]);
+  const reminderTemplate = useMemo(() => activeTemplate(templates, "REMINDER"), [templates]);
   const catalogMissing = catalogs.length === 0;
   const setupBlocker = useMemo<SetupBlocker | null>(() => {
     if (!categories.length) return {
@@ -168,8 +256,9 @@ export default function NewCampaignPage() {
         ...values,
         catalog: values.catalogs[0],
         timezone_name: "America/Argentina/Buenos_Aires",
-        confirm_live: false,
+        confirm_live: values.delivery_mode === "LIVE" && values.confirm_live === true,
       });
+      clearCampaignDraft();
       router.push(`/campaigns/${campaign.id}`);
     } catch (problem) {
       setError(problem);
@@ -177,6 +266,12 @@ export default function NewCampaignPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // Leaving for the message editor must not cost the person what they already filled in.
+  function editMessage() {
+    saveCampaignDraft(form.getFieldsValue(true) as CampaignFormValues);
+    router.push("/settings/message-templates");
   }
 
   function changeProvinces(nextProvinceIds: string[]) {
@@ -193,7 +288,11 @@ export default function NewCampaignPage() {
       />
       {error ? <Alert className="campaign-create__error" type="error" showIcon message="No se pudo crear el borrador" description={problemMessage(error as Problem)} /> : null}
       <div className="campaign-create__notice" role="note">
-        <strong>{deliveryMode === "DRY_RUN" ? "Se crea como borrador en modo simulación." : "Se crea como borrador en modo sólo revisión."}</strong>
+        <strong>{{
+          DRY_RUN: "Se crea como borrador en modo simulación.",
+          REVIEW_ONLY: "Se crea como borrador en modo sólo revisión.",
+          LIVE: "Se crea como borrador en modo automático.",
+        }[deliveryMode]}</strong>
         <span>No se envía ningún email al guardar. La búsqueda y la aprobación ocurren después, desde el detalle de la campaña.</span>
       </div>
 
@@ -201,8 +300,9 @@ export default function NewCampaignPage() {
         className="campaign-create"
         form={form}
         layout="vertical"
-        initialValues={initialValues}
+        initialValues={initial}
         validateTrigger="onBlur"
+        onValuesChange={(_changed, all) => saveCampaignDraft(all as CampaignFormValues)}
         onFinish={(values) => void submit(values)}
       >
         <section className="campaign-form-section" aria-labelledby="campaign-purpose-heading">
@@ -275,28 +375,25 @@ export default function NewCampaignPage() {
 
         <section className="campaign-form-section campaign-form-section--wide" aria-labelledby="campaign-content-heading">
           <h2 className="type-title" id="campaign-content-heading">Contenido de la propuesta</h2>
-          <p className="campaign-form-section__description">Confirmá qué texto y qué archivos se copiarán al borrador. La campaña conserva esta revisión aunque el mensaje predeterminado cambie después.</p>
+          <p className="campaign-form-section__description">Confirmá qué texto y qué archivos se copiarán al borrador. La campaña conserva esta revisión aunque el mensaje predeterminado cambie después. Si editás un mensaje, lo que ya completaste acá se guarda y lo encontrás al volver.</p>
           <div className="campaign-content-grid">
-            <article className="campaign-template-preview" aria-labelledby="campaign-template-heading">
-              <div className="campaign-template-preview__heading">
-                <div>
-                  <span className="type-micro">Mensaje predeterminado</span>
-                  <h2 id="campaign-template-heading">Propuesta inicial</h2>
-                </div>
-                <Link href="/settings/message-templates">Configurar mensaje</Link>
-              </div>
-              {template ? (
-                <>
-                  <dl className="campaign-template-preview__meta">
-                    <div><dt>Asunto</dt><dd>{template.subject || "Sin asunto"}</dd></div>
-                    <div><dt>Revisión</dt><dd>{template.revision}</dd></div>
-                  </dl>
-                  <pre className="campaign-template-preview__body">{template.body}</pre>
-                </>
-              ) : (
-                <p className="campaign-template-preview__missing">No hay una revisión activa. Al crear el borrador se usará la revisión predeterminada del sistema.</p>
-              )}
-            </article>
+            <div className="campaign-previews">
+              <TemplatePreview
+                heading="Propuesta inicial"
+                template={template}
+                missing="No hay una revisión activa. Al crear el borrador se usará la revisión predeterminada del sistema."
+                onEdit={editMessage}
+              />
+              {reminderEnabled ? (
+                <TemplatePreview
+                  heading="Recordatorio"
+                  template={reminderTemplate}
+                  subjectNote="El mismo de la propuesta, en el mismo hilo"
+                  missing="No hay un recordatorio escrito. Al crear el borrador se usará el texto predeterminado del sistema."
+                  onEdit={editMessage}
+                />
+              ) : null}
+            </div>
 
             <div className="campaign-content-fields">
               {catalogMissing ? (
@@ -355,16 +452,32 @@ export default function NewCampaignPage() {
             <Form.Item label="Modo" name="delivery_mode" rules={[{ required: true }]}>
               <Radio.Group className="campaign-choice-group">
                 <Radio value="DRY_RUN"><span><strong>Simulación</strong><small>Prepara todo, pero no envía emails.</small></span></Radio>
-                <Radio value="REVIEW_ONLY"><span><strong>Sólo revisión</strong><small>Deja cada mensaje preparado para leerlo.</small></span></Radio>
+                <Radio value="REVIEW_ONLY"><span><strong>Sólo revisión</strong><small>Deja cada mensaje preparado para leerlo. No se envía nada.</small></span></Radio>
+                <Radio value="LIVE" disabled={!liveAvailable}>
+                  <span>
+                    <strong>Automático</strong>
+                    <small>Cuando apruebes la campaña, los emails salen solos según el calendario.</small>
+                    {liveAvailable ? null : <small className="campaign-choice-group__why">{liveBlockedReason(sendMode)}</small>}
+                  </span>
+                </Radio>
               </Radio.Group>
             </Form.Item>
-            <Form.Item label="Cómo aprobar los mensajes" name="approval_mode" rules={[{ required: true }]}>
+            <Form.Item label="¿Cómo querés aprobar los mensajes?" name="approval_mode" rules={[{ required: true }]}>
               <Radio.Group className="campaign-choice-group">
-                <Radio value="CAMPAIGN"><span><strong>Campaña completa</strong><small>Una confirmación aprueba audiencia, contenido, adjuntos y calendario.</small></span></Radio>
-                <Radio value="PER_MESSAGE"><span><strong>Mensaje por mensaje</strong><small>Permite revisar y editar cada mensaje antes de iniciar.</small></span></Radio>
+                <Radio value="CAMPAIGN"><span><strong>Todos juntos</strong><small>Revisás la campaña una sola vez (a quién, qué texto, qué adjuntos y cuándo) y la aprobás. Todos los mensajes quedan aprobados.</small></span></Radio>
+                <Radio value="PER_MESSAGE"><span><strong>Uno por uno</strong><small>Antes de empezar, leés y podés editar cada mensaje. Es más lento, pero controlás cada correo.</small></span></Radio>
               </Radio.Group>
             </Form.Item>
           </div>
+          {deliveryMode === "LIVE" ? (
+            <Form.Item
+              name="confirm_live"
+              valuePropName="checked"
+              rules={[{ validator: async (_rule, checked: boolean | undefined) => { if (!checked) throw new Error("Confirmá que querés enviar emails de verdad."); } }]}
+            >
+              <Checkbox>Entiendo que, al aprobar la campaña, los emails se envían de verdad a los negocios.</Checkbox>
+            </Form.Item>
+          ) : null}
 
           <Form.Item
             label="Días permitidos"
@@ -422,7 +535,7 @@ export default function NewCampaignPage() {
             )}
           </p>
           <div>
-            <Link href="/campaigns"><Button>Cancelar</Button></Link>
+            <Link href="/campaigns" onClick={clearCampaignDraft}><Button>Cancelar</Button></Link>
             <DisabledReason disabled={catalogMissing} reason="Subí al menos un catálogo PDF para crear el borrador.">
               <Button type="primary" htmlType="submit" loading={saving}>{saving ? "Creando borrador…" : "Crear borrador"}</Button>
             </DisabledReason>

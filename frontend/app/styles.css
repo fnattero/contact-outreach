@@ -1294,7 +1294,14 @@ time {
   color: var(--ink-muted);
 }
 
-.campaign-template-preview__heading h2 {
+.campaign-previews {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.campaign-template-preview__heading h3 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
@@ -1386,6 +1393,10 @@ div.campaign-choice-group > label {
   color: var(--ink-secondary);
   font-size: 13px;
   line-height: 18px;
+}
+
+.campaign-choice-group .campaign-choice-group__why {
+  color: var(--warning);
 }
 
 .campaign-weekdays {
