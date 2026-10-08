@@ -108,8 +108,27 @@ describe("knowledge approval", () => {
   it("shows a saved fact as an unapproved draft with an approve action", async () => {
     renderPage();
     expect(await screen.findByText("Garantía · v1")).toBeInTheDocument();
-    expect(screen.getAllByText("Borrador sin aprobar").length).toBe(2);
+    expect(screen.getAllByText("Borrador sin aprobar").length).toBe(1);
     expect(screen.queryByText("Aprobada")).not.toBeInTheDocument();
+  });
+
+  it("explains how the information reaches the AI and drops the general context form", async () => {
+    renderPage();
+    await screen.findByText("Garantía · v1");
+
+    expect(screen.getByText("Cómo usa la IA esta información")).toBeInTheDocument();
+    expect(screen.getByText(/Toma hasta 3/)).toBeInTheDocument();
+    expect(screen.queryByText("Contexto general")).toBeNull();
+    expect(screen.queryByLabelText("Contexto")).toBeNull();
+  });
+
+  it("shows an approved general context as no longer used instead of hiding it", async () => {
+    vi.mocked(getKnowledgeContexts).mockResolvedValue([context({ state: "APPROVED", approved: true })]);
+    renderPage();
+
+    expect(await screen.findByText("El contexto general dejó de usarse")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Ver el texto que tenías aprobado"));
+    expect(await screen.findByText("Somos una empresa de componentes.")).toBeInTheDocument();
   });
 
   it("approves a fact only after the confirmation word is typed", async () => {

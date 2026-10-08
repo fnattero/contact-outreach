@@ -668,6 +668,15 @@ time {
   line-height: 16px;
 }
 
+.knowledge-steps {
+  margin: 0 0 12px;
+  padding-inline-start: 20px;
+}
+
+.knowledge-steps li {
+  margin-bottom: 4px;
+}
+
 .knowledge-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));

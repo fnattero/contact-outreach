@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Button, Card, Flex, Form, Input, List, Tag } from "antd";
+import { Alert, Button, Card, Collapse, Flex, Form, Input, List, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
@@ -10,9 +10,7 @@ import { LoadingState } from "@/components/design-system/states";
 import { AUTOMATION_TABS } from "@/components/design-system/tabs-config";
 import {
   can,
-  approveKnowledgeContext,
   approveKnowledgeFact,
-  createKnowledgeContext,
   createKnowledgeFact,
   getKnowledgeContexts,
   getKnowledgeFacts,
@@ -41,7 +39,7 @@ export default function KnowledgePage() {
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<{ status: string; matches: Array<{ title: string; score: number; selected: boolean }> } | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<{ kind: "fact" | "context"; id: string; label: string } | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<{ id: string; label: string } | null>(null);
 
   useEffect(() => {
     if (!allowed) return;
@@ -53,6 +51,8 @@ export default function KnowledgePage() {
       .catch(setError);
   }, [allowed]);
 
+  const unusedContext = contexts.find((context) => context.state === "APPROVED") ?? null;
+
   if (!allowed) return <AuthError error={{ detail: "No tenés permisos para configurar automatización." }} />;
   if (error && !facts) return <AuthError error={error} />;
   if (!facts) return <LoadingState layout="form" />;
@@ -63,23 +63,12 @@ export default function KnowledgePage() {
     catch (problem) { setError(problem); } finally { setSaving(false); }
   }
 
-  async function saveContext(values: { context_text: string }) {
-    setSaving(true); setError(null);
-    try { const created = await createKnowledgeContext(values.context_text); setContexts((current) => [created, ...current]); }
-    catch (problem) { setError(problem); } finally { setSaving(false); }
-  }
-
   async function approveRevision() {
     if (!pendingApproval) return;
     setSaving(true); setError(null);
     try {
-      if (pendingApproval.kind === "fact") {
-        await approveKnowledgeFact(pendingApproval.id);
-        setFacts(await getKnowledgeFacts());
-      } else {
-        await approveKnowledgeContext(pendingApproval.id);
-        setContexts(await getKnowledgeContexts());
-      }
+      await approveKnowledgeFact(pendingApproval.id);
+      setFacts(await getKnowledgeFacts());
       setPendingApproval(null);
     } catch (problem) { setError(problem); } finally { setSaving(false); }
   }
@@ -98,26 +87,40 @@ export default function KnowledgePage() {
         tabs={<SectionTabs label="Respuestas automáticas" tabs={AUTOMATION_TABS} />}
       />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
-      <div className="knowledge-grid">
-        <Card title="Datos de tu empresa y tus productos">
-          <p className="integration-muted">Lo que guardás queda como borrador. El agente sólo usa información aprobada.</p>
-          <Form layout="vertical" onFinish={(values) => void saveFact(values as { title: string; category?: string; text: string })}>
+      <Card title="Cómo usa la IA esta información">
+        <ol className="knowledge-steps">
+          <li>Llega un correo de un negocio.</li>
+          <li>La app busca, entre los datos aprobados de abajo, los que más se parecen a lo que preguntó. Toma hasta 3.</li>
+          <li>La IA recibe el mensaje, los anteriores del hilo, tus instrucciones de escritura y esos datos.</li>
+          <li>Solo puede afirmar lo que dicen esos datos. Si ninguno alcanza, no contesta: te lo deja en “Necesita atención”.</li>
+        </ol>
+        <p className="muted">Por eso conviene un dato por tema, escrito como lo contestarías (un horario, un plazo de entrega, una garantía). No hace falta repetir cómo escribir: eso va en “Cómo escribe”.</p>
+      </Card>
+      {unusedContext ? (
+        <Alert
+          type="info"
+          showIcon
+          message="El contexto general dejó de usarse"
+          description={
+            <Collapse
+              ghost
+              items={[{ key: "text", label: "Ver el texto que tenías aprobado", children: <p className="muted">{unusedContext.context_text}</p> }]}
+            />
+          }
+        />
+      ) : null}
+      <Card title="Datos que la IA puede usar">
+        <p className="integration-muted">Lo que guardás queda como borrador. La IA solo usa información aprobada.</p>
+        <Form layout="vertical" onFinish={(values) => void saveFact(values as { title: string; category?: string; text: string })}>
+          <div className="form-grid">
             <Form.Item name="title" label="Título" rules={[{ required: true }]}><Input /></Form.Item>
             <Form.Item name="category" label="Categoría"><Input /></Form.Item>
-            <Form.Item name="text" label="Información verificable" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
-            <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
-          </Form>
-          <List style={{ marginTop: 16 }} dataSource={facts} renderItem={(fact) => <List.Item actions={fact.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ kind: "fact", id: fact.id, label: `${fact.title} · v${fact.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`${fact.title} · v${fact.version}`} description={fact.text} /><Tag color={revisionStateTag[fact.state].color}>{revisionStateTag[fact.state].label}</Tag></List.Item>} />
-        </Card>
-        <Card title="Contexto general">
-          <p className="integration-muted">El contexto guardado queda como borrador hasta que lo aprobás.</p>
-          <Form layout="vertical" onFinish={(values) => void saveContext(values as { context_text: string })}>
-            <Form.Item name="context_text" label="Contexto" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
-            <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
-          </Form>
-          <List style={{ marginTop: 16 }} dataSource={contexts} renderItem={(context) => <List.Item actions={context.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ kind: "context", id: context.id, label: `Revisión ${context.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`Revisión ${context.version}`} description={context.context_text} /><Tag color={revisionStateTag[context.state].color}>{revisionStateTag[context.state].label}</Tag></List.Item>} />
-        </Card>
-      </div>
+            <Form.Item className="form-grid__full" name="text" label="Información verificable" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
+          </div>
+          <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
+        </Form>
+        <List style={{ marginTop: 16 }} dataSource={facts} renderItem={(fact) => <List.Item actions={fact.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ id: fact.id, label: `${fact.title} · v${fact.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`${fact.title} · v${fact.version}`} description={fact.text} /><Tag color={revisionStateTag[fact.state].color}>{revisionStateTag[fact.state].label}</Tag></List.Item>} />
+      </Card>
       <Card title="Probar qué información encuentra">
         <Form layout="vertical" onFinish={(values) => void runPreview(values as { query: string })}>
           <Form.Item name="query" label="Pregunta de ejemplo" rules={[{ required: true }]}><Input /></Form.Item>
@@ -130,7 +133,7 @@ export default function KnowledgePage() {
           open
           title={`Aprobar ${pendingApproval.label}`}
           consequences={[
-            "El agente podrá usar este contenido para responder a los contactos.",
+            "La IA podrá usar este contenido para responder a los contactos.",
             "La versión aprobada anterior quedará reemplazada.",
             "La aprobación queda registrada con tu usuario.",
           ]}

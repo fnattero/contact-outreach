@@ -1,6 +1,7 @@
 "use client";
 
-import { Alert, Flex, Form, Input, Modal } from "antd";
+import { Alert, Card, Flex, Form, Input, Modal } from "antd";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
@@ -104,6 +105,19 @@ export default function WritingPage() {
           tiene acceso a Gmail, archivos ni herramientas, y no puede saltearse las reglas de seguridad.
         </p>
       </section>
+      <Card className="form-column" title="Cuándo pasa a una persona">
+        <p>
+          La app no contesta sola y te deja el correo en “Necesita atención” cuando el negocio pide una reunión o una
+          fecha, habla de precios o cotizaciones, negocia, se queja, toca temas legales o de privacidad, pide un consejo
+          técnico que no está en tus datos aprobados, mezcla varias consultas o no queda claro qué quiere. Tampoco
+          contesta si no hay un dato aprobado que respalde la respuesta.
+        </p>
+        <p className="muted">
+          Estas reglas las fija la app y no se pueden cambiar desde acá: lo que escribas abajo solo cambia cómo suena
+          una respuesta, nunca cuándo se contesta. La firma de tu <Link href="/settings/profile">perfil comercial</Link>{" "}
+          se agrega sola al final, así que no hace falta pedirla.
+        </p>
+      </Card>
       <div className="form-column">
         <FormSection
           title="Instrucciones de escritura"
