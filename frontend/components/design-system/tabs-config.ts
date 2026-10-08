@@ -10,3 +10,9 @@ export const MAIL_TABS: readonly SectionTab[] = [
   { href: "/responses", label: "Recibidos" },
   { href: "/outbound", label: "Enviados" },
 ];
+
+export const AUTOMATION_TABS: readonly SectionTab[] = [
+  { href: "/automation", label: "Estado", capability: "manage_automation", exact: true },
+  { href: "/automation/writing", label: "Cómo escribe", capability: "manage_automation" },
+  { href: "/automation/knowledge", label: "Qué sabe", capability: "manage_automation" },
+];

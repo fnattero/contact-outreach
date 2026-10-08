@@ -1,262 +1,230 @@
 "use client";
 
-import { Alert, Button, Card, Flex, Form, Input, List, Segmented, Tag } from "antd";
+import { Alert, Button, Collapse, Flex, Form, Input, Radio, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { ConfirmDangerModal } from "@/components/design-system/confirm-danger-modal";
 import { PageHeader } from "@/components/design-system/page-header";
+import { SectionTabs } from "@/components/design-system/section-tabs";
 import { LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
-import { can,
-  approveKnowledgeContext,
-  approveKnowledgeFact,
-  getDashboardSummary,
+import { AUTOMATION_TABS } from "@/components/design-system/tabs-config";
+import {
+  can,
   getAutomationConfiguration,
-  createKnowledgeContext,
-  createKnowledgeFact,
-  getKnowledgeContexts,
-  getKnowledgeFacts,
-  previewKnowledge,
+  getDashboardSummary,
   problemMessage,
   reauthenticate,
   setAutomationLive,
   updateAutomationMode,
   type AutomationConfiguration,
   type DashboardSummary,
-  type KnowledgeContextRevision,
-  type KnowledgeFactRevision,
-  type KnowledgeRevisionState,
   type Problem,
 } from "@/lib/api";
+import { AUTOMATION_STATES, automationState } from "./automation-labels";
 
-// The API requires this exact word to enable LIVE; the modal asks the admin to type it.
+// The API requires this exact word to turn the replies on; the modal asks the admin to type it.
 const CONFIRMATION_WORD = "CONFIRMAR";
 
-const revisionStateTag: Record<KnowledgeRevisionState, { color: string; label: string }> = {
-  APPROVED: { color: "green", label: "Aprobada" },
-  DRAFT: { color: "orange", label: "Borrador sin aprobar" },
-  SUPERSEDED: { color: "default", label: "Reemplazada" },
-};
+type Mode = AutomationConfiguration["mode"];
 
 export default function AutomationPage() {
   const { session } = useAuth();
+  const allowed = can(session, "manage_automation");
   const [configuration, setConfiguration] = useState<AutomationConfiguration | null>(null);
   const [safety, setSafety] = useState<DashboardSummary["safety"] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
-  const [facts, setFacts] = useState<KnowledgeFactRevision[]>([]);
-  const [contexts, setContexts] = useState<KnowledgeContextRevision[]>([]);
-  const [preview, setPreview] = useState<{ status: string; matches: Array<{ title: string; score: number; selected: boolean }> } | null>(null);
-  const [pendingPassword, setPendingPassword] = useState<string | null>(null);
-  const [liveConfirmOpen, setLiveConfirmOpen] = useState(false);
-  const [disableConfirmOpen, setDisableConfirmOpen] = useState(false);
-  const [pendingApproval, setPendingApproval] = useState<{ kind: "fact" | "context"; id: string; label: string } | null>(null);
+  const [choice, setChoice] = useState<Mode | null>(null);
+  const [password, setPassword] = useState("");
+  const [turnOnOpen, setTurnOnOpen] = useState(false);
+  const [leaveLiveOpen, setLeaveLiveOpen] = useState(false);
 
   useEffect(() => {
-    void Promise.all([getAutomationConfiguration(), getKnowledgeFacts(), getKnowledgeContexts(), getDashboardSummary()])
-      .then(([nextConfiguration, nextFacts, nextContexts, nextSummary]) => {
-        setConfiguration(nextConfiguration); setFacts(nextFacts); setContexts(nextContexts); setSafety(nextSummary.safety);
-      })
-      .catch(setError);
-  }, []);
+    if (!allowed) return;
+    void getAutomationConfiguration().then(setConfiguration).catch(setError);
+    // Only used to explain why nothing is sent; the page works without it.
+    void getDashboardSummary().then((summary) => setSafety(summary.safety)).catch(() => undefined);
+  }, [allowed]);
 
-  if (!can(session, "manage_automation")) return <AuthError error={{ detail: "No tenés permisos para configurar automatización." }} />;
+  if (!allowed) return <AuthError error={{ detail: "No tenés permisos para configurar automatización." }} />;
   if (error && !configuration) return <AuthError error={error} />;
   if (!configuration) return <LoadingState layout="form" />;
 
-  async function saveMode(values: { mode: "OFF" | "SHADOW" }) {
+  const current = automationState(configuration.mode);
+  const selected: Mode = choice ?? configuration.mode;
+  const changed = selected !== configuration.mode;
+  const turningOn = changed && selected === "LIVE";
+  const leavingLive = changed && configuration.mode === "LIVE";
+
+  async function run(action: () => Promise<AutomationConfiguration>) {
     setSaving(true);
     setError(null);
     try {
-      setConfiguration(await updateAutomationMode(values.mode));
+      setConfiguration(await action());
+      setChoice(null);
+      setPassword("");
+      return true;
     } catch (problem) {
       setError(problem);
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
-  async function enableLive(password: string) {
-    setSaving(true);
-    setError(null);
-    try {
+  async function save() {
+    if (turningOn) {
+      setTurnOnOpen(true);
+    } else if (leavingLive) {
+      setLeaveLiveOpen(true);
+    } else if (changed && (selected === "OFF" || selected === "SHADOW")) {
+      await run(() => updateAutomationMode(selected));
+    }
+  }
+
+  async function turnOn() {
+    const done = await run(async () => {
       await reauthenticate(password);
-      setConfiguration(await setAutomationLive("enable-live", CONFIRMATION_WORD));
-      setLiveConfirmOpen(false);
-      setPendingPassword(null);
-    } catch (problem) {
-      setError(problem);
-    } finally {
-      setSaving(false);
-    }
+      return setAutomationLive("enable-live", CONFIRMATION_WORD);
+    });
+    if (done) setTurnOnOpen(false);
   }
 
-  async function disableLive() {
-    setSaving(true);
-    setError(null);
-    try {
-      setConfiguration(await setAutomationLive("disable-live"));
-      setDisableConfirmOpen(false);
-    } catch (problem) {
-      setError(problem);
-    } finally {
-      setSaving(false);
-    }
+  async function leaveLive() {
+    const done = await run(() =>
+      selected === "OFF" ? updateAutomationMode("OFF") : setAutomationLive("disable-live"),
+    );
+    if (done) setLeaveLiveOpen(false);
   }
 
-  async function saveFact(values: { title: string; category?: string; text: string }) {
-    setSaving(true); setError(null);
-    try { const created = await createKnowledgeFact(values); setFacts((current) => [created, ...current]); }
-    catch (problem) { setError(problem); } finally { setSaving(false); }
+  const blockedBy: string[] = [];
+  if (safety && (safety.send_mode !== "live" || safety.send_kill_switch)) {
+    blockedBy.push("el servidor está en modo simulación o con los envíos bloqueados");
   }
-
-  async function saveContext(values: { context_text: string }) {
-    setSaving(true); setError(null);
-    try { const created = await createKnowledgeContext(values.context_text); setContexts((current) => [created, ...current]); }
-    catch (problem) { setError(problem); } finally { setSaving(false); }
-  }
-
-  async function approveRevision() {
-    if (!pendingApproval) return;
-    setSaving(true); setError(null);
-    try {
-      if (pendingApproval.kind === "fact") {
-        await approveKnowledgeFact(pendingApproval.id);
-        setFacts(await getKnowledgeFacts());
-      } else {
-        await approveKnowledgeContext(pendingApproval.id);
-        setContexts(await getKnowledgeContexts());
-      }
-      setPendingApproval(null);
-    } catch (problem) { setError(problem); } finally { setSaving(false); }
-  }
-
-  async function runPreview(values: { query: string }) {
-    setSaving(true); setError(null);
-    try { setPreview(await previewKnowledge(values.query)); }
-    catch (problem) { setError(problem); } finally { setSaving(false); }
-  }
+  if (safety?.auto_reply_kill_switch) blockedBy.push("las respuestas automáticas están bloqueadas desde el servidor");
 
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Automatización de respuestas" description="El modo se aplica en el backend y se vuelve a validar justo antes de Gmail." />
+      <PageHeader
+        title="Respuestas automáticas"
+        description="Decidí si la app contesta sola los correos que llegan, cómo escribe y qué información puede usar."
+        tabs={<SectionTabs label="Respuestas automáticas" tabs={AUTOMATION_TABS} />}
+      />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       <section className={`automation-mode-block automation-mode-block--${configuration.mode.toLowerCase()}`} aria-labelledby="automation-mode-heading">
         <div className="automation-mode-block__heading">
           <span className="type-micro">Estado actual</span>
-          <h2 className="type-title" id="automation-mode-heading">¿Qué puede hacer la automatización ahora?</h2>
-          <StatusBadge value={configuration.mode} />
+          <h2 className="type-title" id="automation-mode-heading">Las respuestas automáticas están {current.title.toLowerCase()}</h2>
+          <StatusBadge label={current.title} level={current.level} />
         </div>
-        <p className="automation-mode-block__meaning">{configuration.mode === "LIVE" ? "Envío real: las respuestas que cumplan todas las condiciones pueden salir de Gmail de verdad." : configuration.mode === "SHADOW" ? "Observación: el sistema redacta respuestas para revisar, pero no las envía." : "Desactivada: el sistema no redacta ni envía respuestas automáticas."}</p>
-        <p className="automation-mode-block__boundary">SHADOW nunca produce efectos en Gmail. LIVE requiere reautenticación y continúa sujeto a políticas, tareas humanas y kill switches.</p>
+        <p className="automation-mode-block__meaning">{current.explanation}</p>
       </section>
-      <Alert type={configuration.mode === "LIVE" ? "warning" : "info"} showIcon message={`Modo actual: ${configuration.mode_label}`} description="SHADOW nunca produce efectos en Gmail. LIVE requiere reautenticación y continúa sujeto a políticas, tareas humanas y kill switches." />
-      <Card title="Modo operativo">
-        <Form initialValues={{ mode: configuration.mode === "LIVE" ? "SHADOW" : configuration.mode }} layout="vertical" onFinish={(values) => void saveMode(values as { mode: "OFF" | "SHADOW" })}>
-          <Form.Item name="mode" label="Elegí el alcance de la automatización" rules={[{ required: true }]}>
-            <Segmented block options={[
-              { value: "OFF", label: <span className="automation-mode-option"><strong>Desactivada</strong><small>No redacta ni envía respuestas.</small></span> },
-              { value: "SHADOW", label: <span className="automation-mode-option"><strong>Observación</strong><small>Redacta para revisar; nunca envía.</small></span> },
-            ]} />
-          </Form.Item>
-          <Flex gap="small" wrap>
-            <Button type="primary" htmlType="submit" loading={saving}>Guardar modo</Button>
-            {configuration.mode === "LIVE" ? <Button danger onClick={() => setDisableConfirmOpen(true)} loading={saving}>Desactivar LIVE</Button> : null}
-          </Flex>
-        </Form>
-      </Card>
-      {configuration.mode !== "LIVE" ? (
-        <Card title="Activar LIVE">
-          <Alert type="warning" showIcon message="Acción sensible" description="Ingresá tu contraseña nuevamente. Esto no desactiva los kill switches ni permite respuestas fuera de la política aprobada." />
-          <Form layout="vertical" onFinish={(values) => { setPendingPassword((values as { password: string }).password); setLiveConfirmOpen(true); }} style={{ marginTop: 16 }}>
-            <Form.Item name="password" label="Contraseña actual" rules={[{ required: true }]}>
-              <Input.Password autoComplete="new-password" />
-            </Form.Item>
-            <Button danger type="primary" htmlType="submit" loading={saving}>Revisar y activar LIVE</Button>
-          </Form>
-        </Card>
-      ) : null}
-      <Card title="Interruptores de seguridad y política">
-        <p className="integration-muted">Estos controles siguen siendo evaluados por el backend antes de cada efecto. Esta pantalla no los modifica.</p>
-        {safety ? <div className="automation-safety-grid">
-          <div><span className="type-micro">Envíos</span><StatusBadge label={safety.send_kill_switch ? "Protegidos" : "Habilitados"} level={safety.send_kill_switch ? "success" : "danger"} /><p>{safety.send_kill_switch ? "El interruptor bloquea cualquier envío." : "El interruptor permite envíos si las demás condiciones se cumplen."}</p></div>
-          <div><span className="type-micro">Respuestas automáticas</span><StatusBadge label={safety.auto_reply_kill_switch ? "Detenidas" : "Habilitadas"} level={safety.auto_reply_kill_switch ? "inactive" : "warning"} /><p>{safety.auto_reply_kill_switch ? "No se redactan ni envían respuestas automáticas." : "El sistema puede redactar según la configuración vigente."}</p></div>
-          <div><span className="type-micro">Relaciones</span><StatusBadge label={safety.relationship_kill_switch ? "Protegidas" : "Habilitadas"} level={safety.relationship_kill_switch ? "success" : "warning"} /><p>{safety.relationship_kill_switch ? "Las acciones relacionales están bloqueadas." : "Las acciones relacionales siguen las políticas vigentes."}</p></div>
-        </div> : null}
-        <Flex gap="small" wrap>
-          <Tag>Política {configuration.policy_version}</Tag>
-          {configuration.live_enabled_by ? <Tag>Activada por {configuration.live_enabled_by}</Tag> : null}
-        </Flex>
-      </Card>
-      <Card title="Información para el agente">
-        <p className="integration-muted">Lo que guardás queda como borrador. El agente sólo usa información aprobada.</p>
-        <Form layout="vertical" onFinish={(values) => void saveFact(values as { title: string; category?: string; text: string })}>
-          <Form.Item name="title" label="Título" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="category" label="Categoría"><Input /></Form.Item>
-          <Form.Item name="text" label="Información verificable" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
-          <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
-        </Form>
-        <List style={{ marginTop: 16 }} dataSource={facts} renderItem={(fact) => <List.Item actions={fact.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ kind: "fact", id: fact.id, label: `${fact.title} · v${fact.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`${fact.title} · v${fact.version}`} description={fact.text} /><Tag color={revisionStateTag[fact.state].color}>{revisionStateTag[fact.state].label}</Tag></List.Item>} />
-      </Card>
-      <Card title="Contexto general">
-        <p className="integration-muted">El contexto guardado queda como borrador hasta que lo aprobás.</p>
-        <Form layout="vertical" onFinish={(values) => void saveContext(values as { context_text: string })}>
-          <Form.Item name="context_text" label="Contexto" rules={[{ required: true }]}><Input.TextArea rows={4} maxLength={4000} showCount /></Form.Item>
-          <Button htmlType="submit" loading={saving}>Guardar borrador</Button>
-        </Form>
-        <List style={{ marginTop: 16 }} dataSource={contexts} renderItem={(context) => <List.Item actions={context.state === "DRAFT" ? [<Button key="approve" size="small" onClick={() => setPendingApproval({ kind: "context", id: context.id, label: `Revisión ${context.version}` })}>Aprobar</Button>] : undefined}><List.Item.Meta title={`Revisión ${context.version}`} description={context.context_text} /><Tag color={revisionStateTag[context.state].color}>{revisionStateTag[context.state].label}</Tag></List.Item>} />
-      </Card>
-      <Card title="Probar recuperación de información">
-        <Form layout="vertical" onFinish={(values) => void runPreview(values as { query: string })}>
-          <Form.Item name="query" label="Consulta de ejemplo" rules={[{ required: true }]}><Input /></Form.Item>
-          <Button htmlType="submit" loading={saving}>Probar</Button>
-        </Form>
-        {preview ? <Alert style={{ marginTop: 16 }} type={preview.status === "SELECTED" ? "success" : "info"} message={`Resultado: ${preview.status}`} description={preview.matches.map((match) => `${match.title} (${match.score.toFixed(2)})`).join(" · ") || "Sin coincidencias."} /> : null}
-      </Card>
-      {disableConfirmOpen ? (
-        <ConfirmDangerModal
-          open
-          title="Desactivar Envío real"
-          consequences={[
-            "Las respuestas automáticas vuelven a modo observación y dejan de enviarse desde Gmail.",
-            "Las respuestas ya enviadas no se revierten.",
-          ]}
-          confirmationWord={CONFIRMATION_WORD}
-          dangerLabel="Desactivar Envío real"
-          confirming={saving}
-          onCancel={() => setDisableConfirmOpen(false)}
-          onConfirm={() => void disableLive()}
+      {blockedBy.length ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Por ahora no sale ningún correo real"
+          description={`Aunque las enciendas, no se envía nada porque ${blockedBy.join(" y ")}. Para cambiarlo hay que modificar la configuración del servidor.`}
         />
       ) : null}
-      {pendingApproval ? (
+      <div className="form-column">
+        <Form layout="vertical" onFinish={() => void save()}>
+          <Form.Item label="¿Qué querés que haga la app con los correos que llegan?">
+            <Radio.Group className="campaign-choice-group" value={selected} onChange={(event) => setChoice(event.target.value as Mode)}>
+              {AUTOMATION_STATES.map((state) => (
+                <Radio key={state.value} value={state.value}>
+                  <span>
+                    <strong>{state.title}</strong>
+                    <small>{state.explanation}</small>
+                  </span>
+                </Radio>
+              ))}
+            </Radio.Group>
+          </Form.Item>
+          {turningOn ? (
+            <>
+              <Alert
+                type="warning"
+                showIcon
+                message="Acción sensible"
+                description="Ingresá tu contraseña otra vez. Encenderlas no desactiva ninguno de los bloqueos de seguridad, ni permite respuestas fuera de la política aprobada."
+              />
+              <Form.Item label="Contraseña actual" htmlFor="automation-password" style={{ marginTop: 16 }}>
+                <Input.Password
+                  id="automation-password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              </Form.Item>
+            </>
+          ) : null}
+          <Button
+            type="primary"
+            danger={turningOn}
+            htmlType="submit"
+            loading={saving}
+            disabled={!changed || (turningOn && !password)}
+          >
+            {turningOn ? "Revisar y encender" : "Guardar cambio"}
+          </Button>
+        </Form>
+      </div>
+      <Collapse
+        items={[
+          {
+            key: "safety",
+            label: "Ver detalles de seguridad",
+            children: (
+              <>
+                <p className="integration-muted">Estos controles los revisa el servidor antes de cada envío. Esta pantalla no los modifica.</p>
+                {safety ? (
+                  <div className="automation-safety-grid">
+                    <div><span className="type-micro">Envíos</span><StatusBadge label={safety.send_kill_switch ? "Protegidos" : "Habilitados"} level={safety.send_kill_switch ? "success" : "danger"} /><p>{safety.send_kill_switch ? "El bloqueo impide cualquier envío." : "El bloqueo permite envíos si las demás condiciones se cumplen."}</p></div>
+                    <div><span className="type-micro">Respuestas automáticas</span><StatusBadge label={safety.auto_reply_kill_switch ? "Detenidas" : "Habilitadas"} level={safety.auto_reply_kill_switch ? "inactive" : "warning"} /><p>{safety.auto_reply_kill_switch ? "No se preparan ni se envían respuestas automáticas." : "Se pueden preparar según la configuración vigente."}</p></div>
+                    <div><span className="type-micro">Relaciones</span><StatusBadge label={safety.relationship_kill_switch ? "Protegidas" : "Habilitadas"} level={safety.relationship_kill_switch ? "success" : "warning"} /><p>{safety.relationship_kill_switch ? "Los mensajes programados a contactos están bloqueados." : "Los mensajes programados siguen las políticas vigentes."}</p></div>
+                  </div>
+                ) : null}
+                <Flex gap="small" wrap>
+                  <Tag>Política {configuration.policy_version}</Tag>
+                  {configuration.live_enabled_by ? <Tag>Encendidas por {configuration.live_enabled_by}</Tag> : null}
+                </Flex>
+              </>
+            ),
+          },
+        ]}
+      />
+      {leaveLiveOpen ? (
         <ConfirmDangerModal
           open
-          title={`Aprobar ${pendingApproval.label}`}
+          title="Dejar de contestar automáticamente"
           consequences={[
-            "El agente podrá usar este contenido para responder a los contactos.",
-            "La versión aprobada anterior quedará reemplazada.",
-            "La aprobación queda registrada con tu usuario.",
+            selected === "OFF"
+              ? "Las respuestas automáticas se apagan: los correos que lleguen quedan para que los atiendas."
+              : "Las respuestas pasan a prepararse sin enviarse: vas a poder verlas, pero no salen.",
+            "Las respuestas que ya se enviaron no se revierten.",
           ]}
           confirmationWord={CONFIRMATION_WORD}
-          dangerLabel="Aprobar contenido"
+          dangerLabel="Dejar de contestar"
           confirming={saving}
-          onCancel={() => setPendingApproval(null)}
-          onConfirm={() => void approveRevision()}
+          onCancel={() => setLeaveLiveOpen(false)}
+          onConfirm={() => void leaveLive()}
         />
       ) : null}
       <ConfirmDangerModal
-        open={liveConfirmOpen}
-        title="Activar Envío real"
+        open={turnOnOpen}
+        title="Encender las respuestas automáticas"
         consequences={[
-          "Las respuestas automáticas podrán redactarse según la política configurada.",
-          "Las respuestas que cumplan todas las condiciones podrán enviarse desde Gmail de verdad.",
-          "La reautenticación, Gmail, las restricciones, las tareas humanas y los kill switches se volverán a comprobar antes de cada efecto.",
+          "La app va a contestar sola las preguntas simples que estén permitidas por la política.",
+          "Esas respuestas pueden salir de tu Gmail de verdad.",
+          "Antes de cada una se vuelve a comprobar la política, Gmail, las restricciones y las tareas de revisión pendientes.",
         ]}
         confirmationWord={CONFIRMATION_WORD}
-        dangerLabel="Activar Envío real"
+        dangerLabel="Encender respuestas"
         confirming={saving}
-        onCancel={() => { setLiveConfirmOpen(false); setPendingPassword(null); }}
-        onConfirm={() => { if (pendingPassword) void enableLive(pendingPassword); }}
+        onCancel={() => setTurnOnOpen(false)}
+        onConfirm={() => void turnOn()}
       />
     </Flex>
   );

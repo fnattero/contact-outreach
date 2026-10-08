@@ -97,7 +97,7 @@ export default function ProfileSettingsPage() {
         message="Esta página no es lo que lee la inteligencia artificial"
         description={
           <>
-            La IA contesta con la información que aprobaste en <Link href="/automation">Respuestas automáticas</Link>, y
+            La IA contesta con la información que aprobaste en <Link href="/automation/knowledge">Respuestas automáticas</Link>, y
             decide a quién le escribís según lo que describís en <Link href="/prospects">Audiencia</Link>.
           </>
         }

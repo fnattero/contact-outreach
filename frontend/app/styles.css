@@ -584,6 +584,13 @@ time {
   line-height: 16px;
 }
 
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
 .automation-safety-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

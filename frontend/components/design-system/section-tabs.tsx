@@ -12,6 +12,8 @@ export type SectionTab = {
   label: string;
   // Hidden (not disabled) for someone who may not open it; absent when every role may.
   capability?: Capability;
+  // Active only on exactly this path, for a first tab whose address is a prefix of the others.
+  exact?: boolean;
 };
 
 export type SectionTabsProps = {
@@ -21,8 +23,8 @@ export type SectionTabsProps = {
   dirty?: boolean;
 };
 
-function isActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+function isActive(pathname: string, tab: SectionTab): boolean {
+  return pathname === tab.href || (!tab.exact && pathname.startsWith(`${tab.href}/`));
 }
 
 /**
@@ -42,7 +44,7 @@ export function SectionTabs({ label, tabs, dirty = false }: SectionTabsProps) {
     <>
       <nav className="section-tabs" aria-label={label}>
         {visible.map((tab) => {
-          const active = isActive(pathname, tab.href);
+          const active = isActive(pathname, tab);
           return (
             <Link
               key={tab.href}
