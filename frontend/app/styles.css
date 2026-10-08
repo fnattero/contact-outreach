@@ -2055,6 +2055,28 @@ div.campaign-choice-group > label {
   font-weight: 600;
 }
 
+.signature-preview {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.signature-preview h3 {
+  margin: 0 0 8px;
+  color: var(--ink-muted);
+}
+
+.signature-preview p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.signature-preview .signature-preview__tail {
+  margin-bottom: 12px;
+  color: var(--ink-secondary);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

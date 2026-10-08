@@ -1,13 +1,16 @@
 "use client";
 
 import { Alert, Flex, Form, Input, Modal } from "antd";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
 import { FormSection, StickySaveBar } from "@/components/design-system/forms";
 import { LoadingState } from "@/components/design-system/states";
 import { PageHeader } from "@/components/design-system/page-header";
+import { emailEnding } from "./profile-helpers";
 import { can,
   getBusinessProfileVersioned,
+  getMessageTemplates,
   problemMessage,
   updateBusinessProfile,
   type BusinessProfile,
@@ -28,6 +31,8 @@ export default function ProfileSettingsPage() {
   const [feedback, setFeedback] = useState<Feedback>({ state: "idle" });
   const [error, setError] = useState<unknown>(null);
   const [etag, setEtag] = useState<string | null>(null);
+  const [proposalBody, setProposalBody] = useState<string | null>(null);
+  const signature = Form.useWatch("signature", form) ?? "";
 
   useEffect(() => {
     void getBusinessProfileVersioned()
@@ -38,6 +43,10 @@ export default function ProfileSettingsPage() {
       })
       .catch(setError)
       .finally(() => setLoading(false));
+    // Only to show how a real proposal ends; the page works without it.
+    void getMessageTemplates()
+      .then((templates) => setProposalBody(templates.find((item) => item.kind === "INITIAL" && item.active)?.body ?? null))
+      .catch(() => undefined);
   }, [form]);
 
   async function submit(values: Partial<BusinessProfile>) {
@@ -72,11 +81,27 @@ export default function ProfileSettingsPage() {
   if (error && !profile && !loading) return <AuthError error={error} />;
   if (loading) return <LoadingState layout="form" />;
 
+  const ending = emailEnding(proposalBody ?? "", String(signature));
+
   return (
     <Flex vertical gap="large">
-      <PageHeader title="Perfil comercial" description="Información aprobada que puede usar el motor de contenido y las campañas." />
+      <PageHeader
+        title="Perfil comercial"
+        description="Datos que identifican a tu empresa y la firma de tus correos."
+      />
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       {feedback.state === "saved" ? <p className="form-save-feedback form-save-feedback--saved" role="status">{feedback.message}</p> : null}
+      <Alert
+        type="info"
+        showIcon
+        message="Esta página no es lo que lee la inteligencia artificial"
+        description={
+          <>
+            La IA contesta con la información que aprobaste en <Link href="/automation">Respuestas automáticas</Link>, y
+            decide a quién le escribís según lo que describís en <Link href="/prospects">Audiencia</Link>.
+          </>
+        }
+      />
       <Form
         form={form}
         layout="vertical"
@@ -86,26 +111,35 @@ export default function ProfileSettingsPage() {
         onFinish={(values) => void submit(values as Partial<BusinessProfile>)}
       >
         <div className="form-column">
-          <FormSection title="Identidad" description="Los datos que identifican a tu empresa en cada propuesta.">
-            <Form.Item label="Empresa" name="company_name" rules={[{ required: true, message: "Indicá el nombre de la empresa." }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item label="Vendedor/a" name="salesperson_name" extra="Nombre que aparecerá como persona de contacto.">
-              <Input />
-            </Form.Item>
-          </FormSection>
-          <FormSection title="Contacto" description="Canales y ubicación para que los contactos puedan responderte.">
-            <Form.Item label="Teléfono" name="phone" extra="Usá el formato con código de país si corresponde."><Input /></Form.Item>
-            <Form.Item label="WhatsApp" name="whatsapp" extra="Número que se incluirá cuando una propuesta lo necesite."><Input /></Form.Item>
-            <Form.Item label="Sitio web" name="website" extra="Incluí la dirección completa, por ejemplo https://tuempresa.com." rules={[{ type: "url", message: "Indicá una URL válida." }]}><Input /></Form.Item>
-            <Form.Item label="Dirección" name="address"><Input /></Form.Item>
-          </FormSection>
-          <FormSection title="Oferta" description="Información verificable que puede usar el contenido de las campañas.">
-            <Form.Item label="Descripción" name="description" extra="Explicá brevemente qué hace la empresa."><Input.TextArea rows={4} /></Form.Item>
-            <Form.Item label="Productos" name="products" extra="Enumerá productos o servicios que ofrecés."><Input.TextArea rows={4} /></Form.Item>
-            <Form.Item label="Diferenciadores" name="differentiators" extra="Contá qué te distingue frente a otras opciones."><Input.TextArea rows={4} /></Form.Item>
-            <Form.Item label="Firma" name="signature" extra="Texto que cierra los mensajes enviados."><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item label="Instrucciones adicionales" name="additional_instructions" extra="Reglas específicas para redactar contenido."><Input.TextArea rows={4} /></Form.Item>
+          <FormSection
+            title="Tu empresa"
+            description="Los tres primeros datos identifican quién envía y son obligatorios para lanzar campañas. No se agregan solos al correo: si querés que aparezcan, escribilos en la firma."
+          >
+            <div className="form-grid">
+              <Form.Item label="Empresa" name="company_name" extra="El nombre de tu empresa." rules={[{ required: true, whitespace: true, message: "Indicá el nombre de la empresa." }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item label="Vendedor/a" name="salesperson_name" extra="La persona de contacto." rules={[{ required: true, whitespace: true, message: "Indicá quién firma como persona de contacto." }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item className="form-grid__full" label="Dirección" name="address" extra="El domicilio de tu empresa." rules={[{ required: true, whitespace: true, message: "Indicá la dirección de la empresa." }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item
+                className="form-grid__full"
+                label="Firma"
+                name="signature"
+                extra="Fija: va al final de las propuestas, los recordatorios y los mensajes programados, tal cual la escribís. Las respuestas automáticas no la llevan."
+                rules={[{ required: true, whitespace: true, message: "Escribí la firma que cierra tus correos." }]}
+              >
+                <Input.TextArea rows={4} />
+              </Form.Item>
+            </div>
+            <section className="signature-preview" aria-label="Vista previa del final del correo">
+              <h3 className="type-micro">Así termina cada correo</h3>
+              {ending.tail ? <p className="signature-preview__tail">…{"\n"}{ending.tail}</p> : null}
+              <p className="signature-preview__signature">{ending.signature || "Tu firma va a aparecer acá."}</p>
+            </section>
           </FormSection>
         </div>
       </Form>
