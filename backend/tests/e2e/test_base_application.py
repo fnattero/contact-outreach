@@ -254,7 +254,7 @@ def test_a_strict_filter_that_removes_everything_stops_the_campaign_with_a_reaso
     unfit = MockLLMProvider(
         screening_outputs=[{"verdict": "UNFIT", "reason": "No tiene relación con motores."}] * 50
     )
-    monkeypatch.setattr("apps.prospects.screening.get_llm_provider", lambda *a, **k: unfit)
+    monkeypatch.setattr("apps.prospects.screening.get_screening_provider", lambda *a, **k: unfit)
     save_relevance_filter(owner=owner, mode="STRICT", criteria="Sólo talleres de motores.")
     operator = Operator(owner.username)
     operator.save_profile("Componentes Filtro")

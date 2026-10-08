@@ -22,6 +22,7 @@ from apps.configuration.models import IntegrationConfiguration
 from apps.core.crypto import decrypt_secret, encrypt_secret
 
 LLM_KEY_PURPOSE = "integration.llm.api-key"
+RELEVANCE_LLM_KEY_PURPOSE = "integration.llm.relevance-api-key"
 GMAIL_CLIENT_SECRET_PURPOSE = "integration.gmail.oauth-client-secret"
 
 
@@ -86,6 +87,10 @@ class RuntimeIntegrationConfiguration:
     llm_provider: str
     llm_model: str
     relevance_llm_model: str
+    relevance_llm_provider: str
+    relevance_llm_base_url: str
+    relevance_llm_credential_source: str
+    relevance_llm_credential_configured: bool
     ollama_base_url: str
     openai_compatible_base_url: str
     embedding_provider: str
@@ -106,6 +111,25 @@ class RuntimeIntegrationConfiguration:
         if selected == IntegrationConfiguration.LLMProvider.OPENAI_COMPATIBLE:
             return self.openai_compatible_base_url
         return ""
+
+    @property
+    def relevance_separate(self) -> bool:
+        return bool(self.relevance_llm_provider)
+
+    def relevance_connection(self) -> tuple[str, str]:
+        """Provider and address the audience filter talks to, before any key is involved."""
+
+        if not self.relevance_llm_provider:
+            return self.llm_provider, self.llm_base_url()
+        return (
+            self.relevance_llm_provider,
+            self.relevance_llm_base_url or self.llm_base_url(self.relevance_llm_provider),
+        )
+
+    def relevance_model(self) -> str:
+        if not self.relevance_llm_provider:
+            return self.relevance_llm_model or self.llm_model
+        return self.relevance_llm_model
 
 
 def _configuration(
@@ -151,6 +175,43 @@ def _secret_status(
     return IntegrationConfiguration.SecretSource.NONE, False
 
 
+def _relevance_shares_main_connection(configuration: IntegrationConfiguration) -> bool:
+    """A key may be reused only for the very same service, never sent to a different one."""
+
+    main_base = _provider_base_url(configuration, configuration.llm_provider)
+    relevance_base = configuration.relevance_llm_base_url or _provider_base_url(
+        configuration, configuration.relevance_llm_provider
+    )
+    return (
+        configuration.relevance_llm_provider == configuration.llm_provider
+        and relevance_base == main_base
+    )
+
+
+def _provider_base_url(configuration: IntegrationConfiguration, provider: str) -> str:
+    if provider == IntegrationConfiguration.LLMProvider.OLLAMA:
+        return configuration.ollama_base_url
+    if provider == IntegrationConfiguration.LLMProvider.OPENAI_COMPATIBLE:
+        return configuration.openai_compatible_base_url
+    return ""
+
+
+def _relevance_credential(
+    configuration: IntegrationConfiguration | None, *, main_source: str, main_configured: bool
+) -> tuple[str, bool]:
+    if configuration is None or not configuration.relevance_llm_provider:
+        return main_source, main_configured
+    own_key_source = configuration.relevance_llm_api_key_source
+    if own_key_source == IntegrationConfiguration.SecretSource.ENCRYPTED:
+        return (
+            IntegrationConfiguration.SecretSource.ENCRYPTED,
+            bool(configuration.relevance_llm_api_key_encrypted),
+        )
+    if _relevance_shares_main_connection(configuration):
+        return "SHARED", main_configured
+    return IntegrationConfiguration.SecretSource.NONE, False
+
+
 def runtime_integration_configuration(
     owner_id: int | None = None,
 ) -> RuntimeIntegrationConfiguration:
@@ -167,6 +228,9 @@ def runtime_integration_configuration(
         ciphertext_field="gmail_oauth_client_secret_encrypted",
         environment_value=settings.GMAIL_OAUTH_CLIENT_SECRET,
     )
+    relevance_source, relevance_configured = _relevance_credential(
+        configuration, main_source=llm_source, main_configured=llm_configured
+    )
     if configuration is None:
         return RuntimeIntegrationConfiguration(
             extractor_provider=IntegrationConfiguration.ExtractorProvider.FAKE,
@@ -175,6 +239,10 @@ def runtime_integration_configuration(
             llm_provider=settings.LLM_PROVIDER,
             llm_model=settings.LLM_MODEL,
             relevance_llm_model="",
+            relevance_llm_provider="",
+            relevance_llm_base_url="",
+            relevance_llm_credential_source=relevance_source,
+            relevance_llm_credential_configured=relevance_configured,
             ollama_base_url=settings.OLLAMA_BASE_URL,
             openai_compatible_base_url=settings.OPENAI_COMPATIBLE_BASE_URL,
             embedding_provider=settings.EMBEDDING_PROVIDER,
@@ -195,6 +263,10 @@ def runtime_integration_configuration(
         llm_provider=configuration.llm_provider,
         llm_model=configuration.llm_model,
         relevance_llm_model=configuration.relevance_llm_model,
+        relevance_llm_provider=configuration.relevance_llm_provider,
+        relevance_llm_base_url=configuration.relevance_llm_base_url,
+        relevance_llm_credential_source=relevance_source,
+        relevance_llm_credential_configured=relevance_configured,
         ollama_base_url=configuration.ollama_base_url,
         openai_compatible_base_url=configuration.openai_compatible_base_url,
         embedding_provider=configuration.embedding_provider,
@@ -242,6 +314,23 @@ def get_llm_api_key(owner_id: int | None = None) -> str:
     )
 
 
+def get_relevance_llm_api_key(owner_id: int | None = None) -> str:
+    """The key the audience filter sends. Its own when it has its own connection."""
+
+    configuration = _configuration(owner_id)
+    if configuration is None or not configuration.relevance_llm_provider:
+        return get_llm_api_key(owner_id)
+    own_key_source = configuration.relevance_llm_api_key_source
+    if own_key_source == IntegrationConfiguration.SecretSource.ENCRYPTED:
+        ciphertext = str(configuration.relevance_llm_api_key_encrypted)
+        if not ciphertext:
+            raise ImproperlyConfigured("La credencial cifrada configurada está ausente.")
+        return decrypt_secret(ciphertext, purpose=RELEVANCE_LLM_KEY_PURPOSE)
+    if _relevance_shares_main_connection(configuration):
+        return get_llm_api_key(owner_id)
+    return ""
+
+
 def get_gmail_oauth_client_secret(owner_id: int | None = None) -> str:
     return _resolve_secret(
         owner_id,
@@ -261,6 +350,8 @@ def integration_configuration_initial(owner_id: int) -> dict[str, object]:
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
         "relevance_llm_model": runtime.relevance_llm_model,
+        "relevance_llm_provider": runtime.relevance_llm_provider,
+        "relevance_llm_base_url": runtime.relevance_llm_base_url,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
         "embedding_provider": runtime.embedding_provider,
@@ -279,11 +370,16 @@ def _safe_snapshot(runtime: RuntimeIntegrationConfiguration) -> dict[str, object
         "llm_provider": runtime.llm_provider,
         "llm_model": runtime.llm_model,
         "relevance_llm_model": runtime.relevance_llm_model,
+        "relevance_llm_provider": runtime.relevance_llm_provider,
+        "relevance_llm_base_url": runtime.relevance_llm_base_url,
         "ollama_base_url": runtime.ollama_base_url,
         "openai_compatible_base_url": runtime.openai_compatible_base_url,
         "embedding_provider": runtime.embedding_provider,
         "embedding_model": runtime.embedding_model,
         "embedding_dimensions": runtime.embedding_dimensions,
+        "relevance_llm_credential": (
+            "configured" if runtime.relevance_llm_credential_configured else "missing"
+        ),
         "llm_credential": "configured" if runtime.llm_credential_configured else "missing",
         "gmail_provider": runtime.gmail_provider,
         "gmail_client_id_configured": bool(runtime.gmail_oauth_client_id),
@@ -331,6 +427,46 @@ def _candidate_secret_configured(
     return False
 
 
+def _validate_relevance_connection(configuration: IntegrationConfiguration) -> None:
+    provider = configuration.relevance_llm_provider
+    if not provider:
+        # Shared connection: nothing of its own may linger and be mistaken for active.
+        configuration.relevance_llm_base_url = ""
+        configuration.relevance_llm_api_key_encrypted = ""
+        configuration.relevance_llm_api_key_source = IntegrationConfiguration.SecretSource.NONE
+        return
+    if provider != IntegrationConfiguration.LLMProvider.FAKE and not (
+        configuration.relevance_llm_model.strip()
+    ):
+        raise ValidationError(
+            "Indicá el modelo del filtro de audiencia: no puede heredar el de las respuestas "
+            "porque usa otro servicio."
+        )
+    if provider == IntegrationConfiguration.LLMProvider.OPENAI_COMPATIBLE:
+        address = configuration.relevance_llm_base_url or configuration.openai_compatible_base_url
+        if not address.strip():
+            raise ValidationError(
+                "El filtro de audiencia compatible con OpenAI requiere una dirección del servicio."
+            )
+        has_own_key = (
+            configuration.relevance_llm_api_key_source
+            == IntegrationConfiguration.SecretSource.ENCRYPTED
+            and bool(configuration.relevance_llm_api_key_encrypted)
+        )
+        if not has_own_key and not (
+            _relevance_shares_main_connection(configuration)
+            and _candidate_secret_configured(
+                configuration,
+                source_field="llm_api_key_source",
+                ciphertext_field="llm_api_key_encrypted",
+                environment_value=settings.LLM_API_KEY,
+            )
+        ):
+            raise ValidationError(
+                "El filtro de audiencia compatible con OpenAI requiere su propia clave de acceso."
+            )
+
+
 @transaction.atomic
 @sensitive_variables("values")
 def save_integration_configuration(
@@ -373,6 +509,7 @@ def save_integration_configuration(
         "llm_provider",
         "llm_model",
         "relevance_llm_model",
+        "relevance_llm_provider",
         "embedding_provider",
         "embedding_model",
         "embedding_dimensions",
@@ -400,6 +537,27 @@ def save_integration_configuration(
         ciphertext_field="llm_api_key_encrypted",
         purpose=LLM_KEY_PURPOSE,
     )
+    relevance_base_url = values.get("relevance_llm_base_url", "")
+    relevance_is_ollama = (
+        configuration.relevance_llm_provider == IntegrationConfiguration.LLMProvider.OLLAMA
+    )
+    configuration.relevance_llm_base_url = (
+        validate_integration_base_url(
+            relevance_base_url,
+            label="Ollama del filtro" if relevance_is_ollama else "OpenAI compatible del filtro",
+            allow_http_service_name=relevance_is_ollama,
+        )
+        if relevance_base_url
+        else ""
+    )
+    _set_secret(
+        configuration,
+        value=values.get("relevance_llm_api_key", ""),
+        remove=bool(values.get("remove_relevance_llm_api_key")),
+        source_field="relevance_llm_api_key_source",
+        ciphertext_field="relevance_llm_api_key_encrypted",
+        purpose=RELEVANCE_LLM_KEY_PURPOSE,
+    )
     _set_secret(
         configuration,
         value=values.get("gmail_oauth_client_secret", ""),
@@ -424,6 +582,7 @@ def save_integration_configuration(
             raise ValidationError("La conexión compatible con OpenAI requiere una clave de acceso.")
         if not configuration.openai_compatible_base_url.strip():
             raise ValidationError("La conexión compatible con OpenAI requiere una URL base.")
+    _validate_relevance_connection(configuration)
     if configuration.gmail_provider == IntegrationConfiguration.GmailProvider.API:
         configured = _candidate_secret_configured(
             configuration,
@@ -456,6 +615,7 @@ def redact_provider_error(error: object, *, owner_id: int | None = None) -> str:
     message = " ".join(str(error).split()) or error.__class__.__name__
     getters: tuple[Callable[[int | None], str], ...] = (
         get_llm_api_key,
+        get_relevance_llm_api_key,
         get_gmail_oauth_client_secret,
     )
     for getter in getters:
@@ -478,6 +638,12 @@ def validate_encrypted_integration_credentials() -> list[str]:
     failures: list[str] = []
     checks = (
         ("llm_api_key_source", "llm_api_key_encrypted", LLM_KEY_PURPOSE, "LLM"),
+        (
+            "relevance_llm_api_key_source",
+            "relevance_llm_api_key_encrypted",
+            RELEVANCE_LLM_KEY_PURPOSE,
+            "LLM del filtro",
+        ),
         (
             "gmail_oauth_client_secret_source",
             "gmail_oauth_client_secret_encrypted",

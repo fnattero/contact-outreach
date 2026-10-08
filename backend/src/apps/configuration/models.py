@@ -151,6 +151,21 @@ class IntegrationConfiguration(TimestampedUUIDModel):
     llm_model = models.CharField(max_length=120, default="fake-deterministic")
     # Blank means the audience filter uses llm_model; a cheaper model can be set here.
     relevance_llm_model = models.CharField(max_length=120, blank=True, default="")
+    # Blank means the audience filter shares the reply connection (provider, address and key).
+    # A provider here makes the filter use its own connection: its own address and its own key.
+    relevance_llm_provider = models.CharField(
+        max_length=30,
+        choices=LLMProvider.choices,
+        blank=True,
+        default="",
+    )
+    relevance_llm_base_url = models.URLField(blank=True)
+    relevance_llm_api_key_encrypted = models.TextField(blank=True, editable=False)
+    relevance_llm_api_key_source = models.CharField(
+        max_length=20,
+        choices=SecretSource.choices,
+        default=SecretSource.NONE,
+    )
     llm_api_key_encrypted = models.TextField(blank=True, editable=False)
     llm_api_key_source = models.CharField(
         max_length=20,
@@ -192,6 +207,11 @@ class IntegrationConfiguration(TimestampedUUIDModel):
             models.CheckConstraint(
                 condition=~Q(llm_api_key_source="ENCRYPTED") | ~Q(llm_api_key_encrypted=""),
                 name="integration_llm_cipher_required",
+            ),
+            models.CheckConstraint(
+                condition=~Q(relevance_llm_api_key_source="ENCRYPTED")
+                | ~Q(relevance_llm_api_key_encrypted=""),
+                name="integration_relevance_llm_cipher_required",
             ),
             models.CheckConstraint(
                 condition=Q(embedding_dimensions__gte=64, embedding_dimensions__lte=3072),

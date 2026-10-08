@@ -54,6 +54,7 @@ def _prompt_snapshot(campaign: Campaign) -> dict[str, Any]:
 
     prompts = runtime_prompt_configuration(campaign.created_by_id)
     integrations = runtime_integration_configuration(campaign.created_by_id)
+    relevance_provider, relevance_base_url = integrations.relevance_connection()
     return {
         "version": "fixed-campaign-message-v1",
         "schema_version": "fixed-message-no-placeholders-v1",
@@ -65,7 +66,11 @@ def _prompt_snapshot(campaign: Campaign) -> dict[str, Any]:
             "criteria": prompts.relevance_criteria,
             "criteria_sha256": hashlib.sha256(prompts.relevance_criteria.encode()).hexdigest(),
             "criteria_characters": len(prompts.relevance_criteria),
-            "model": integrations.relevance_llm_model or campaign.llm_model,
+            # Frozen like the model: the connection is what a campaign was approved against.
+            # The key is never stored here; it is resolved when the call is made.
+            "provider": relevance_provider,
+            "base_url": relevance_base_url,
+            "model": integrations.relevance_model(),
             "configuration_revision": prompts.revision,
             "schema_version": PROSPECT_SCREENING_SCHEMA_VERSION,
         },

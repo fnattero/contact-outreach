@@ -29,7 +29,7 @@ from apps.integrations.contracts import (
     ProspectScreeningRequest,
     ProviderError,
 )
-from apps.integrations.factory import get_llm_provider
+from apps.integrations.factory import get_llm_provider, get_screening_provider
 from apps.integrations.llm_inputs import (
     PROSPECT_SCREENING_SCHEMA_VERSION,
     prospect_screening_input_character_count,
@@ -181,7 +181,10 @@ def screen_prospect_relevance(
 
     criteria = str(config.get("criteria", ""))
     model = str(config.get("model") or campaign.llm_model)
-    provider_name = campaign.llm_provider
+    # A campaign frozen before the filter had its own connection used the reply one.
+    own_connection = "provider" in config
+    provider_name = str(config.get("provider") or campaign.llm_provider)
+    base_url = str(config.get("base_url") or "") if own_connection else campaign.llm_base_url
     snapshot = prospect.web_snapshots.first()
     facts = build_screening_facts(prospect, snapshot)
     criteria_sha256 = str(
@@ -247,12 +250,22 @@ def screen_prospect_relevance(
     error = ""
     # No transaction is open here: the provider call never holds a database lock.
     try:
-        active = provider or get_llm_provider(
-            provider_name,
-            base_url=campaign.llm_base_url,
-            model=model,
-            owner_id=campaign.created_by_id,
-        )
+        if provider is not None:
+            active = provider
+        elif own_connection:
+            active = get_screening_provider(
+                provider_name,
+                base_url=base_url,
+                model=model,
+                owner_id=campaign.created_by_id,
+            )
+        else:
+            active = get_llm_provider(
+                provider_name,
+                base_url=base_url,
+                model=model,
+                owner_id=campaign.created_by_id,
+            )
         result = active.screen_prospect(request)
     except (ProviderError, ValueError, ImproperlyConfigured) as exc:
         # Fail open: a technical problem never discards a business.

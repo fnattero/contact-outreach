@@ -316,6 +316,47 @@ def test_a_provider_failure_keeps_the_prospect_after_exactly_one_call(
 
 
 @pytest.mark.django_db
+def test_a_campaign_with_its_own_filter_connection_screens_through_it(
+    owner: User, private_catalog_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del private_catalog_dir
+    prospect = _prospect(owner, mode="LENIENT")
+    _set_snapshot(
+        prospect,
+        {
+            "prospect_screening": {
+                **_screening(),
+                "provider": "ollama",
+                "base_url": "http://filter.example:11434",
+                "model": "small-local",
+            }
+        },
+    )
+    seen: dict[str, Any] = {}
+    provider = MockLLMProvider(screening_outputs=[_verdict("FIT")])
+
+    def _screening_provider(name: str, **kwargs: Any) -> LLMProvider:
+        seen.update(name=name, **kwargs)
+        return provider
+
+    monkeypatch.setattr("apps.prospects.screening.get_screening_provider", _screening_provider)
+    monkeypatch.setattr(
+        "apps.prospects.screening.get_llm_provider",
+        lambda *a, **k: ExplodingLLMProvider(),
+    )
+
+    outcome = screen_prospect_relevance(prospect.pk)
+
+    assert outcome.vetoed is False
+    assert provider.screening_call_count == 1
+    assert (seen["name"], seen["base_url"], seen["model"]) == (
+        "ollama",
+        "http://filter.example:11434",
+        "small-local",
+    )
+
+
+@pytest.mark.django_db
 def test_malformed_model_output_keeps_the_prospect(owner: User, private_catalog_dir: Path) -> None:
     del private_catalog_dir
     prospect = _prospect(owner, mode="STRICT")

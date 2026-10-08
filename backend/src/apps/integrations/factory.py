@@ -6,6 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 from apps.configuration.integrations import (
     get_gmail_oauth_client_secret,
     get_llm_api_key,
+    get_relevance_llm_api_key,
     runtime_integration_configuration,
 )
 from apps.integrations.contracts import (
@@ -81,6 +82,33 @@ def get_llm_provider(
             api_key=get_llm_api_key(owner_id),
         )
     raise ImproperlyConfigured(f"LLM provider {selected!r} is not supported")
+
+
+def get_screening_provider(
+    provider_name: str,
+    *,
+    base_url: str,
+    model: str,
+    owner_id: int | None = None,
+) -> LLMProvider:
+    """The model that reviews the audience, which may live at a different service than replies.
+
+    The key is the filter's own when it has its own connection, so a key is never sent to a
+    service it was not entered for.
+    """
+
+    runtime = runtime_integration_configuration(owner_id)
+    if provider_name == "fake":
+        return MockLLMProvider()
+    if provider_name == "ollama":
+        return OllamaProvider(base_url=base_url or runtime.ollama_base_url, model=model)
+    if provider_name == "openai-compatible":
+        return OpenAICompatibleProvider(
+            base_url=base_url or runtime.openai_compatible_base_url,
+            model=model,
+            api_key=get_relevance_llm_api_key(owner_id),
+        )
+    raise ImproperlyConfigured(f"LLM provider {provider_name!r} is not supported")
 
 
 def get_embedding_provider(
