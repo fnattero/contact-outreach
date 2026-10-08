@@ -126,9 +126,9 @@ export default function NewCampaignPage() {
   const catalogMissing = catalogs.length === 0;
   const setupBlocker = useMemo<SetupBlocker | null>(() => {
     if (!categories.length) return {
-      headline: "Faltan rubros para buscar",
-      explanation: "Configurá al menos un rubro activo antes de crear la audiencia de una campaña.",
-      actionLabel: "Configurar rubros",
+      headline: "Faltan negocios para buscar",
+      explanation: "Configurá al menos un negocio a buscar antes de crear la audiencia de una campaña.",
+      actionLabel: "Configurar negocios a buscar",
       actionHref: "/settings/categories",
     };
     if (!provinces.length || !zones.length) return {
@@ -225,14 +225,14 @@ export default function NewCampaignPage() {
 
         <section className="campaign-form-section campaign-form-section--wide" aria-labelledby="campaign-audience-heading">
           <h2 className="type-title" id="campaign-audience-heading">Audiencia y zona</h2>
-          <p className="campaign-form-section__description">Cada rubro se combina con cada zona seleccionada para buscar empresas. El mapa usa límites oficiales.</p>
+          <p className="campaign-form-section__description">Cada negocio a buscar se combina con cada zona seleccionada para encontrar empresas. El mapa usa límites oficiales.</p>
           <Form.Item
-            label="Rubros"
+            label="Negocios a buscar"
             name="categories"
             extra="Elegí las actividades que describen a las empresas que querés encontrar."
-            rules={[{ required: true, message: "Elegí al menos un rubro." }]}
+            rules={[{ required: true, message: "Elegí al menos un negocio a buscar." }]}
           >
-            <Select mode="multiple" optionFilterProp="label" placeholder="Seleccioná uno o más rubros" options={categories.map((category) => ({ value: category.id, label: category.name }))} />
+            <Select mode="multiple" optionFilterProp="label" placeholder="Elegí uno o más negocios a buscar" options={categories.map((category) => ({ value: category.id, label: category.name }))} />
           </Form.Item>
           <Form.Item
             label="Provincias"

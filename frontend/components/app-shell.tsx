@@ -86,7 +86,7 @@ const navigationGroups: readonly NavigationGroup[] = [
       { key: "/settings/profile", label: "Perfil comercial", icon: <ShopOutlined />, capabilities: ["manage_configuration"] },
       { key: "/settings/message-templates", label: "Mensajes de campaña", icon: <MailOutlined />, capabilities: ["manage_configuration"] },
       { key: "/catalogs", label: "Catálogos", icon: <BookOutlined />, capabilities: ["manage_configuration"] },
-      { key: "/settings/categories", label: "Rubros", icon: <TagsOutlined />, capabilities: ["manage_configuration"] },
+      { key: "/settings/categories", label: "Negocios a buscar", icon: <TagsOutlined />, capabilities: ["manage_configuration"] },
     ],
   },
   {

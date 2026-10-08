@@ -668,6 +668,68 @@ time {
   line-height: 16px;
 }
 
+.search-targets {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-targets__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-targets__item:first-child {
+  padding-top: 0;
+}
+
+.search-targets__item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.search-targets__main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.search-targets__words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.search-targets__words--edit {
+  margin-bottom: 16px;
+}
+
+.search-targets__examples {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.search-targets__examples h3 {
+  margin: 0 0 8px;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 767px) {
+  .search-targets__item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .knowledge-steps {
   margin: 0 0 12px;
   padding-inline-start: 20px;
