@@ -1,6 +1,11 @@
 .PHONY: build up down logs backend-lint backend-typecheck backend-test backend-check frontend-install frontend-check test-e2e security-check check migrate owner demo smoke-worker backup restore \
 	backend-lint-local backend-typecheck-local backend-test-local backend-check-local frontend-check-local test-e2e-local security-check-local backend-shell
 
+# Keep the image build log out of test output: it is hundreds of lines nobody reads. Failures
+# still print. Use `make build` (or unset these) to watch a build.
+export COMPOSE_PROGRESS ?= quiet
+export BUILDKIT_PROGRESS ?= quiet
+
 COMPOSE := docker compose --project-directory . --file infra/docker-compose.yml
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend

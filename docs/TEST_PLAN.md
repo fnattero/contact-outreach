@@ -24,7 +24,12 @@ Antes de revisión también se ejecutan migraciones frescas/upgrade, tests de se
   `backend/pyproject.toml`). Meta siguiente: 95% en autorización, elegibilidad/restricción,
   transiciones, idempotencia, SSRF, contexto/policy, MIME y Gmail.
 - Frontend: 72% de sentencias, 59% de ramas, 69% de funciones y 77% de líneas
-  (`coverage.thresholds` en `frontend/vitest.config.ts`). `pnpm test` imprime la tabla de cobertura.
+  (`coverage.thresholds` en `frontend/vitest.config.ts`).
+
+La salida de los tests es breve a propósito: el backend termina con un cuadro de cobertura (total,
+mínimo y los cinco archivos más débiles) y el frontend con un resumen de cuatro líneas. Para la
+tabla completa por archivo: `COVERAGE_DETAIL=1 make frontend-check` o, en backend,
+`pytest --cov-report=term-missing:skip-covered`.
 
 Coverage nunca sustituye negativos. En CI (`.github/workflows/ci.yml`) cada push ejecuta
 `make check` y `make test-e2e`; `make security-check` corre como job aparte.

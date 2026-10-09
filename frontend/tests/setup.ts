@@ -41,3 +41,19 @@ class ResizeObserverStub {
   disconnect(): void {}
 }
 Object.defineProperty(globalThis, "ResizeObserver", { writable: true, value: ResizeObserverStub });
+
+// jsdom does not implement styles of pseudo-elements and prints a "Not implemented" notice to
+// stderr on every call, which antd makes constantly. Ignoring the pseudo-element argument returns
+// the element's own style (all jsdom can offer anyway) without the notice.
+if (typeof window !== "undefined") {
+  const realGetComputedStyle = window.getComputedStyle.bind(window);
+  window.getComputedStyle = (element: Element) => realGetComputedStyle(element);
+}
+
+// Clicking a real link makes jsdom print "Not implemented: navigation". Cancelling the default
+// action after React has handled the click keeps the notice away without changing what a test sees.
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    if ((event.target as Element | null)?.closest?.("a[href]")) event.preventDefault();
+  });
+}
