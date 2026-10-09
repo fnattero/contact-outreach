@@ -764,7 +764,7 @@ export function runCampaignAction(
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return request<CampaignDetail>(
-    `/api/v1/campaigns/${encodeURIComponent(id)}/actions/${action}/`,
+    `/api/v1/campaigns/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}/`,
     {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
@@ -921,7 +921,7 @@ export function changeCommunicationPlan(
   body: Record<string, unknown> = {},
 ): Promise<CommunicationPlan> {
   return request<CommunicationPlan>(
-    `/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/${encodeURIComponent(planId)}/${action}/`,
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/${encodeURIComponent(planId)}/${encodeURIComponent(action)}/`,
     { method: "POST", body: JSON.stringify(action === "active" || action === "pause" || action === "disable" ? { state: action === "active" ? "ACTIVE" : action === "pause" ? "PAUSED" : "DISABLED" } : body) },
   );
 }
@@ -975,14 +975,14 @@ export function createUser(input: {
 }
 
 export function updateUserRole(id: number, role: "ADMIN" | "VENDEDOR"): Promise<ManagedUser> {
-  return request<ManagedUser>(`/api/v1/users/${id}/role/`, {
+  return request<ManagedUser>(`/api/v1/users/${encodeURIComponent(String(id))}/role/`, {
     method: "PATCH",
     body: JSON.stringify({ role }),
   });
 }
 
 export function deleteUser(id: number): Promise<void> {
-  return request<void>(`/api/v1/users/${id}/`, { method: "DELETE" });
+  return request<void>(`/api/v1/users/${encodeURIComponent(String(id))}/`, { method: "DELETE" });
 }
 
 export type SendMode = {
@@ -997,14 +997,14 @@ export function getSendMode(): Promise<SendMode> {
 }
 
 export function setSendLive(action: "enable-live" | "disable-live", confirmation?: string): Promise<SendMode> {
-  return request<SendMode>(`/api/v1/send-mode/actions/${action}/`, {
+  return request<SendMode>(`/api/v1/send-mode/actions/${encodeURIComponent(action)}/`, {
     method: "POST",
     body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
   });
 }
 
 export function updateUserStatus(id: number, isActive: boolean): Promise<ManagedUser> {
-  return request<ManagedUser>(`/api/v1/users/${id}/status/`, {
+  return request<ManagedUser>(`/api/v1/users/${encodeURIComponent(String(id))}/status/`, {
     method: "PATCH",
     body: JSON.stringify({ is_active: isActive }),
   });
@@ -1180,7 +1180,7 @@ export function syncOverture(provinceCode: string): Promise<{ status: string; ce
 }
 
 export function resolveHumanTask(id: string, action: "resolve" | "dismiss", note: string): Promise<{ id: string; status: string }> {
-  return request<{ id: string; status: string }>(`/api/v1/human-tasks/${encodeURIComponent(id)}/${action}/`, {
+  return request<{ id: string; status: string }>(`/api/v1/human-tasks/${encodeURIComponent(id)}/${encodeURIComponent(action)}/`, {
     method: "POST",
     body: JSON.stringify({ note }),
   });
@@ -1199,7 +1199,7 @@ export function setAutomationLive(
   action: "enable-live" | "disable-live",
   confirmation?: string,
 ): Promise<AutomationConfiguration> {
-  return request<AutomationConfiguration>(`/api/v1/automation/actions/${action}/`, {
+  return request<AutomationConfiguration>(`/api/v1/automation/actions/${encodeURIComponent(action)}/`, {
     method: "POST",
     body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
   });
