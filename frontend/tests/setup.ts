@@ -1,10 +1,21 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
 // Vitest runs without globals, so Testing Library cannot register its own cleanup; without this
-// every test would render on top of the previous one.
-afterEach(() => cleanup());
+// every test would render on top of the previous one. Pending React and animation work is let to
+// finish first: a test that ends right after its last assertion otherwise leaves scheduler tasks
+// that fire after jsdom is gone ("window is not defined") and fail the whole run at random.
+afterEach(async () => {
+  if (typeof window !== "undefined") {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+  }
+  cleanup();
+  // Unmounting queues its own passive-effect work; let that run too before the next test or exit.
+  if (typeof window !== "undefined") await new Promise((resolve) => setTimeout(resolve, 0));
+});
 
 // Server-only tests (route handlers) run in the node environment, which has no window.
 if (typeof window !== "undefined") {
