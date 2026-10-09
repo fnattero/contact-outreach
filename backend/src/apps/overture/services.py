@@ -165,18 +165,6 @@ def get_active_snapshot() -> OvertureDatasetSnapshot | None:
     return OvertureDatasetSnapshot.objects.active().order_by("-activated_at", "-created_at").first()
 
 
-def get_active_partition(province_code: str) -> OvertureCoveragePartition | None:
-    return (
-        OvertureCoveragePartition.objects.select_related("release", "province", "snapshot")
-        .filter(
-            province_code=province_code,
-            status=OvertureCoveragePartition.Status.READY,
-            is_active=True,
-        )
-        .first()
-    )
-
-
 def get_latest_snapshot() -> OvertureDatasetSnapshot | None:
     return OvertureDatasetSnapshot.objects.order_by("-created_at").first()
 

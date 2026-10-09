@@ -54,10 +54,6 @@ class ScheduledEligibility:
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
-def _friendly_validation(error: ValidationError) -> str:
-    return " ".join(error.messages) if error.messages else str(error)
-
-
 def _message_id(idempotency_key: str) -> str:
     digest = sha256(idempotency_key.encode()).hexdigest()[:40]
     return f"<scheduled-{digest}@contact-outreach.local>"

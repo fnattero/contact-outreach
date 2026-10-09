@@ -608,13 +608,3 @@ def sync_gmail_connection(
     except (AuthenticationError, PermanentProviderError, ValidationProviderError) as exc:
         _persist_sync_failure(connection_id, exc)
         raise
-
-
-def sync_all_connections() -> int:
-    imported = 0
-    connection_ids = GmailConnection.objects.filter(
-        status=GmailConnection.Status.CONNECTED
-    ).values_list("pk", flat=True)
-    for connection_id in connection_ids:
-        imported += sync_gmail_connection(connection_id)
-    return imported

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from apps.automation.models import HumanTask, ReplyDecision
+from apps.automation.models import HumanTask
 
 TASK_REASON_LABELS = {
     "MEETING_OR_DATE": "Quiere coordinar una reunión o una fecha",
@@ -59,21 +59,4 @@ def review_reason_for_task(task: HumanTask) -> ReviewReason:
         title=task_reason_label(task.reason, summary or "Necesita revisión humana"),
         summary=summary or "Esta conversación necesita que la revise una persona.",
         next_step=TASK_REASON_NEXT_STEPS.get(task.reason, ""),
-    )
-
-
-def review_reason_for_decision(decision: ReplyDecision) -> ReviewReason | None:
-    if decision.state not in {
-        ReplyDecision.State.HUMAN_REQUIRED,
-        ReplyDecision.State.REJECTED_POLICY,
-        ReplyDecision.State.FAILED,
-    }:
-        return None
-    reason = decision.human_reason or decision.intent
-    summary = decision.error or task_reason_label(reason)
-    return ReviewReason(
-        status_label=decision.get_state_display(),
-        title=task_reason_label(reason, "La respuesta automática necesita revisión"),
-        summary=summary or "Esta conversación necesita que la revise una persona.",
-        next_step=TASK_REASON_NEXT_STEPS.get(reason, ""),
     )
