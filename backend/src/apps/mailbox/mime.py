@@ -68,6 +68,16 @@ def _validated_pdf_attachments(
     return attachments
 
 
+def _single_plain_address(value: str) -> bool:
+    """One bare address: no name, list, separator or control character (one recipient per effect)."""
+
+    return (
+        bool(value)
+        and value.count("@") == 1
+        and not any(character in value for character in ' ,;<>"()\r\n\t\0')
+    )
+
+
 def _finish_message(message: EmailMessage) -> BuiltMessage:
     raw = message.as_bytes(policy=SMTP)
     size = len(raw)
@@ -90,7 +100,7 @@ def build_message(
     pdf_bytes: bytes | None = None,
     pdf_filename: str = "catalogo.pdf",
 ) -> BuiltMessage:
-    if not sender or not recipient or "\n" in sender or "\n" in recipient:
+    if not sender or "\n" in sender or "\r" in sender or not _single_plain_address(recipient):
         raise ValidationError("El remitente o destinatario del correo no es válido.")
     message = EmailMessage(policy=SMTP)
     message["From"] = sender
@@ -129,7 +139,7 @@ def build_reply_message(
     campaign_header: str,
     message_header: str,
 ) -> BuiltMessage:
-    if not sender or not recipient or "\n" in sender or "\n" in recipient:
+    if not sender or "\n" in sender or "\r" in sender or not _single_plain_address(recipient):
         raise ValidationError("El remitente o destinatario del correo no es válido.")
     if not in_reply_to:
         raise ValidationError("La respuesta necesita el identificador del mensaje anterior.")
