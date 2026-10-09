@@ -694,6 +694,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await requestEnvelope<T>(path, init)).data;
 }
 
+/** The server rotates the CSRF secret when the session changes, so a cached token must not outlive it. */
+function forgetCsrfToken<T>(result: Promise<T>): Promise<T> {
+  return result.finally(() => {
+    csrfToken = null;
+  });
+}
+
 async function requestVersioned<T>(path: string, init: RequestInit = {}): Promise<VersionedResource<T>> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
@@ -710,7 +717,11 @@ async function requestVersioned<T>(path: string, init: RequestInit = {}): Promis
     credentials: "include",
     cache: "no-store",
   });
-  if (!response.ok) throw await responseError(response);
+  if (!response.ok) {
+    const problem = await responseError(response);
+    if (response.status === 401) csrfToken = null;
+    throw problem;
+  }
   const body = (await response.json()) as ApiEnvelope<T>;
   const etag = response.headers.get("ETag");
   return { data: body.data, etag };
@@ -1302,10 +1313,12 @@ export function createCampaign(input: Record<string, unknown>): Promise<Campaign
 }
 
 export function login(username: string, password: string): Promise<UserSession> {
-  return request<UserSession>("/api/v1/auth/login/", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
+  return forgetCsrfToken(
+    request<UserSession>("/api/v1/auth/login/", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  );
 }
 
 export function activate(
@@ -1313,18 +1326,20 @@ export function activate(
   password: string,
   passwordConfirmation: string,
 ): Promise<UserSession> {
-  return request<UserSession>("/api/v1/auth/activate/", {
-    method: "POST",
-    body: JSON.stringify({
-      token,
-      password,
-      password_confirmation: passwordConfirmation,
+  return forgetCsrfToken(
+    request<UserSession>("/api/v1/auth/activate/", {
+      method: "POST",
+      body: JSON.stringify({
+        token,
+        password,
+        password_confirmation: passwordConfirmation,
+      }),
     }),
-  });
+  );
 }
 
 export function logout(): Promise<void> {
-  return request<void>("/api/v1/auth/logout/", { method: "POST", body: "{}" });
+  return forgetCsrfToken(request<void>("/api/v1/auth/logout/", { method: "POST", body: "{}" }));
 }
 
 export function problemMessage(problem: Problem): string {
