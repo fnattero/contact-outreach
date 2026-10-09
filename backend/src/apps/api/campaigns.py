@@ -577,16 +577,14 @@ class CampaignCoverageView(SchemaAPIView):
 
 
 class CampaignEnrollmentListView(SchemaAPIView):
-    permission_classes = (IsAuthenticated, ViewCampaignsPermission)
+    # The audience is prospect data: administrators only, like the prospects list itself.
+    permission_classes = (IsAuthenticated, ManageCampaignsPermission)
 
     def get(self, request: Request, campaign_id: uuid.UUID) -> Response:
         user = authenticated_user(request)
-        workspace = workspace_for_user(user, Capability.VIEW_CAMPAIGNS)
+        workspace = workspace_for_user(user, Capability.MANAGE_CAMPAIGNS)
         campaign = Campaign.objects.filter(pk=campaign_id, workspace=workspace).first()
-        if campaign is None or (
-            campaign.state == Campaign.State.DRAFT
-            and not has_capability(user, Capability.MANAGE_CAMPAIGNS)
-        ):
+        if campaign is None:
             raise serializers.ValidationError({"campaign_id": "La campaña no existe."})
         enrollments = CampaignEnrollment.objects.filter(campaign=campaign).select_related(
             "organization", "selected_email"
@@ -602,11 +600,7 @@ class CampaignEnrollmentListView(SchemaAPIView):
                         ),
                         "state": item.state,
                         "state_label": item.get_state_display(),
-                        "exclusion_reason": (
-                            item.exclusion_reason
-                            if has_capability(user, Capability.MANAGE_CAMPAIGNS)
-                            else ""
-                        ),
+                        "exclusion_reason": item.exclusion_reason,
                     }
                     for item in enrollments
                 ]
