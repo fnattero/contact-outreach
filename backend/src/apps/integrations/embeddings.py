@@ -152,9 +152,3 @@ def _parse_embedding_response(
     vectors = tuple(vector for _, vector in parsed)
     model = str(response.payload.get("model") or "")
     return EmbeddingResult(vectors=vectors, model=model, dimensions=dimensions)
-
-
-def assert_embedding_protocols() -> tuple[
-    type[FakeEmbeddingProvider], type[OpenAICompatibleEmbeddingProvider]
-]:
-    return FakeEmbeddingProvider, OpenAICompatibleEmbeddingProvider
