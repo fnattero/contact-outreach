@@ -19,6 +19,8 @@ export default defineConfig({
       reporter: [["text", { skipFull: true }]],
       include: ["app/**", "components/**", "lib/**", "src/**", "proxy.ts"],
       exclude: ["**/*.d.ts"],
+      // Measured 2026-10-09: 73.14 / 60.88 / 70.86 / 78.9. Only ever raise these numbers.
+      thresholds: { statements: 72, branches: 59, functions: 69, lines: 77 },
     },
   },
 });

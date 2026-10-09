@@ -18,10 +18,35 @@ make check       # agrega migraciones, OpenAPI/client drift e imágenes
 ```
 
 Antes de revisión también se ejecutan migraciones frescas/upgrade, tests de seguridad relevantes y
-`git diff --check`. El gate inicial exige 83% de líneas sobre código de aplicación, excluyendo
-migraciones generadas; la meta de endurecimiento siguiente es 85% total y 95% en autorización,
-elegibilidad/restricción, transiciones, idempotencia, SSRF, contexto/policy, MIME y Gmail. Coverage
-nunca sustituye negativos.
+`git diff --check`. Cobertura mínima (gate, sube con el tiempo y no baja):
+
+- Backend: 85% sobre código de aplicación, excluyendo migraciones generadas (`--cov-fail-under` en
+  `backend/pyproject.toml`). Meta siguiente: 95% en autorización, elegibilidad/restricción,
+  transiciones, idempotencia, SSRF, contexto/policy, MIME y Gmail.
+- Frontend: 72% de sentencias, 59% de ramas, 69% de funciones y 77% de líneas
+  (`coverage.thresholds` en `frontend/vitest.config.ts`). `pnpm test` imprime la tabla de cobertura.
+
+Coverage nunca sustituye negativos. En CI (`.github/workflows/ci.yml`) cada push ejecuta
+`make check` y `make test-e2e`; `make security-check` corre como job aparte.
+
+### Suites de seguridad por amenaza
+
+| Amenaza (SECURITY.md) | Suite |
+| --- | --- |
+| §3 Autorización: default-deny en cada ruta y método, CSRF en toda mutación | `backend/tests/apps/api/test_route_authorization_matrix.py` |
+| §3 VENDEDOR no ve audiencia ni prospectos | `backend/tests/apps/api/test_seller_audience_privacy.py` |
+| §3 Cada página administrativa cerrada al VENDEDOR | `frontend/tests/route-guard.test.ts` |
+| §2 Lockout, IP confiable, último admin, links de activación | `backend/tests/apps/accounts/test_account_security.py` |
+| §2 CSRF rota al cambiar la sesión | `backend/tests/apps/api/test_csrf_rotation.py`, `frontend/tests/api-client.test.ts` |
+| §4 Headers y confianza de proxy | `backend/tests/apps/core/test_proxy_trust.py` |
+| §5 Cifrado de credenciales y separación por propósito | `backend/tests/apps/core/test_crypto.py` |
+| §6 HTML hostil de email | `backend/tests/apps/mailbox/test_sanitizer.py` |
+| §7 Cada regla de rechazo de la respuesta automática, también justo antes de Gmail | `backend/tests/apps/automation/test_reply_policy_gates.py` |
+| §7 Sólo se encola lo aprobado una por una y todavía elegible | `backend/tests/apps/campaigns/test_per_message_start_gates.py` |
+| §8 Un solo destinatario por envío; sin inyección de encabezados | `backend/tests/apps/mailbox/test_mime_injection.py` |
+| §8 No contactar, restricciones, canales manuales | `backend/tests/apps/contacts/test_contact_safety.py` |
+| §9 SSRF, redirects, pinning y límites del fetcher | `backend/tests/apps/integrations/test_website_ssrf.py` |
+| Cliente web: sin sinks de inyección, rutas codificadas, CSRF, texto hostil como texto | `frontend/tests/source-safety.test.ts`, `api-contract.test.ts`, `data-pages.test.tsx`, `auth-pages.test.tsx`, `contact-detail.test.tsx` |
 
 ## 2. Migraciones y compatibilidad
 

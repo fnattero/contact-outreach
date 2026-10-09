@@ -33,7 +33,9 @@ def _seen_by_the_view(remote: str = "198.51.100.9", **extra: str) -> dict[str, s
     return captured
 
 
-@override_settings(TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=False)
+@override_settings(
+    TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=False
+)
 def test_a_direct_client_cannot_spoof_any_forwarded_header() -> None:
     assert _seen_by_the_view() == {}
 
@@ -80,7 +82,9 @@ def test_an_unset_server_token_never_matches_an_empty_header(configured: str | N
         assert internal_proxy_authenticated(request) is False
 
 
-@override_settings(TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=True)
+@override_settings(
+    TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=True
+)
 def test_railway_markers_only_establish_https_and_drop_the_rest() -> None:
     seen = _seen_by_the_view(HTTP_X_RAILWAY_REQUEST_ID="abc")
 
@@ -89,7 +93,9 @@ def test_railway_markers_only_establish_https_and_drop_the_rest() -> None:
     assert "HTTP_X_FORWARDED_FOR" not in seen
 
 
-@override_settings(TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=True)
+@override_settings(
+    TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=True
+)
 def test_railway_trust_needs_both_the_request_id_and_https() -> None:
     assert _seen_by_the_view() == {}
     assert "HTTP_X_FORWARDED_PROTO" not in _seen_by_the_view(
@@ -97,9 +103,13 @@ def test_railway_trust_needs_both_the_request_id_and_https() -> None:
     )
 
 
-@override_settings(TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=False)
+@override_settings(
+    TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN, TRUST_RAILWAY_PROXY_HEADERS=False
+)
 def test_railway_markers_are_ignored_unless_explicitly_enabled() -> None:
-    assert _seen_by_the_view(HTTP_X_RAILWAY_REQUEST_ID="abc") == {"HTTP_X_RAILWAY_REQUEST_ID": "abc"}
+    assert _seen_by_the_view(HTTP_X_RAILWAY_REQUEST_ID="abc") == {
+        "HTTP_X_RAILWAY_REQUEST_ID": "abc"
+    }
 
 
 def _headers_for(path: str, response: HttpResponse | None = None) -> HttpResponse:

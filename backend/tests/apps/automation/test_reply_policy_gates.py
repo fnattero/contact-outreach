@@ -66,7 +66,9 @@ def _assert_refused(s: ReplyScenario, result: object, *, state: str, reason: str
     assert not OutboundMessage.objects.filter(kind=OutboundMessage.Kind.AUTOMATIC_REPLY).exists()
     assert not FakeGmailMessage.objects.exists()
     assert HumanTask.objects.filter(contact=s.contact, status=HumanTask.Status.OPEN).exists()
-    assert AuditEvent.objects.filter(action="automation.reply_rejected", entity_id=str(decision.pk)).exists()
+    assert AuditEvent.objects.filter(
+        action="automation.reply_rejected", entity_id=str(decision.pk)
+    ).exists()
     return decision
 
 
@@ -103,7 +105,9 @@ def test_server_switches_stop_a_reply_before_anything_else(
     assert fragment in decision.error
 
 
-def test_the_independent_auto_reply_switch_holds_even_when_sending_is_fully_open(s: ReplyScenario) -> None:
+def test_the_independent_auto_reply_switch_holds_even_when_sending_is_fully_open(
+    s: ReplyScenario,
+) -> None:
     assert _authorize(s, AUTO_REPLY_KILL_SWITCH=True) == REJECTED
 
 
@@ -144,7 +148,9 @@ def test_a_change_of_policy_version_invalidates_prepared_decisions(s: ReplyScena
 def test_shadow_mode_is_recorded_but_never_authorizes_a_send(owner, private_catalog_dir) -> None:
     s = _scenario(owner, private_catalog_dir=private_catalog_dir)
     ReplyAutomationConfiguration.objects.update(mode=ReplyAutomationConfiguration.Mode.SHADOW)
-    ReplyDecision.objects.filter(pk=s.decision.pk).update(mode=ReplyAutomationConfiguration.Mode.SHADOW)
+    ReplyDecision.objects.filter(pk=s.decision.pk).update(
+        mode=ReplyAutomationConfiguration.Mode.SHADOW
+    )
 
     with override_settings(**OPEN):
         state = execute_reply_decision(s.decision.pk, provider=FakeGmailProvider(persist=True))
@@ -208,7 +214,7 @@ def test_auto_submitted_no_is_an_ordinary_human_message(s: ReplyScenario) -> Non
     assert isinstance(_authorize(s), OutboundMessage)
 
 
-# --- the decision: confidence, intent and action ---------------------------------------------------------
+# --- the decision: confidence, intent and action ---
 
 
 @pytest.mark.parametrize("confidence", ["0.00", "0.50", "0.899"])
@@ -275,7 +281,9 @@ def test_unknown_actions_are_not_automatic(s: ReplyScenario, action: str) -> Non
     assert "acción propuesta no está permitida" in decision.error
 
 
-def test_a_redirect_needs_the_redirection_intent_and_exactly_one_candidate(s: ReplyScenario) -> None:
+def test_a_redirect_needs_the_redirection_intent_and_exactly_one_candidate(
+    s: ReplyScenario,
+) -> None:
     ReplyDecision.objects.filter(pk=s.decision.pk).update(action="REDIRECT_PROPOSAL")
 
     decision = _assert_refused(s, _authorize(s), state=REJECTED, reason="POLICY_RECHECK_FAILED")
@@ -283,7 +291,9 @@ def test_a_redirect_needs_the_redirection_intent_and_exactly_one_candidate(s: Re
     assert "único email autorizado" in decision.error
 
 
-def test_a_redirect_without_a_candidate_is_refused_even_with_the_right_intent(s: ReplyScenario) -> None:
+def test_a_redirect_without_a_candidate_is_refused_even_with_the_right_intent(
+    s: ReplyScenario,
+) -> None:
     ReplyDecision.objects.filter(pk=s.decision.pk).update(
         action="REDIRECT_PROPOSAL", intent="EXPLICIT_PROPOSAL_REDIRECTION", candidate=None
     )
@@ -293,7 +303,7 @@ def test_a_redirect_without_a_candidate_is_refused_even_with_the_right_intent(s:
     assert "único email autorizado" in decision.error
 
 
-# --- grounding in approved, versioned facts ----------------------------------------------------------------
+# --- grounding in approved, versioned facts ---
 
 
 def _revision(s: ReplyScenario) -> KnowledgeFactRevision:
@@ -411,7 +421,7 @@ def test_a_newer_customer_message_makes_the_decision_stale(s: ReplyScenario) -> 
     assert "conversación cambió" in decision.error
 
 
-# --- humans first, then who may be contacted -----------------------------------------------------------
+# --- humans first, then who may be contacted ---
 
 
 def test_an_open_human_task_for_the_contact_blocks_every_automatic_reply(s: ReplyScenario) -> None:
@@ -477,7 +487,10 @@ def test_a_manual_reply_already_in_flight_wins_over_the_automatic_one(s: ReplySc
     result = _authorize(s)
 
     assert result == NEEDS_HUMAN
-    assert ReplyDecision.objects.get(pk=s.decision.pk).human_reason == "MANUAL_REPLY_ALREADY_AUTHORIZED"
+    assert (
+        ReplyDecision.objects.get(pk=s.decision.pk).human_reason
+        == "MANUAL_REPLY_ALREADY_AUTHORIZED"
+    )
     assert not OutboundMessage.objects.filter(kind=OutboundMessage.Kind.AUTOMATIC_REPLY).exists()
 
 
@@ -492,7 +505,9 @@ def test_a_conversation_that_did_not_start_live_is_never_answered(s: ReplyScenar
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda c: GmailConnection.objects.filter(pk=c.pk).update(status=GmailConnection.Status.ERROR),
+        lambda c: GmailConnection.objects.filter(pk=c.pk).update(
+            status=GmailConnection.Status.ERROR
+        ),
         lambda c: GmailConnection.objects.filter(pk=c.pk).update(
             scopes=[*c.scopes, "https://mail.google.com/"]
         ),
@@ -579,13 +594,15 @@ def test_the_third_reply_in_a_day_fits_and_the_fourth_does_not(s: ReplyScenario)
     }
 
 
-# --- who may be contacted ------------------------------------------------------------------------------
+# --- who may be contacted ---
 
 
 def test_a_reply_from_an_unknown_address_is_never_answered(s: ReplyScenario) -> None:
-    InboundMessage.objects.filter(pk=s.inbound.pk).update(sender="Intruso <intruso@elsewhere.example>")
+    InboundMessage.objects.filter(pk=s.inbound.pk).update(
+        sender="Intruso <intruso@elsewhere.example>"
+    )
 
-    # The recorded context no longer matches the message, or the sender is unknown: either way, no send.
+    # Either the recorded context no longer matches or the sender is unknown: no send.
     result = _authorize(s)
 
     assert result == REJECTED
@@ -595,13 +612,21 @@ def test_a_reply_from_an_unknown_address_is_never_answered(s: ReplyScenario) -> 
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda s: Contact.objects.filter(pk=s.contact.pk).update(status=Contact.Status.DO_NOT_CONTACT),
-        lambda s: Contact.objects.filter(pk=s.contact.pk).update(status=Contact.Status.UNSUBSCRIBED),
-        lambda s: type(s.contact.preferred_email).objects.filter(pk=s.contact.preferred_email_id).update(
-            validity="INVALID"
+        lambda s: Contact.objects.filter(pk=s.contact.pk).update(
+            status=Contact.Status.DO_NOT_CONTACT
         ),
-        lambda s: type(s.contact.preferred_email).objects.filter(pk=s.contact.preferred_email_id).update(
-            invalid_reason="rebote"
+        lambda s: Contact.objects.filter(pk=s.contact.pk).update(
+            status=Contact.Status.UNSUBSCRIBED
+        ),
+        lambda s: (
+            type(s.contact.preferred_email)
+            .objects.filter(pk=s.contact.preferred_email_id)
+            .update(validity="INVALID")
+        ),
+        lambda s: (
+            type(s.contact.preferred_email)
+            .objects.filter(pk=s.contact.preferred_email_id)
+            .update(invalid_reason="rebote")
         ),
         lambda s: CommunicationRestriction.objects.create(
             workspace=s.decision.workspace,
@@ -654,7 +679,7 @@ def test_a_revoked_restriction_no_longer_blocks(s: ReplyScenario) -> None:
     assert isinstance(_authorize(s), OutboundMessage)
 
 
-# --- the check is repeated immediately before Gmail ------------------------------------------------------
+# --- the check is repeated immediately before Gmail ---
 
 
 @pytest.mark.parametrize(
@@ -724,7 +749,7 @@ def test_anything_that_changes_between_authorization_and_gmail_stops_the_send(
     assert HumanTask.objects.filter(contact=s.contact, status=HumanTask.Status.OPEN).exists()
 
 
-# --- the last moments before Gmail: duplicates, leftovers, limits -----------------------------------------
+# --- the last moments before Gmail: duplicates, leftovers, limits ---
 
 
 def _authorized(s: ReplyScenario) -> OutboundMessage:
@@ -760,7 +785,9 @@ def test_delivering_the_same_authorized_reply_twice_sends_one_email(s: ReplyScen
         OutboundMessage.State.INELIGIBLE,
     ],
 )
-def test_a_failed_cancelled_or_ineligible_message_is_never_resent(s: ReplyScenario, state: str) -> None:
+def test_a_failed_cancelled_or_ineligible_message_is_never_resent(
+    s: ReplyScenario, state: str
+) -> None:
     message = _authorized(s)
     OutboundMessage.objects.filter(pk=message.pk).update(state=state)
 
@@ -768,9 +795,13 @@ def test_a_failed_cancelled_or_ineligible_message_is_never_resent(s: ReplyScenar
     assert not FakeGmailMessage.objects.exists()
 
 
-def test_a_message_that_is_not_queued_was_never_authorized_and_is_not_sent(s: ReplyScenario) -> None:
+def test_a_message_that_is_not_queued_was_never_authorized_and_is_not_sent(
+    s: ReplyScenario,
+) -> None:
     message = _authorized(s)
-    OutboundMessage.objects.filter(pk=message.pk).update(state=OutboundMessage.State.DRY_RUN_COMPLETED)
+    OutboundMessage.objects.filter(pk=message.pk).update(
+        state=OutboundMessage.State.DRY_RUN_COMPLETED
+    )
 
     assert _deliver(message) == OutboundMessage.State.SEND_FAILED
     assert not FakeGmailMessage.objects.exists()
@@ -778,7 +809,9 @@ def test_a_message_that_is_not_queued_was_never_authorized_and_is_not_sent(s: Re
     assert "no estaba autorizado" in message.error
 
 
-def test_a_message_detached_from_the_inbound_that_authorized_it_is_not_sent(s: ReplyScenario) -> None:
+def test_a_message_detached_from_the_inbound_that_authorized_it_is_not_sent(
+    s: ReplyScenario,
+) -> None:
     message = _authorized(s)
     OutboundMessage.objects.filter(pk=message.pk).update(parent_inbound=None)
 
@@ -786,9 +819,13 @@ def test_a_message_detached_from_the_inbound_that_authorized_it_is_not_sent(s: R
     assert not FakeGmailMessage.objects.exists()
 
 
-def test_a_recipient_changed_after_authorization_is_caught_by_the_final_recheck(s: ReplyScenario) -> None:
+def test_a_recipient_changed_after_authorization_is_caught_by_the_final_recheck(
+    s: ReplyScenario,
+) -> None:
     message = _authorized(s)
-    OutboundMessage.objects.filter(pk=message.pk).update(recipient_normalized="attacker@example.com")
+    OutboundMessage.objects.filter(pk=message.pk).update(
+        recipient_normalized="attacker@example.com"
+    )
 
     _deliver(message)
 
@@ -823,7 +860,9 @@ def test_the_daily_limit_is_checked_again_right_before_gmail(s: ReplyScenario) -
     assert not FakeGmailMessage.objects.exists()
 
 
-def test_replies_already_sent_in_the_last_day_count_against_the_conversation(s: ReplyScenario) -> None:
+def test_replies_already_sent_in_the_last_day_count_against_the_conversation(
+    s: ReplyScenario,
+) -> None:
     message = _authorized(s)
     OutboundMessage.objects.create(
         kind=OutboundMessage.Kind.AUTOMATIC_REPLY,
@@ -849,7 +888,9 @@ def test_replies_already_sent_in_the_last_day_count_against_the_conversation(s: 
     assert FakeGmailMessage.objects.count() == 0
 
 
-def test_a_failed_final_check_leaves_the_message_failed_and_an_audit_trail(s: ReplyScenario) -> None:
+def test_a_failed_final_check_leaves_the_message_failed_and_an_audit_trail(
+    s: ReplyScenario,
+) -> None:
     message = _authorized(s)
 
     _deliver(message, AUTO_REPLY_KILL_SWITCH=True)

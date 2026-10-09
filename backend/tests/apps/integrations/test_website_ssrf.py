@@ -1,4 +1,4 @@
-"""SSRF, redirect, pinning and transport hardening of the website fetcher (SECURITY.md section 9)."""
+"""SSRF, redirect, pinning and transport hardening of the website fetcher (SECURITY.md 9)."""
 
 from __future__ import annotations
 
@@ -657,7 +657,7 @@ def test_the_real_transport_does_not_wrap_plain_http_and_keeps_a_custom_port_in_
 def test_the_real_transport_closes_its_connection_even_on_failure(wire: dict[str, Any]) -> None:
     wire["response"] = b"not http at all"
 
-    with pytest.raises(Exception):  # noqa: B017, PT011 - any protocol error must still clean up
+    with pytest.raises(Exception):  # noqa: B017 - any protocol error must still clean up
         _get()
 
     assert wire["connections"][0][2].closed

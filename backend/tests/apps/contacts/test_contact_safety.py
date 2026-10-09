@@ -41,7 +41,9 @@ def seller(owner: User) -> User:
 
 @pytest.fixture
 def contact(owner: User) -> Contact:
-    return create_manual_contact(actor=owner, email="cliente@example.com", organization_name="Cliente")
+    return create_manual_contact(
+        actor=owner, email="cliente@example.com", organization_name="Cliente"
+    )
 
 
 def _unsubscribe(contact: Contact) -> CommunicationRestriction:
@@ -66,9 +68,12 @@ def test_marking_do_not_contact_restricts_the_contact_and_suppresses_every_addre
     blocked = set_contact_no_contact(actor=owner, contact_id=contact.pk, blocked=True)
 
     assert blocked.status == Contact.Status.DO_NOT_CONTACT
-    assert CommunicationRestriction.objects.filter(
-        contact=contact, kind=CommunicationRestriction.Kind.MANUAL, revoked_at__isnull=True
-    ).count() == 1
+    assert (
+        CommunicationRestriction.objects.filter(
+            contact=contact, kind=CommunicationRestriction.Kind.MANUAL, revoked_at__isnull=True
+        ).count()
+        == 1
+    )
     assert set(SuppressionEntry.objects.values_list("normalized_email", flat=True)) == {
         "cliente@example.com",
         "ventas@example.com",
@@ -78,7 +83,9 @@ def test_marking_do_not_contact_restricts_the_contact_and_suppresses_every_addre
 
 
 @pytest.mark.django_db
-def test_marking_do_not_contact_twice_does_not_stack_restrictions(owner: User, contact: Contact) -> None:
+def test_marking_do_not_contact_twice_does_not_stack_restrictions(
+    owner: User, contact: Contact
+) -> None:
     set_contact_no_contact(actor=owner, contact_id=contact.pk, blocked=True)
     set_contact_no_contact(actor=owner, contact_id=contact.pk, blocked=True)
 
@@ -103,7 +110,9 @@ def test_lifting_a_manual_block_restores_the_contact_and_removes_only_its_own_su
 
 
 @pytest.mark.django_db
-def test_an_unsubscribe_can_never_be_lifted_from_the_contacts_screen(owner: User, contact: Contact) -> None:
+def test_an_unsubscribe_can_never_be_lifted_from_the_contacts_screen(
+    owner: User, contact: Contact
+) -> None:
     _unsubscribe(contact)
 
     with pytest.raises(ValidationError, match="no se puede quitar"):
@@ -113,7 +122,9 @@ def test_an_unsubscribe_can_never_be_lifted_from_the_contacts_screen(owner: User
 
 
 @pytest.mark.django_db
-def test_a_block_added_next_to_an_unsubscribe_still_cannot_be_lifted(owner: User, contact: Contact) -> None:
+def test_a_block_added_next_to_an_unsubscribe_still_cannot_be_lifted(
+    owner: User, contact: Contact
+) -> None:
     _unsubscribe(contact)
     set_contact_no_contact(actor=owner, contact_id=contact.pk, blocked=True)
 
@@ -203,7 +214,9 @@ def test_restrictions_need_one_clear_target_and_a_reason(
 def test_an_email_level_restriction_blocks_that_address_but_not_its_siblings(
     owner: User, contact: Contact
 ) -> None:
-    other = add_contact_email_address(actor=owner, contact_id=contact.pk, email="ventas@example.com")
+    other = add_contact_email_address(
+        actor=owner, contact_id=contact.pk, email="ventas@example.com"
+    )
     first = contact.preferred_email
     assert first is not None
 
@@ -222,14 +235,18 @@ def test_an_address_from_another_organization_is_always_treated_as_restricted(
 ) -> None:
     stranger = create_manual_contact(actor=owner, email="extrano@elsewhere.example")
 
-    assert communication_is_restricted(contact=contact, email_address=stranger.preferred_email) is True
+    assert (
+        communication_is_restricted(contact=contact, email_address=stranger.preferred_email) is True
+    )
 
 
 # --- manual channels ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
-def test_a_manually_added_email_starts_unvalidated_and_is_audited(owner: User, contact: Contact) -> None:
+def test_a_manually_added_email_starts_unvalidated_and_is_audited(
+    owner: User, contact: Contact
+) -> None:
     address = add_contact_email_address(
         actor=owner, contact_id=contact.pk, email=" Ventas@Example.com ", label="Ventas"
     )
@@ -238,25 +255,34 @@ def test_a_manually_added_email_starts_unvalidated_and_is_audited(owner: User, c
     assert address.validity == EmailAddress.Validity.UNKNOWN
     assert address.label == "Ventas"
     assert address.organization_id == contact.organization_id
-    assert AuditEvent.objects.filter(action="contact.email_added", entity_id=str(address.pk)).exists()
+    assert AuditEvent.objects.filter(
+        action="contact.email_added", entity_id=str(address.pk)
+    ).exists()
     contact.refresh_from_db()
     assert contact.preferred_email_id != address.pk  # it must be validated and chosen explicitly
 
 
 @pytest.mark.django_db
-def test_an_address_can_be_made_preferred_and_only_one_is_preferred(owner: User, contact: Contact) -> None:
+def test_an_address_can_be_made_preferred_and_only_one_is_preferred(
+    owner: User, contact: Contact
+) -> None:
     address = add_contact_email_address(
         actor=owner, contact_id=contact.pk, email="nuevo@example.com", make_preferred=True
     )
 
     contact.refresh_from_db()
     assert contact.preferred_email_id == address.pk
-    assert EmailAddress.objects.filter(organization=contact.organization, is_preferred=True).count() == 1
+    assert (
+        EmailAddress.objects.filter(organization=contact.organization, is_preferred=True).count()
+        == 1
+    )
 
 
 @pytest.mark.django_db
 def test_an_invalid_address_cannot_become_preferred(owner: User, contact: Contact) -> None:
-    address = add_contact_email_address(actor=owner, contact_id=contact.pk, email="malo@example.com")
+    address = add_contact_email_address(
+        actor=owner, contact_id=contact.pk, email="malo@example.com"
+    )
     EmailAddress.objects.filter(pk=address.pk).update(validity=EmailAddress.Validity.INVALID)
 
     with pytest.raises(ValidationError, match="inválido"):
@@ -266,8 +292,12 @@ def test_an_invalid_address_cannot_become_preferred(owner: User, contact: Contac
 
 
 @pytest.mark.django_db
-def test_an_address_owned_by_another_organization_is_never_moved(owner: User, contact: Contact) -> None:
-    other = create_manual_contact(actor=owner, email="vecino@vecino.example", organization_name="Vecino")
+def test_an_address_owned_by_another_organization_is_never_moved(
+    owner: User, contact: Contact
+) -> None:
+    other = create_manual_contact(
+        actor=owner, email="vecino@vecino.example", organization_name="Vecino"
+    )
 
     with pytest.raises(OrganizationResolutionConflict, match="organizaciones distintas"):
         add_contact_email_address(actor=owner, contact_id=contact.pk, email="vecino@vecino.example")
@@ -285,7 +315,9 @@ def test_only_a_contact_manager_can_add_addresses(seller: User, contact: Contact
 
 
 @pytest.mark.django_db
-def test_validation_can_only_be_requested_for_unchecked_addresses(owner: User, contact: Contact) -> None:
+def test_validation_can_only_be_requested_for_unchecked_addresses(
+    owner: User, contact: Contact
+) -> None:
     address = contact.preferred_email
     assert address is not None
 
@@ -324,7 +356,9 @@ def test_a_final_validity_is_never_re_checked_or_flipped(contact: Contact, final
     address = contact.preferred_email
     assert address is not None
     EmailAddress.objects.filter(pk=address.pk).update(validity=final)
-    resolver = _Resolver(MXStatus.VALID if final == EmailAddress.Validity.INVALID else MXStatus.INVALID)
+    resolver = _Resolver(
+        MXStatus.VALID if final == EmailAddress.Validity.INVALID else MXStatus.INVALID
+    )
 
     assert validate_contact_email_address(address.pk, resolver=resolver) == final
     assert resolver.asked == []

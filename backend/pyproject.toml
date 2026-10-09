@@ -101,9 +101,8 @@ addopts = [
   "--disable-socket",
   "--cov=src",
   "--cov-report=term-missing:skip-covered",
-  # Measured 82.07% on 2026-10-04 after the server-rendered UI was removed. The previous 83 had been
-  # failing unnoticed because no gate was runnable; raise this as API coverage grows.
-  "--cov-fail-under=82",
+  # Measured 85.46% on 2026-10-09. Only ever raise this number (docs/TEST_PLAN.md section 1).
+  "--cov-fail-under=85",
 ]
 markers = [
   "e2e: end-to-end tests using only in-process fake providers",

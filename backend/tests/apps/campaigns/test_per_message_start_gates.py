@@ -42,7 +42,8 @@ class World:
             enrollment,
             email,
             self.catalog,
-            state=state or (OutboundMessage.State.PREPARED if approved else OutboundMessage.State.REVIEW_READY),
+            state=state
+            or (OutboundMessage.State.PREPARED if approved else OutboundMessage.State.REVIEW_READY),
             approved_at=timezone.now() if approved else None,
             approved_by=self.owner if approved else None,
         )
@@ -61,7 +62,9 @@ def _reload(*objects):
 
 
 @pytest.mark.django_db
-def test_only_individually_approved_messages_are_queued_and_the_rest_are_dropped(world: World) -> None:
+def test_only_individually_approved_messages_are_queued_and_the_rest_are_dropped(
+    world: World,
+) -> None:
     approved, approved_enrollment, _ = world.recipient("a", approved=True)
     skipped, skipped_enrollment, _ = world.recipient("b", approved=False)
 
@@ -94,7 +97,9 @@ def test_starting_with_nothing_approved_changes_nothing(world: World) -> None:
 
 
 @pytest.mark.django_db
-def test_a_recipient_suppressed_after_approval_is_dropped_but_the_others_still_go(world: World) -> None:
+def test_a_recipient_suppressed_after_approval_is_dropped_but_the_others_still_go(
+    world: World,
+) -> None:
     safe, safe_enrollment, _ = world.recipient("safe", approved=True)
     blocked, blocked_enrollment, blocked_email = world.recipient("blocked", approved=True)
     suppress_email(
@@ -212,10 +217,14 @@ def test_each_approval_mode_refuses_the_other_flow(world: World) -> None:
     world.recipient("a", approved=True)
 
     with pytest.raises(ValidationError, match="una sola confirmación"):
-        Campaign.objects.filter(pk=world.campaign.pk).update(approval_mode=Campaign.ApprovalMode.CAMPAIGN)
+        Campaign.objects.filter(pk=world.campaign.pk).update(
+            approval_mode=Campaign.ApprovalMode.CAMPAIGN
+        )
         start_per_message_campaign(world.campaign.pk, actor=world.owner)
 
-    Campaign.objects.filter(pk=world.campaign.pk).update(approval_mode=Campaign.ApprovalMode.PER_MESSAGE)
+    Campaign.objects.filter(pk=world.campaign.pk).update(
+        approval_mode=Campaign.ApprovalMode.PER_MESSAGE
+    )
     with pytest.raises(ValidationError, match="mensaje por mensaje"):
         approve_campaign(world.campaign.pk, actor=world.owner)
 

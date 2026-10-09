@@ -1,4 +1,4 @@
-"""Hostile values must never become extra headers or extra recipients (SECURITY.md sections 7, 8)."""
+"""Hostile values must never become extra headers or extra recipients (SECURITY.md 7, 8)."""
 
 from __future__ import annotations
 
@@ -47,7 +47,9 @@ def test_a_line_break_in_any_header_value_cannot_inject_another_header(
 @pytest.mark.parametrize("breaker", LINE_BREAKS)
 def test_a_line_break_in_the_pdf_filename_cannot_inject_a_header(breaker: str) -> None:
     with pytest.raises((ValidationError, ValueError)):
-        build_message(**BASE, pdf_bytes=b"%PDF-1.4", pdf_filename=f"a{breaker}Bcc: e@evil.example.pdf")
+        build_message(
+            **BASE, pdf_bytes=b"%PDF-1.4", pdf_filename=f"a{breaker}Bcc: e@evil.example.pdf"
+        )
 
 
 @pytest.mark.parametrize(
@@ -90,7 +92,9 @@ def test_a_plain_address_is_sent_to_exactly_that_address(builder) -> None:
     assert message["From"] == "ventas@empresa.example"
 
 
-@pytest.mark.parametrize("sender", ["", "a@x.com\nBcc: e@evil.example", "a@x.com\rBcc: e@evil.example"])
+@pytest.mark.parametrize(
+    "sender", ["", "a@x.com\nBcc: e@evil.example", "a@x.com\rBcc: e@evil.example"]
+)
 def test_the_sender_cannot_carry_line_breaks(sender: str) -> None:
     with pytest.raises(ValidationError, match="no es válido"):
         build_message(**{**BASE, "sender": sender})
@@ -120,7 +124,9 @@ def test_a_traversal_filename_is_reduced_to_its_base_name() -> None:
     assert names == ["passwd.pdf"]
 
 
-@pytest.mark.parametrize("filename", ["", "no-extension", "evil.exe", "evil.pdf.exe", "../../etc/shadow"])
+@pytest.mark.parametrize(
+    "filename", ["", "no-extension", "evil.exe", "evil.pdf.exe", "../../etc/shadow"]
+)
 def test_a_non_pdf_filename_is_replaced_by_a_safe_default(filename: str) -> None:
     built = build_message(**BASE, pdf_bytes=b"%PDF-1.4\n", pdf_filename=filename)
 

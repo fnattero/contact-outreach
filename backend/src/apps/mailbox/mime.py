@@ -69,7 +69,7 @@ def _validated_pdf_attachments(
 
 
 def _single_plain_address(value: str) -> bool:
-    """One bare address: no name, list, separator or control character (one recipient per effect)."""
+    """One bare address: no name, list, separator or control character (one per effect)."""
 
     return (
         bool(value)

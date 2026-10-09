@@ -1,4 +1,4 @@
-"""A seller never sees the audience: prospect businesses and their email addresses (PRODUCT_SPEC)."""
+"""A seller never sees the audience: prospect businesses and their email addresses."""
 
 from __future__ import annotations
 

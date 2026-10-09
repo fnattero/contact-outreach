@@ -43,7 +43,9 @@ def test_an_admin_holds_every_capability(admin: User, capability: Capability) ->
 
 
 @pytest.mark.parametrize("capability", list(Capability))
-def test_a_seller_holds_only_the_four_read_capabilities(seller: User, capability: Capability) -> None:
+def test_a_seller_holds_only_the_four_read_capabilities(
+    seller: User, capability: Capability
+) -> None:
     assert has_capability(seller, capability) is (capability in VENDEDOR_CAPABILITIES)
 
 
