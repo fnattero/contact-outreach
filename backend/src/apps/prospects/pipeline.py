@@ -9,7 +9,6 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.campaigns.models import Campaign, SearchRun
-from apps.prospects.exceptions import ProspectPipelineInactive, StaleProspectAnalysis
 from apps.prospects.models import Prospect
 
 RESERVATION_TTL = timedelta(minutes=5)
@@ -125,49 +124,3 @@ def clear_prospect_pipeline_reservation(prospect_id: uuid.UUID | str, *, token: 
             "updated_at",
         )
     )
-
-
-@transaction.atomic
-def begin_analysis_generation(
-    prospect_id: uuid.UUID | str,
-    *,
-    expected_generation: int | None,
-    manual: bool,
-) -> int:
-    prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
-    if not _campaign_allows_work(prospect.campaign, manual=manual):
-        raise ProspectPipelineInactive("La campaña ya no admite análisis.")
-    if expected_generation is not None:
-        if prospect.analysis_generation != expected_generation:
-            raise StaleProspectAnalysis("Una generación más nueva reemplazó este análisis.")
-        return expected_generation
-    prospect.analysis_generation += 1
-    prospect.save(update_fields=("analysis_generation", "updated_at"))
-    return prospect.analysis_generation
-
-
-@transaction.atomic
-def defer_prospect_pipeline(
-    prospect_id: uuid.UUID | str,
-    *,
-    current_token: str,
-    generation: int,
-) -> str:
-    prospect = Prospect.objects.select_for_update().get(pk=prospect_id)
-    if prospect.analysis_generation != generation:
-        raise StaleProspectAnalysis("Una generación más nueva reemplazó este reintento.")
-    if prospect.pipeline_reservation_key != current_token:
-        raise StaleProspectAnalysis("La reserva del reintento ya fue reemplazada.")
-    next_token = uuid.uuid4().hex
-    prospect.pipeline_reservation_key = next_token
-    prospect.pipeline_reserved_at = timezone.now()
-    prospect.pipeline_claimed_at = None
-    prospect.save(
-        update_fields=(
-            "pipeline_reservation_key",
-            "pipeline_reserved_at",
-            "pipeline_claimed_at",
-            "updated_at",
-        )
-    )
-    return next_token

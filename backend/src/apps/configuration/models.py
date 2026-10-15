@@ -399,17 +399,6 @@ class SearchCategory(TimestampedUUIDModel):
     def __str__(self) -> str:
         return self.name
 
-    @property
-    def search_variants(self) -> tuple[str, ...]:
-        variants: list[str] = []
-        for rule in self.rules.all():
-            if not rule.active:
-                continue
-            for term in rule.name_terms:
-                if isinstance(term, str) and term not in variants:
-                    variants.append(term)
-        return tuple(variants)
-
 
 class SearchCategoryRule(TimestampedUUIDModel):
     category = models.ForeignKey(

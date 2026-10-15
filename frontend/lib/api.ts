@@ -694,6 +694,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await requestEnvelope<T>(path, init)).data;
 }
 
+/** The server rotates the CSRF secret when the session changes, so a cached token must not outlive it. */
+function forgetCsrfToken<T>(result: Promise<T>): Promise<T> {
+  return result.finally(() => {
+    csrfToken = null;
+  });
+}
+
 async function requestVersioned<T>(path: string, init: RequestInit = {}): Promise<VersionedResource<T>> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
@@ -710,7 +717,11 @@ async function requestVersioned<T>(path: string, init: RequestInit = {}): Promis
     credentials: "include",
     cache: "no-store",
   });
-  if (!response.ok) throw await responseError(response);
+  if (!response.ok) {
+    const problem = await responseError(response);
+    if (response.status === 401) csrfToken = null;
+    throw problem;
+  }
   const body = (await response.json()) as ApiEnvelope<T>;
   const etag = response.headers.get("ETag");
   return { data: body.data, etag };
@@ -753,7 +764,7 @@ export function runCampaignAction(
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return request<CampaignDetail>(
-    `/api/v1/campaigns/${encodeURIComponent(id)}/actions/${action}/`,
+    `/api/v1/campaigns/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}/`,
     {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
@@ -910,7 +921,7 @@ export function changeCommunicationPlan(
   body: Record<string, unknown> = {},
 ): Promise<CommunicationPlan> {
   return request<CommunicationPlan>(
-    `/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/${encodeURIComponent(planId)}/${action}/`,
+    `/api/v1/contacts/${encodeURIComponent(contactId)}/communication-plans/${encodeURIComponent(planId)}/${encodeURIComponent(action)}/`,
     { method: "POST", body: JSON.stringify(action === "active" || action === "pause" || action === "disable" ? { state: action === "active" ? "ACTIVE" : action === "pause" ? "PAUSED" : "DISABLED" } : body) },
   );
 }
@@ -964,14 +975,14 @@ export function createUser(input: {
 }
 
 export function updateUserRole(id: number, role: "ADMIN" | "VENDEDOR"): Promise<ManagedUser> {
-  return request<ManagedUser>(`/api/v1/users/${id}/role/`, {
+  return request<ManagedUser>(`/api/v1/users/${encodeURIComponent(String(id))}/role/`, {
     method: "PATCH",
     body: JSON.stringify({ role }),
   });
 }
 
 export function deleteUser(id: number): Promise<void> {
-  return request<void>(`/api/v1/users/${id}/`, { method: "DELETE" });
+  return request<void>(`/api/v1/users/${encodeURIComponent(String(id))}/`, { method: "DELETE" });
 }
 
 export type SendMode = {
@@ -986,14 +997,14 @@ export function getSendMode(): Promise<SendMode> {
 }
 
 export function setSendLive(action: "enable-live" | "disable-live", confirmation?: string): Promise<SendMode> {
-  return request<SendMode>(`/api/v1/send-mode/actions/${action}/`, {
+  return request<SendMode>(`/api/v1/send-mode/actions/${encodeURIComponent(action)}/`, {
     method: "POST",
     body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
   });
 }
 
 export function updateUserStatus(id: number, isActive: boolean): Promise<ManagedUser> {
-  return request<ManagedUser>(`/api/v1/users/${id}/status/`, {
+  return request<ManagedUser>(`/api/v1/users/${encodeURIComponent(String(id))}/status/`, {
     method: "PATCH",
     body: JSON.stringify({ is_active: isActive }),
   });
@@ -1169,7 +1180,7 @@ export function syncOverture(provinceCode: string): Promise<{ status: string; ce
 }
 
 export function resolveHumanTask(id: string, action: "resolve" | "dismiss", note: string): Promise<{ id: string; status: string }> {
-  return request<{ id: string; status: string }>(`/api/v1/human-tasks/${encodeURIComponent(id)}/${action}/`, {
+  return request<{ id: string; status: string }>(`/api/v1/human-tasks/${encodeURIComponent(id)}/${encodeURIComponent(action)}/`, {
     method: "POST",
     body: JSON.stringify({ note }),
   });
@@ -1188,7 +1199,7 @@ export function setAutomationLive(
   action: "enable-live" | "disable-live",
   confirmation?: string,
 ): Promise<AutomationConfiguration> {
-  return request<AutomationConfiguration>(`/api/v1/automation/actions/${action}/`, {
+  return request<AutomationConfiguration>(`/api/v1/automation/actions/${encodeURIComponent(action)}/`, {
     method: "POST",
     body: JSON.stringify(confirmation === undefined ? {} : { confirmation }),
   });
@@ -1302,10 +1313,12 @@ export function createCampaign(input: Record<string, unknown>): Promise<Campaign
 }
 
 export function login(username: string, password: string): Promise<UserSession> {
-  return request<UserSession>("/api/v1/auth/login/", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
+  return forgetCsrfToken(
+    request<UserSession>("/api/v1/auth/login/", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  );
 }
 
 export function activate(
@@ -1313,18 +1326,20 @@ export function activate(
   password: string,
   passwordConfirmation: string,
 ): Promise<UserSession> {
-  return request<UserSession>("/api/v1/auth/activate/", {
-    method: "POST",
-    body: JSON.stringify({
-      token,
-      password,
-      password_confirmation: passwordConfirmation,
+  return forgetCsrfToken(
+    request<UserSession>("/api/v1/auth/activate/", {
+      method: "POST",
+      body: JSON.stringify({
+        token,
+        password,
+        password_confirmation: passwordConfirmation,
+      }),
     }),
-  });
+  );
 }
 
 export function logout(): Promise<void> {
-  return request<void>("/api/v1/auth/logout/", { method: "POST", body: "{}" });
+  return forgetCsrfToken(request<void>("/api/v1/auth/logout/", { method: "POST", body: "{}" }));
 }
 
 export function problemMessage(problem: Problem): string {

@@ -108,10 +108,6 @@ class ActivationToken(TimestampedUUIDModel):
         ordering = ("-created_at",)
         indexes = [models.Index(fields=("token_hash", "expires_at"))]
 
-    @property
-    def is_used(self) -> bool:
-        return self.used_at is not None
-
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
             original = ActivationToken.objects.filter(pk=self.pk).values("token_hash").first()
