@@ -71,6 +71,14 @@ class TrustedProxySecurityMiddleware:
             if not trusted_by_internal:
                 request.META.pop("HTTP_X_FORWARDED_HOST", None)
             request.META.pop("HTTP_X_FORWARDED_FOR", None)
+        if trusted_by_internal:
+            # The frontend reaches this service by its private name (Node's fetch cannot override
+            # Host), so the public host arrives as X-Forwarded-Host. Only the token holder may
+            # supply it; it replaces Host before anything calls get_host(), which still checks it
+            # against ALLOWED_HOSTS. USE_X_FORWARDED_HOST stays off so nobody else can do this.
+            forwarded_host = request.META.get("HTTP_X_FORWARDED_HOST")
+            if forwarded_host:
+                request.META["HTTP_HOST"] = forwarded_host
         return self.get_response(request)
 
 
