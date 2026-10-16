@@ -81,10 +81,9 @@ function forwardedRequestHeaders(request: Request, correlationId: string): Heade
   const publicOrigin = new URL(
     process.env.PUBLIC_APP_ORIGIN ?? request.url,
   );
-  // The upstream URL is private, but Django must validate the public browser
-  // origin as its Host. Never let the internal service name become the
-  // application host seen by Django.
-  headers.set("Host", publicOrigin.host);
+  // The upstream URL is private and fetch (undici) always sends its host as Host, so Host cannot
+  // carry the public one. The backend takes it from this header, and only when the proxy token is
+  // valid; never let the internal service name become the application host.
   headers.set("X-Forwarded-Host", publicOrigin.host);
   headers.set("X-Forwarded-Proto", publicOrigin.protocol.replace(":", ""));
   headers.set("X-Correlation-ID", correlationId);

@@ -83,7 +83,10 @@ GMAIL_PROVIDER=fake
 
 Railway termina TLS en frontend. El proxy Next normaliza metadata y prueba identidad con
 `INTERNAL_PROXY_TOKEN`; backend no confía headers forwarded de un request sin token. El backend
-sólo acepta el host público (el proxy lo presenta como `Host`), no su nombre privado. Los endpoints
+sólo acepta el host público, no su nombre privado. Como `fetch` de Node no deja cambiar `Host`, el
+proxy lo envía en `X-Forwarded-Host` y el backend lo usa como host únicamente si el pedido trae un
+`INTERNAL_PROXY_TOKEN` válido (`USE_X_FORWARDED_HOST` sigue apagado); aun así se valida contra
+`DJANGO_ALLOWED_HOSTS`, que no debe incluir el nombre privado. Los endpoints
 `/api/v1/health/live/` y `/api/v1/health/ready/` están exentos del token y del redireccionamiento a
 HTTPS para que los health checks de Railway y del contenedor funcionen por HTTP privado.
 

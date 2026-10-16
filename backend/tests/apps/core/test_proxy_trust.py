@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from django.core.exceptions import DisallowedHost
 from django.http import HttpRequest, HttpResponse
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
 
 from apps.core.security import (
     ApplicationSecurityHeadersMiddleware,
@@ -65,6 +66,81 @@ def test_the_frontend_proxy_token_unlocks_proto_and_host_but_never_the_client_ad
     assert seen["HTTP_X_FORWARDED_PROTO"] == "https"
     assert seen["HTTP_X_FORWARDED_HOST"] == "evil.example"
     assert "HTTP_X_FORWARDED_FOR" not in seen
+
+
+PUBLIC_HOST = "outreach.example"
+
+
+def _host_seen_by_the_view(**extra: str) -> str:
+    """The host Django would validate for a request that reaches the backend as backend:8000."""
+    captured: list[str] = []
+
+    def view(request: HttpRequest) -> HttpResponse:
+        captured.append(request.get_host())
+        return HttpResponse("ok")
+
+    request = RequestFactory().get(
+        "/", REMOTE_ADDR="198.51.100.9", HTTP_HOST="backend:8000", **extra
+    )
+    TrustedProxySecurityMiddleware(view)(request)
+    return captured[0]
+
+
+@override_settings(ALLOWED_HOSTS=[PUBLIC_HOST], TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN)
+def test_the_frontend_proxy_presents_the_public_host_through_x_forwarded_host() -> None:
+    seen = _host_seen_by_the_view(
+        HTTP_X_INTERNAL_PROXY_TOKEN=TOKEN, HTTP_X_FORWARDED_HOST=PUBLIC_HOST
+    )
+
+    assert seen == PUBLIC_HOST
+
+
+@override_settings(ALLOWED_HOSTS=[PUBLIC_HOST], TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN)
+def test_a_forwarded_host_is_still_checked_against_allowed_hosts() -> None:
+    with pytest.raises(DisallowedHost):
+        _host_seen_by_the_view(
+            HTTP_X_INTERNAL_PROXY_TOKEN=TOKEN, HTTP_X_FORWARDED_HOST="evil.example"
+        )
+
+
+@override_settings(ALLOWED_HOSTS=[PUBLIC_HOST], TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN)
+def test_the_private_service_name_is_refused_when_nothing_presents_the_public_host() -> None:
+    with pytest.raises(DisallowedHost):
+        _host_seen_by_the_view(HTTP_X_INTERNAL_PROXY_TOKEN=TOKEN)
+
+
+@pytest.mark.parametrize("token", [None, "", "x" * 40])
+@override_settings(ALLOWED_HOSTS=[PUBLIC_HOST], TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN)
+def test_without_a_valid_token_x_forwarded_host_cannot_replace_the_host(token: str | None) -> None:
+    extra = {} if token is None else {"HTTP_X_INTERNAL_PROXY_TOKEN": token}
+
+    with pytest.raises(DisallowedHost):
+        _host_seen_by_the_view(HTTP_X_FORWARDED_HOST=PUBLIC_HOST, **extra)
+
+
+@override_settings(
+    ALLOWED_HOSTS=[PUBLIC_HOST, "backend"], TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN
+)
+def test_without_a_valid_token_the_request_keeps_the_host_it_arrived_with() -> None:
+    assert _host_seen_by_the_view(HTTP_X_FORWARDED_HOST=PUBLIC_HOST) == "backend:8000"
+
+
+@override_settings(ALLOWED_HOSTS=[PUBLIC_HOST], TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN)
+def test_the_whole_stack_accepts_the_proxied_call_and_rejects_the_direct_one() -> None:
+    client = Client()
+    path = "/api/v1/health/live/"
+
+    proxied = client.get(
+        path,
+        HTTP_HOST="backend:8000",
+        HTTP_X_INTERNAL_PROXY_TOKEN=TOKEN,
+        HTTP_X_FORWARDED_HOST=PUBLIC_HOST,
+        HTTP_X_FORWARDED_PROTO="https",
+    )
+    direct = client.get(path, HTTP_HOST="backend:8000", HTTP_X_FORWARDED_HOST=PUBLIC_HOST)
+
+    assert proxied.status_code == 200
+    assert direct.status_code == 400
 
 
 @override_settings(TRUSTED_PROXY_IPS=(), INTERNAL_PROXY_TOKEN=TOKEN)
