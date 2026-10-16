@@ -11,7 +11,7 @@ compose() {
         # shellcheck disable=SC2086
         $COMPOSE "$@"
     else
-        docker compose --project-directory "$repo_root" --file "$repo_root/infra/docker-compose.yml" "$@"
+        docker compose --project-directory "$repo_root" --file "$repo_root/infra/docker-compose.yml" --profile storage-s3 "$@"
     fi
 }
 

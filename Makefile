@@ -6,7 +6,7 @@
 export COMPOSE_PROGRESS ?= quiet
 export BUILDKIT_PROGRESS ?= quiet
 
-COMPOSE := docker compose --project-directory . --file infra/docker-compose.yml
+COMPOSE := docker compose --project-directory . --file infra/docker-compose.yml --profile storage-s3
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 PNPM ?= pnpm

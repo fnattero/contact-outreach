@@ -15,7 +15,7 @@ compose() {
         # shellcheck disable=SC2086
         $COMPOSE "$@"
     else
-        docker compose --project-directory "$repo_root" --file "$repo_root/infra/docker-compose.yml" "$@"
+        docker compose --project-directory "$repo_root" --file "$repo_root/infra/docker-compose.yml" --profile storage-s3 "$@"
     fi
 }
 
@@ -31,8 +31,13 @@ test -f "$backup_dir/checksums.sha256"
 
 compose run --rm --no-deps -T backend python src/manage.py shell -c 'from django.conf import settings; raise SystemExit(0 if settings.SEND_KILL_SWITCH else "Activá SEND_KILL_SWITCH=true antes del restore")'
 compose stop backend
-compose up --detach --wait postgres redis minio
-compose run --rm --no-deps minio-init
+compose up --detach --wait postgres redis
+# Naming MinIO would start it even with PRIVATE_STORAGE_BACKEND=filesystem; config lists only the
+# services that storage mode enables.
+if compose config --services | grep -qx minio-init; then
+    compose up --detach --wait minio
+    compose run --rm --no-deps minio-init
+fi
 compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction' < "$backup_dir/database.dump"
 
 compose run --rm --no-deps -T backend python src/manage.py private_objects import < "$backup_dir/objects.tar"

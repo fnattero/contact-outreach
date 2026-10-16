@@ -28,6 +28,16 @@ Frontend no posee credenciales S3. Todos los procesos supervisados del backend u
 storage adapter y Bucket privado; si un objeto no existe o cambia hash/tamaño, la preparación MIME
 rechaza el set completo y el mensaje queda recuperable. MinIO representa ese contrato sólo en local.
 
+En Compose, `PRIVATE_STORAGE_BACKEND` (en `.env`) elige dónde se guardan esos archivos: `s3`
+(predeterminado) usa MinIO; `filesystem` los guarda en el volumen Docker `private_data`, montado en
+`/app/private` del backend, y MinIO ni siquiera se levanta. Para eso MinIO vive en el profile
+`storage-${PRIVATE_STORAGE_BACKEND}`, y el Makefile y los scripts siempre pasan `--profile
+storage-s3`; quien use `docker compose` a mano debe agregar ese mismo flag, o con `s3` el backend
+queda sin MinIO. MinIO dejó de publicar imágenes
+y su edición comunitaria ya no se mantiene, así que `filesystem` evita depender de ella hasta
+reemplazarla. Cambiar el valor no mueve los archivos existentes: hacer `make backup`, cambiar la
+variable y `make restore` con ese backup, que los vuelve a cargar en el nuevo destino.
+
 ## 2. Backup
 
 `make backup` (o `backend/scripts/backup.sh [directorio]`, por defecto `backups/`) corre con el
@@ -35,7 +45,7 @@ stack levantado y deja en `AAAA...Z/`:
 
 - `database.dump`: `pg_dump --format=custom` hecho con `docker compose exec -T postgres`;
 - `objects.tar` y `objects.manifest.tsv`: todos los objetos del Bucket privado (PDF y catálogos,
-  en MinIO) y su manifiesto `sha256 ⇥ tamaño ⇥ clave`, que el comando
+  en MinIO o en el volumen `private_data`) y su manifiesto `sha256 ⇥ tamaño ⇥ clave`, que el comando
   `manage.py private_objects export` genera al leer cada objeto;
 - `manifest.txt` (fecha UTC, commit, cantidad de objetos) y `checksums.sha256` de los tres archivos.
 
@@ -43,7 +53,7 @@ Antes de copiar nada ejecuta `verify_restore`; la base se vuelca antes que los o
 subido entre ambos pasos queda huérfano (inofensivo) y nunca al revés. Usa `umask 077`; un fallo
 conserva el backup anterior y elimina sólo el temporal. Para un compose con más archivos (Hetzner)
 exportar `COMPOSE='docker compose --project-directory . --file infra/docker-compose.yml --file
-infra/docker-compose.hetzner.yml'` antes de ejecutar el script. La copia/versioning del Bucket
+infra/docker-compose.hetzner.yml --profile storage-s3'` antes de ejecutar el script. La copia/versioning del Bucket
 también puede configurarse fuera del container.
 
 El dump contiene el catálogo Overture, sus manifests/licencias/atribución y ciphertext de
@@ -58,7 +68,7 @@ sólo el dump no debe poder descifrar API keys, client secret ni refresh token.
 3. Ejecutar `make restore BACKUP=RUTA_BACKUP` (o `scripts/restore.sh --confirm RUTA_BACKUP`, con el
    mismo `COMPOSE` del backup).
 4. El procedimiento verifica `checksums.sha256` y el kill switch antes de tocar nada; después
-   detiene el backend, levanta PostgreSQL, Redis y MinIO, restaura la base con `pg_restore
+   detiene el backend, levanta PostgreSQL, Redis y MinIO (sólo con `s3`), restaura la base con `pg_restore
    --single-transaction`, reemplaza el contenido del Bucket con `private_objects import` (que
    compara cada objeto con el manifiesto), aplica migraciones bajo advisory lock, ejecuta
    `verify_restore --require-kill-switch` y recién entonces levanta el stack.

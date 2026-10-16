@@ -22,6 +22,7 @@ DOCKER_SHIM = """#!/bin/sh
 echo "docker $*" >> "$SHIM_LOG"
 case "$*" in
   *pg_dump*) printf 'DUMP' ;;
+  *"config --services"*) printf '%s\n' ${SHIM_SERVICES:-postgres redis minio minio-init backend} ;;
   *"private_objects export"*) tar -cf - -C "$SHIM_OBJECTS" manifest.tsv ;;
   *pg_restore*|*"private_objects import"*) cat > /dev/null ;;
   *"shell -c"*)
@@ -104,7 +105,9 @@ def test_backup_uses_only_services_and_project_options_of_the_current_compose_fi
     _make_backup(tmp_path)
 
     calls = _calls(tmp_path)
-    compose = f"--project-directory {REPO} --file {REPO}/infra/docker-compose.yml"
+    compose = (
+        f"--project-directory {REPO} --file {REPO}/infra/docker-compose.yml --profile storage-s3"
+    )
     assert all(call.startswith(f"docker compose {compose} ") for call in calls)
     services = {
         match.group(1)
@@ -166,7 +169,7 @@ def test_a_failed_backup_leaves_no_partial_directory_and_keeps_the_previous_one(
         tmp_path,
         SHIM_FAIL_ON=(
             f"compose --project-directory {REPO} --file {REPO}/infra/docker-compose.yml "
-            "exec -T backend python src/manage.py private_objects export"
+            "--profile storage-s3 exec -T backend python src/manage.py private_objects export"
         ),
     )
 
@@ -202,7 +205,8 @@ def test_restore_runs_the_documented_sequence_and_starts_the_stack_last(tmp_path
     markers = [
         "shell -c",
         "stop backend",
-        "up --detach --wait postgres redis minio",
+        "up --detach --wait postgres redis",
+        "up --detach --wait minio",
         "run --rm --no-deps minio-init",
         "pg_restore",
         "private_objects import",
@@ -214,6 +218,17 @@ def test_restore_runs_the_documented_sequence_and_starts_the_stack_last(tmp_path
     assert calls[-1].endswith(" up --detach --wait")
     assert len(calls) - 1 > positions[-1]
     assert "Restore verificado" in result.stdout
+
+
+def test_restore_with_filesystem_storage_never_starts_minio(tmp_path: Path) -> None:
+    backup_dir = _make_backup(tmp_path)
+
+    result = _restore(tmp_path, backup_dir, SHIM_SERVICES="postgres redis backend")
+
+    assert result.returncode == 0, result.stderr
+    calls = _calls(tmp_path)
+    assert not any("minio" in call for call in calls)
+    assert any("private_objects import" in call for call in calls)
 
 
 def test_restore_refuses_when_the_kill_switch_is_off_before_touching_anything(

@@ -29,7 +29,9 @@ def test_compose_uses_one_backend_service_and_private_object_storage() -> None:
     assert "  worker:\n" not in compose
     assert "  maintenance:\n" not in compose
     assert "  beat:\n" not in compose
-    assert "PRIVATE_STORAGE_BACKEND: s3" in compose
+    assert "PRIVATE_STORAGE_BACKEND: ${PRIVATE_STORAGE_BACKEND:-s3}" in compose
+    assert "- private_data:/app/private" in compose
+    assert compose.count("      - storage-${PRIVATE_STORAGE_BACKEND:-s3}\n") == 2
     assert "[program:worker-general]" in supervisor
     assert "[program:worker-maintenance]" in supervisor
     assert "[program:beat]" in supervisor

@@ -47,7 +47,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app . .
 
 RUN chmod +x /app/scripts/*.sh \
-    && mkdir -p /app/staticfiles /tmp/contact-outreach \
+    && mkdir -p /app/staticfiles /app/private /tmp/contact-outreach \
     && chown -R app:app /app /tmp/contact-outreach \
     && DJANGO_SECRET_KEY=container-build-only DATABASE_ENGINE=sqlite \
        python src/manage.py collectstatic --noinput

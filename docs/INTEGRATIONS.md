@@ -13,7 +13,8 @@ con reautenticación). La API sólo expone `configured|not_configured`, el orige
 credencial producida en runtime: se cifra por propósito en PostgreSQL. Workers pertenecen al mismo
 backend release y llaman servicios/ORM directamente; nunca endpoints HTTP internos.
 
-`PrivateObjectStorage` abstrae MinIO local y Railway Bucket productivo. Acepta streams, genera key
+`PrivateObjectStorage` abstrae MinIO local, un volumen Docker (`PRIVATE_STORAGE_BACKEND=filesystem`)
+y Railway Bucket productivo. Acepta streams, genera key
 server-side, calcula metadata/hashes y nunca entrega URL pública. Catálogos se descargan por un
 endpoint backend autenticado que transmite el objeto completo con `private, no-store`.
 
