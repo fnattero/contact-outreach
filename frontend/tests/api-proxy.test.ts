@@ -36,7 +36,9 @@ describe("backend proxy", () => {
     await call();
     const headers = forwarded();
     expect(headers.get("X-Internal-Proxy-Token")).toBe("t".repeat(40));
-    expect(headers.get("Host")).toBe("app.example.com");
+    // fetch ignores a Host override, so the public host travels in X-Forwarded-Host instead.
+    expect(headers.get("X-Forwarded-Host")).toBe("app.example.com");
+    expect(headers.has("Host")).toBe(false);
     expect(headers.get("X-Forwarded-Proto")).toBe("https");
   });
 

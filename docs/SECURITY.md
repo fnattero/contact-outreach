@@ -66,8 +66,11 @@ frontend. Las sesiones duran 12 horas absolutas; rol, desactivación, password y
 
 Sólo Next.js recibe dominio público. Su proxy elimina headers `Forwarded`, `X-Forwarded-*` e
 `X-Internal-*` del browser, agrega valores propios y un `INTERNAL_PROXY_TOKEN`. El backend privado
-compara ese token en tiempo constante antes de confiar proxy metadata. No se configura CORS ni se
-admiten credenciales cross-origin.
+compara ese token en tiempo constante antes de confiar proxy metadata. Como `fetch` de Node no puede
+cambiar `Host`, el proxy envía el dominio público en `X-Forwarded-Host`; sólo con token válido el
+backend lo usa como host, y se valida igual contra `ALLOWED_HOSTS` (que contiene únicamente el
+dominio público). `USE_X_FORWARDED_HOST` sigue en `False`, así que sin token el header se ignora.
+No se configura CORS ni se admiten credenciales cross-origin.
 
 Headers: CSP restrictiva con scripts/styles propios static y nonce sólo si fuera imprescindible,
 `Referrer-Policy`, `X-Content-Type-Options`, frame-ancestors/DENY, permissions policy y no sniff.
