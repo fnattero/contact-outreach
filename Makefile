@@ -6,7 +6,7 @@
 export COMPOSE_PROGRESS ?= quiet
 export BUILDKIT_PROGRESS ?= quiet
 
-COMPOSE := docker compose --project-directory . --file infra/docker-compose.yml
+COMPOSE := docker compose --project-directory . --file infra/docker-compose.yml --profile storage-s3
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 PNPM ?= pnpm
@@ -106,7 +106,7 @@ smoke-worker:
 	$(COMPOSE) exec backend python src/manage.py check_worker
 
 backup:
-	./backend/scripts/backup.sh $(BACKUP_ROOT)
+	COMPOSE="$(COMPOSE)" ./backend/scripts/backup.sh $(BACKUP_ROOT)
 
 restore:
-	./backend/scripts/restore.sh --confirm $(BACKUP)
+	COMPOSE="$(COMPOSE)" ./backend/scripts/restore.sh --confirm $(BACKUP)
