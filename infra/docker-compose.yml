@@ -8,6 +8,7 @@ services:
       BACKEND_INTERNAL_URL: http://backend:8000
       INTERNAL_PROXY_TOKEN: ${INTERNAL_PROXY_TOKEN:-development-proxy-token-change-me}
       PUBLIC_APP_ORIGIN: ${PUBLIC_APP_ORIGIN:-http://localhost:3000}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-real-ip}
       NODE_ENV: production
     ports:
       - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"

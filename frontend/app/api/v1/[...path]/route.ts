@@ -89,9 +89,15 @@ function forwardedRequestHeaders(request: Request, correlationId: string): Heade
   headers.set("X-Correlation-ID", correlationId);
 
   // The backend only sees this service's address. Pass on the browser's, read from the header the
-  // platform edge sets (Railway: X-Real-IP), so lockouts and rate limits apply per client. The
-  // backend accepts it only together with the proxy token and ignores anything that is not an IP.
-  const clientIp = request.headers.get(process.env.CLIENT_IP_HEADER || "x-real-ip")?.trim();
+  // edge sets (Railway: X-Real-IP, Tailscale Funnel: X-Forwarded-For, Cloudflare: CF-Connecting-IP),
+  // so lockouts and rate limits apply per client. For a list, only the last entry was written by the
+  // edge; earlier ones may come from the browser. The backend accepts it only together with the
+  // proxy token and ignores anything that is not an IP.
+  const clientIp = request.headers
+    .get(process.env.CLIENT_IP_HEADER || "x-real-ip")
+    ?.split(",")
+    .at(-1)
+    ?.trim();
   if (clientIp) {
     headers.set("X-Internal-Client-IP", clientIp);
   }
