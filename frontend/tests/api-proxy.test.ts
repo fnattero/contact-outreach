@@ -72,6 +72,12 @@ describe("backend proxy", () => {
     await call({ "cf-connecting-ip": "203.0.113.9", "x-real-ip": "198.51.100.1" });
     expect(forwarded().get("X-Internal-Client-IP")).toBe("203.0.113.9");
   });
+
+  it("takes the entry the edge appended when the header is a list", async () => {
+    vi.stubEnv("CLIENT_IP_HEADER", "x-forwarded-for");
+    await call({ "x-forwarded-for": "198.51.100.1, 203.0.113.9 " });
+    expect(forwarded().get("X-Internal-Client-IP")).toBe("203.0.113.9");
+  });
 });
 
 describe("backend proxy in production", () => {

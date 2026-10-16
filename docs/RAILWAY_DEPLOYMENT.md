@@ -40,7 +40,10 @@ son server-only y nunca usan prefijo `NEXT_PUBLIC_`.
 En producción el proxy responde 503 sin llamar al backend si falta `BACKEND_INTERNAL_URL` o
 `INTERNAL_PROXY_TOKEN`, o si `PUBLIC_APP_ORIGIN` no es un origen exacto HTTPS. `CLIENT_IP_HEADER`
 nombra el header donde el borde de Railway entrega la IP del navegador (`x-real-ip`); sin él, el
-bloqueo de inicio de sesión y los límites de tasa se compartirían entre todos los usuarios.
+bloqueo de inicio de sesión y los límites de tasa se compartirían entre todos los usuarios. Si el
+header trae una lista, se usa la última entrada, que es la que agregó el borde. Fuera de Railway se
+apunta al header de cada proveedor (Tailscale Funnel/Serve: `x-forwarded-for`; Cloudflare:
+`cf-connecting-ip`), siempre que el puerto del frontend solo sea alcanzable a través de ese proxy.
 `HSTS_MAX_AGE_SECONDS` se puede bajar (por ejemplo a 300) en el primer despliegue y subir después.
 
 ## 3. Variables backend
