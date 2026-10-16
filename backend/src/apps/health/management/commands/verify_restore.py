@@ -14,6 +14,7 @@ from django.db.models import F
 from apps.campaigns.models import Campaign
 from apps.catalogs.models import Catalog
 from apps.catalogs.services import verify_catalog
+from apps.catalogs.storage import private_catalog_storage
 from apps.configuration.integrations import validate_encrypted_integration_credentials
 from apps.mailbox.crypto import decrypt_token
 from apps.mailbox.models import GmailConnection
@@ -301,13 +302,20 @@ class Command(BaseCommand):
                 failures.append(f"token Gmail {gmail.pk} no descifrable")
         failures.extend(validate_encrypted_integration_credentials())
         _verify_running_overture_campaigns(failures)
-        try:
-            free = shutil.disk_usage(settings.PRIVATE_STORAGE_ROOT).free
-        except OSError:
-            failures.append("almacenamiento privado no disponible")
+        if private_catalog_storage.is_local:
+            try:
+                free = shutil.disk_usage(settings.PRIVATE_STORAGE_ROOT).free
+            except OSError:
+                failures.append("almacenamiento privado no disponible")
+            else:
+                if free < settings.MIN_FREE_DISK_BYTES:
+                    failures.append("espacio libre debajo del margen operativo")
         else:
-            if free < settings.MIN_FREE_DISK_BYTES:
-                failures.append("espacio libre debajo del margen operativo")
+            # An object store has no local disk to measure; reaching the Bucket is the check.
+            try:
+                private_catalog_storage.exists("health/verify-restore-check")
+            except Exception:
+                failures.append("almacenamiento privado no disponible")
         if (
             options["require_kill_switch"]
             and settings.SEND_MODE == "live"

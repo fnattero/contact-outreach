@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from django.contrib.auth.models import User
@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from apps.campaigns.models import Campaign, CampaignZoneSelection
 from apps.catalogs.services import create_catalog
+from apps.catalogs.storage import private_catalog_storage
 from apps.configuration.integrations import (
     GMAIL_CLIENT_SECRET_PURPOSE,
     LLM_KEY_PURPOSE,
@@ -362,6 +363,24 @@ def test_verify_restore_checks_migrations_and_safe_live_state(tmp_path: Path) ->
     ):
         with pytest.raises(CommandError, match="kill switch"):
             call_command("verify_restore", "--require-kill-switch", verbosity=0)
+
+
+@pytest.mark.django_db
+def test_verify_restore_checks_object_storage_by_reaching_it_not_by_measuring_a_local_disk(
+    tmp_path: Path,
+) -> None:
+    missing_root = tmp_path / "does-not-exist"
+    with (
+        override_settings(PRIVATE_STORAGE_ROOT=missing_root, MIN_FREE_DISK_BYTES=1),
+        patch.object(
+            type(private_catalog_storage), "is_local", new_callable=PropertyMock, return_value=False
+        ),
+        patch.object(private_catalog_storage, "exists", return_value=False) as probe,
+    ):
+        call_command("verify_restore", verbosity=0)
+        probe.side_effect = OSError("bucket unreachable")
+        with pytest.raises(CommandError, match="almacenamiento privado no disponible"):
+            call_command("verify_restore", verbosity=0)
 
 
 @pytest.mark.django_db

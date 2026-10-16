@@ -106,7 +106,7 @@ smoke-worker:
 	$(COMPOSE) exec backend python src/manage.py check_worker
 
 backup:
-	./backend/scripts/backup.sh $(BACKUP_ROOT)
+	COMPOSE="$(COMPOSE)" ./backend/scripts/backup.sh $(BACKUP_ROOT)
 
 restore:
-	./backend/scripts/restore.sh --confirm $(BACKUP)
+	COMPOSE="$(COMPOSE)" ./backend/scripts/restore.sh --confirm $(BACKUP)
