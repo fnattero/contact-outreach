@@ -140,6 +140,9 @@ def _record(
     mode: str,
 ) -> ScreeningOutcome:
     prospect = Prospect.objects.select_for_update().get(pk=prospect_id)
+    if prospect.erased_at is not None:
+        # The data was erased while the provider was being called: keep nothing it returned.
+        return ScreeningOutcome(vetoed=False)
     verdict = str(values.get("verdict", ""))
     # A person may have restored this business while the provider was being called.
     vetoed = (
@@ -167,6 +170,8 @@ def screen_prospect_relevance(
     prospect = Prospect.objects.select_related("campaign", "campaign_enrollment").get(
         pk=prospect_id
     )
+    if prospect.erased_at is not None:
+        return ScreeningOutcome(vetoed=False)
     campaign = prospect.campaign
     config = campaign.prompt_snapshot.get("prospect_screening")
     # A campaign frozen before the filter existed has no such key and is treated as OFF.

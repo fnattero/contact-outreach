@@ -34,6 +34,9 @@ class Organization(TimestampedUUIDModel):
     phone = models.CharField(max_length=80, blank=True)
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.DISCOVERY)
     provenance = models.JSONField(default=dict, blank=True)
+    # Set once when someone asks for this business's data to be erased. The row and its identity
+    # hashes stay so the business is still recognised, and blocked, if it is discovered again.
+    erased_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         ordering = ("normalized_name", "created_at")
@@ -170,12 +173,14 @@ class Contact(TimestampedUUIDModel):
         ACTIVE = "ACTIVE", "Contacto actual"
         DO_NOT_CONTACT = "DO_NOT_CONTACT", "No contactar"
         UNSUBSCRIBED = "UNSUBSCRIBED", "Baja solicitada"
+        ERASED = "ERASED", "Datos eliminados"
 
     class CreatedReason(models.TextChoices):
         HUMAN_REPLY = "HUMAN_REPLY", "Respondió una persona"
         MANUAL_ENTRY = "MANUAL_ENTRY", "Carga manual"
         MANUAL_RESTRICTION = "MANUAL_RESTRICTION", "Restricción manual"
         UNSUBSCRIBE = "UNSUBSCRIBE", "Baja solicitada"
+        ERASURE = "ERASURE", "Datos eliminados"
 
     workspace = models.ForeignKey(
         "accounts.Workspace",
@@ -241,6 +246,10 @@ class CommunicationRestriction(TimestampedUUIDModel):
         UNSUBSCRIBE = "UNSUBSCRIBE", "Baja"
         BOUNCE = "BOUNCE", "Rebote"
         MANUAL = "MANUAL", "Manual"
+        ERASURE = "ERASURE", "Datos eliminados"
+
+    # Kinds that nobody can lift: the person asked us to stop, or to forget them.
+    PERMANENT_KINDS = frozenset({"UNSUBSCRIBE", "ERASURE"})
 
     workspace = models.ForeignKey(
         "accounts.Workspace",
@@ -298,8 +307,8 @@ class CommunicationRestriction(TimestampedUUIDModel):
                 name="bounce_restriction_email_only",
             ),
             models.CheckConstraint(
-                condition=~Q(kind="UNSUBSCRIBE", revoked_at__isnull=False),
-                name="unsubscribe_restriction_permanent",
+                condition=~Q(kind__in=("UNSUBSCRIBE", "ERASURE"), revoked_at__isnull=False),
+                name="permanent_restriction_not_revoked",
             ),
             models.CheckConstraint(
                 condition=(
@@ -342,6 +351,11 @@ class CommunicationRestriction(TimestampedUUIDModel):
             errors["kind"] = "Un rebote sólo invalida el email que rebotó."
         if self.kind == self.Kind.UNSUBSCRIBE and self.revoked_at is not None:
             errors["revoked_at"] = "Una baja no se puede quitar."
+        if self.kind == self.Kind.ERASURE:
+            if self.scope != self.Scope.CONTACT:
+                errors["kind"] = "El bloqueo por datos eliminados cubre todo el contacto."
+            if self.revoked_at is not None:
+                errors["revoked_at"] = "El bloqueo por datos eliminados no se puede quitar."
         if self.revoked_at is None:
             if self.revoked_by_id or self.revocation_reason:
                 errors["revoked_at"] = "La reversión está incompleta."
@@ -357,10 +371,14 @@ class CommunicationRestriction(TimestampedUUIDModel):
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
             previous = type(self).objects.only("kind", "revoked_at").get(pk=self.pk)
-            if previous.kind == self.Kind.UNSUBSCRIBE and (
+            if previous.kind in self.PERMANENT_KINDS and (
                 self.kind != previous.kind or self.revoked_at != previous.revoked_at
             ):
-                raise ValidationError("Una baja no se puede modificar ni quitar.")
+                if previous.kind == self.Kind.UNSUBSCRIBE:
+                    raise ValidationError("Una baja no se puede modificar ni quitar.")
+                raise ValidationError(
+                    "El bloqueo por datos eliminados no se puede modificar ni quitar."
+                )
         self.full_clean()
         super().save(*args, **kwargs)
 

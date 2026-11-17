@@ -53,6 +53,8 @@ def _persist_enrichment(
     prospect = Prospect.objects.select_for_update().select_related("campaign").get(pk=prospect_id)
     if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.erased_at is not None:
+        raise ProspectPipelineInactive("Se eliminaron los datos de este negocio.")
     existing = prospect.web_snapshots.first()
     if existing is not None:
         if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
@@ -136,6 +138,8 @@ def enrich_prospect(
     prospect = Prospect.objects.select_related("campaign").get(pk=prospect_id)
     if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.erased_at is not None:
+        raise ProspectPipelineInactive("Se eliminaron los datos de este negocio.")
     existing = prospect.web_snapshots.first()
     if existing is not None:
         if prospect.pipeline_state == Prospect.PipelineState.EMAIL_FOUND:
