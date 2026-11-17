@@ -19,10 +19,12 @@ import {
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
+import { EraseBusinessControl } from "@/components/erase-business-control";
 import { can,
   addContactEmail,
   createContactRestriction,
   createCommunicationPlan,
+  eraseContactData,
   getContact,
   getCommunicationPlans,
   revokeContactRestriction,
@@ -73,6 +75,9 @@ export default function ContactDetailPage() {
 
   if (error) return <AuthError error={error} />;
   if (!contact) return <Skeleton active paragraph={{ rows: 10 }} />;
+  const erased = contact.status === "ERASED";
+  // Nothing can be added to an erased business: it only stays to keep it blocked.
+  const canEdit = canManage && !erased;
 
   async function addEmail(values: { email: string; label?: string }) {
     setBusy("email"); setError(null);
@@ -115,12 +120,23 @@ export default function ContactDetailPage() {
   return (
     <Flex vertical gap="large">
       <div>
-        <Typography.Title level={2}>{contact.name || contact.organization_name}</Typography.Title>
+        <Typography.Title level={2}>
+          {erased ? "Negocio con datos eliminados" : contact.name || contact.organization_name}
+        </Typography.Title>
         <Flex gap="small" wrap>
-          <Tag>{contact.status}</Tag>
+          <Tag color={erased ? "red" : undefined}>{erased ? "Datos eliminados" : contact.status}</Tag>
           <Typography.Text type="secondary">{contact.organization_name}</Typography.Text>
         </Flex>
       </div>
+
+      {erased ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Se eliminaron los datos de este negocio"
+          description="Solo queda su dirección de correo, para que nunca se le vuelva a escribir. Ese bloqueo no se puede quitar."
+        />
+      ) : null}
 
       <Card title="Datos principales">
         <Descriptions column={{ xs: 1, sm: 2 }}>
@@ -153,10 +169,10 @@ export default function ContactDetailPage() {
                   {email.active_restriction_count ? (
                     <Tag color="red">Restringido</Tag>
                   ) : null}
-                  {can(session, "manage_contacts") && !email.is_preferred ? (
+                  {canEdit && !email.is_preferred ? (
                     <Button size="small" loading={busy === email.id} onClick={() => void choosePreferred(email.id)}>Preferir</Button>
                   ) : null}
-                  {can(session, "manage_contacts") && email.validity !== "VALID" ? (
+                  {canEdit && email.validity !== "VALID" ? (
                     <Button size="small" loading={busy === email.id} onClick={() => void validateEmail(email.id)}>Validar</Button>
                   ) : null}
                 </Flex>
@@ -168,7 +184,7 @@ export default function ContactDetailPage() {
         )}
       </Card>
 
-      {can(session, "manage_contacts") ? (
+      {canEdit ? (
         <Card title="Agregar email">
           <Form layout="vertical" onFinish={(values) => void addEmail(values as { email: string; label?: string })}>
             <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}><Input /></Form.Item>
@@ -180,7 +196,7 @@ export default function ContactDetailPage() {
 
       {contact.restrictions.length || can(session, "manage_contacts") ? (
         <Card title="Restricciones">
-          {can(session, "manage_contacts") ? (
+          {canEdit ? (
             <Form layout="vertical" onFinish={(values) => void addRestriction(values as { scope: "CONTACT" | "EMAIL"; email_address_id?: string; reason: string })}>
               <Flex gap="middle" wrap>
                 <Form.Item name="scope" label="Alcance" rules={[{ required: true }]}><Select style={{ minWidth: 180 }} options={[{ value: "CONTACT", label: "Todo el contacto" }, { value: "EMAIL", label: "Sólo este email" }]} /></Form.Item>
@@ -245,7 +261,7 @@ export default function ContactDetailPage() {
         )}
       </Card>
 
-      {can(session, "manage_contacts") ? (
+      {canEdit ? (
         <Card title="Seguimiento programado">
           <Form layout="vertical" onFinish={(values) => void addPlan(values as { preferred_email_id: string; purpose: string; goal_text?: string })}>
             <Form.Item name="preferred_email_id" label="Email preferido" rules={[{ required: true }]}><Select options={contact.emails.filter((email) => email.is_preferred && email.validity === "VALID").map((email) => ({ value: email.id, label: email.original_email }))} /></Form.Item>
@@ -254,6 +270,18 @@ export default function ContactDetailPage() {
             <Button htmlType="submit" loading={busy === "plan"}>Activar revisión periódica</Button>
           </Form>
           {plans.length ? <List style={{ marginTop: 16 }} dataSource={plans} renderItem={(plan) => <List.Item><List.Item.Meta title={plan.topic_name} description={`Próximo: ${formatDate(plan.next_due_at)}`} /><Tag>{plan.state_label}</Tag></List.Item>} /> : <Empty style={{ marginTop: 16 }} description="No hay seguimientos configurados." />}
+        </Card>
+      ) : null}
+
+      {canEdit ? (
+        <Card title="Eliminar datos">
+          <Flex vertical gap="middle" align="start">
+            <Typography.Paragraph type="secondary">
+              Si el negocio te pide que borres sus datos, eliminalos desde acá. Se conserva solo su
+              dirección de correo para no volver a escribirle nunca.
+            </Typography.Paragraph>
+            <EraseBusinessControl erase={(word) => eraseContactData(params.id, word)} onErased={refresh} />
+          </Flex>
         </Card>
       ) : null}
 

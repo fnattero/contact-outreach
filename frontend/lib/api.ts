@@ -356,6 +356,7 @@ export type Prospect = {
   relevance_reason: string | null;
   relevance_checked_at: string | null;
   relevance_override: boolean;
+  erased: boolean;
   campaign_state: string;
   campaign: { id: string; name: string };
   provenance: Provenance | null;
@@ -1070,6 +1071,23 @@ export function updateRelevanceFilter(
 
 export function getAutomaticReplyPrompt(): Promise<{ automatic_reply_prompt: string }> {
   return request<{ automatic_reply_prompt: string }>("/api/v1/automation/writing-instructions/");
+}
+
+export type ErasureResult = { organization_id: string; erased_at: string; already_erased: boolean };
+
+/** Erases what we know about a business. Needs a recent password check and the typed word. */
+export function eraseContactData(contactId: string, confirmation: string): Promise<ErasureResult> {
+  return request<ErasureResult>(`/api/v1/contacts/${encodeURIComponent(contactId)}/erase/`, {
+    method: "POST",
+    body: JSON.stringify({ confirmation }),
+  });
+}
+
+export function eraseProspectData(prospectId: string, confirmation: string): Promise<ErasureResult> {
+  return request<ErasureResult>(`/api/v1/prospects/${encodeURIComponent(prospectId)}/erase/`, {
+    method: "POST",
+    body: JSON.stringify({ confirmation }),
+  });
 }
 
 export function restoreProspect(id: string): Promise<Prospect> {

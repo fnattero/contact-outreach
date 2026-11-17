@@ -55,6 +55,7 @@ function prospect(overrides: Partial<Prospect> = {}): Prospect {
     relevance_reason: null,
     relevance_checked_at: null,
     relevance_override: false,
+    erased: false,
     campaign_state: "DISCOVERING",
     campaign: { id: "campaign-1", name: "Primera campaña" },
     provenance: null,
@@ -257,6 +258,22 @@ describe("prospects page", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Expand row/i })[0]);
     expect(await screen.findByText("No se puede confirmar que tenga taller propio.")).toBeInTheDocument();
     expect(screen.getByText(/Lo recuperaste a mano/)).toBeInTheDocument();
+  });
+
+  it("shows an erased business without its data and offers no action on it", async () => {
+    vi.mocked(getProspects).mockResolvedValue({
+      data: [
+        prospect({ id: "gone", name: "", primary_email: null, erased: true, pipeline_state: "SKIPPED_DUPLICATE" }),
+        prospect({ id: "kept", name: "Taller Presente" }),
+      ],
+      meta: { page: 1, page_size: 25, total: 2 },
+    });
+
+    render(createElement(App, null, createElement(ProspectsPage)));
+
+    expect(await screen.findByText("Datos eliminados")).toBeInTheDocument();
+    expect(screen.getByText("Taller Presente")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Eliminar datos de este negocio" })).toHaveLength(1);
   });
 
   it("offers Recuperar only for removed businesses and explains when it is blocked", async () => {
