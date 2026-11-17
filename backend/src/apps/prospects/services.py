@@ -90,7 +90,7 @@ def mark_fixed_campaign_prospect_ready(prospect_id: uuid.UUID | str) -> Prospect
     """Finish a new-campaign prospect without relevance scoring or LLM copy."""
 
     prospect = (
-        Prospect.objects.select_for_update()
+        Prospect.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign_enrollment")
         .get(pk=prospect_id)
     )

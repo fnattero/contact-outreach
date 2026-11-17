@@ -452,7 +452,7 @@ def approve_campaign(campaign_id: uuid.UUID | str, *, actor: User) -> Campaign:
     _verified_campaign_attachments(campaign)
     _validate_campaign_approval_snapshot(campaign)
     prepared = list(
-        campaign.messages.select_for_update()
+        campaign.messages.select_for_update(of=("self",))
         .select_related("campaign_enrollment__selected_email")
         .filter(kind=OutboundMessage.Kind.INITIAL, state=OutboundMessage.State.PREPARED)
     )
@@ -538,7 +538,7 @@ def start_per_message_campaign(campaign_id: uuid.UUID | str, *, actor: User) -> 
         raise ValidationError("Esta campaña se aprueba completa con una sola confirmación.")
     _verified_campaign_attachments(campaign)
     messages = list(
-        campaign.messages.select_for_update()
+        campaign.messages.select_for_update(of=("self",))
         .select_related("campaign_enrollment__selected_email")
         .filter(kind=OutboundMessage.Kind.INITIAL)
         .order_by("created_at")

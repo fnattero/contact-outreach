@@ -353,7 +353,7 @@ def approve_contact_follow_up_topic(
 ) -> ContactCommunicationPlan:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     contact = (
-        Contact.objects.select_for_update()
+        Contact.objects.select_for_update(of=("self",))
         .select_related("organization", "preferred_email")
         .get(pk=contact_id)
     )
@@ -450,7 +450,7 @@ def save_contact_communication_plan(
 ) -> ContactCommunicationPlan:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     contact = (
-        Contact.objects.select_for_update()
+        Contact.objects.select_for_update(of=("self",))
         .select_related("organization", "preferred_email")
         .get(pk=contact_id)
     )
@@ -517,7 +517,7 @@ def set_contact_communication_plan_state(
     if state not in ContactCommunicationPlan.State.values:
         raise ValidationError("La acción solicitada no es válida.")
     plan = (
-        ContactCommunicationPlan.objects.select_for_update()
+        ContactCommunicationPlan.objects.select_for_update(of=("self",))
         .select_related("contact__preferred_email", "preferred_email", "topic")
         .get(pk=plan_id)
     )
@@ -905,7 +905,7 @@ def process_scheduled_contact_attempt(
 
     with transaction.atomic():
         locked = (
-            ScheduledContactAttempt.objects.select_for_update()
+            ScheduledContactAttempt.objects.select_for_update(of=("self",))
             .select_related(
                 "plan__contact__workspace",
                 "plan__contact__organization",
@@ -1077,7 +1077,7 @@ def edit_scheduled_contact_draft(
 ) -> ScheduledContactAttempt:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     attempt = (
-        ScheduledContactAttempt.objects.select_for_update()
+        ScheduledContactAttempt.objects.select_for_update(of=("self",))
         .select_related("plan__contact", "plan__topic", "outbound_message")
         .get(pk=attempt_id)
     )
@@ -1134,7 +1134,7 @@ def authorize_scheduled_contact_attempt(
 ) -> ScheduledContactAttempt:
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     attempt = (
-        ScheduledContactAttempt.objects.select_for_update()
+        ScheduledContactAttempt.objects.select_for_update(of=("self",))
         .select_related(
             "plan__contact__workspace",
             "plan__contact__preferred_email",
@@ -1192,7 +1192,7 @@ def complete_scheduled_contact_attempt(
     message_id: uuid.UUID | str,
 ) -> ScheduledContactAttempt | None:
     attempt = (
-        ScheduledContactAttempt.objects.select_for_update()
+        ScheduledContactAttempt.objects.select_for_update(of=("self",))
         .select_related("plan__contact__workspace", "plan__topic", "outbound_message")
         .filter(outbound_message_id=uuid.UUID(str(message_id)))
         .first()
