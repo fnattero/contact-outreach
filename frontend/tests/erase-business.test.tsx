@@ -137,11 +137,20 @@ describe("contact detail and erasure", () => {
   });
 
   it("shows an erased business as such and offers nothing to add to it", async () => {
-    vi.mocked(getContact).mockResolvedValue(contact({ name: "", organization_name: "", status: "ERASED" }));
+    vi.mocked(getContact).mockResolvedValue(
+      contact({
+        name: "",
+        organization_name: "",
+        status: "ERASED",
+        restrictions: [{ id: "r1", scope: "CONTACT", kind: "ERASURE", evidence: "", revoked_at: null, created_at: "2026-11-17T00:00:00Z", email_address_id: null }],
+      }),
+    );
     render(createElement(App, null, createElement(ContactDetailPage)));
 
     expect(await screen.findByRole("heading", { name: "Negocio con datos eliminados" })).toBeInTheDocument();
     expect(screen.getByText("Se eliminaron los datos de este negocio")).toBeInTheDocument();
+    expect(screen.getByText("Datos eliminados · Todo el contacto")).toBeInTheDocument();
+    expect(screen.queryByText(/ERASURE/)).not.toBeInTheDocument();
     for (const control of ["Eliminar datos de este negocio", "Agregar email", "Agregar restricción manual", "Activar revisión periódica"]) {
       expect(screen.queryByRole("button", { name: control })).not.toBeInTheDocument();
     }

@@ -180,7 +180,7 @@ export default function ProspectsPage() {
                   dataIndex: "name",
                   render: (name: string, row) =>
                     row.erased ? (
-                      <span className="muted">Datos eliminados</span>
+                      <span className="muted">Negocio sin datos</span>
                     ) : (
                       <><strong>{name}</strong><br /><span className="data-text">{row.primary_email ?? "Sin correo seleccionado"}</span></>
                     ),
@@ -190,7 +190,12 @@ export default function ProspectsPage() {
                 {
                   title: "Estado",
                   dataIndex: "pipeline_state",
-                  render: (state: string, row) => <StatusBadge label={stateLabel(state, row.pipeline_state_label)} level={stateLevel(state)} />,
+                  render: (state: string, row) =>
+                    row.erased ? (
+                      <StatusBadge label="Datos eliminados" level="warning" />
+                    ) : (
+                      <StatusBadge label={stateLabel(state, row.pipeline_state_label)} level={stateLevel(state)} />
+                    ),
                 },
                 {
                   title: "Evaluación",
@@ -220,6 +225,7 @@ export default function ProspectsPage() {
                         {canErase ? (
                           <EraseBusinessControl
                             size="small"
+                            label="Eliminar datos"
                             erase={(word) => eraseProspectData(row.id, word)}
                             onErased={() => { setLoading(true); setReload((current) => current + 1); }}
                           />

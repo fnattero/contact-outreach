@@ -271,9 +271,11 @@ describe("prospects page", () => {
 
     render(createElement(App, null, createElement(ProspectsPage)));
 
-    expect(await screen.findByText("Datos eliminados")).toBeInTheDocument();
+    expect(await screen.findByText("Negocio sin datos")).toBeInTheDocument();
+    expect(screen.getByText("Datos eliminados")).toBeInTheDocument();
+    expect(screen.queryByText("Duplicado")).not.toBeInTheDocument();
     expect(screen.getByText("Taller Presente")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Eliminar datos de este negocio" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Eliminar datos" })).toHaveLength(1);
   });
 
   it("offers Recuperar only for removed businesses and explains when it is blocked", async () => {

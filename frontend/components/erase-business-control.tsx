@@ -14,10 +14,17 @@ type Props = {
   // Reload the page after the erasure so it shows what is left.
   onErased: () => void;
   size?: "small" | "middle";
+  // A shorter label fits a table row; the dialog still names the business-wide effect.
+  label?: string;
 };
 
 /** Erases a business's data on request, keeping only what is needed to never write to it again. */
-export function EraseBusinessControl({ erase, onErased, size = "middle" }: Props) {
+export function EraseBusinessControl({
+  erase,
+  onErased,
+  size = "middle",
+  label = "Eliminar datos de este negocio",
+}: Props) {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -49,7 +56,7 @@ export function EraseBusinessControl({ erase, onErased, size = "middle" }: Props
   return (
     <>
       <Button size={size} danger onClick={() => setPasswordOpen(true)}>
-        Eliminar datos de este negocio
+        {label}
       </Button>
       {error ? <Alert type="error" showIcon message={problemMessage(error as Problem)} /> : null}
       <Modal

@@ -40,6 +40,17 @@ const dateFormatter = new Intl.DateTimeFormat("es-AR", {
   timeZone: "America/Argentina/Buenos_Aires",
 });
 
+const RESTRICTION_KIND_LABELS: Record<string, string> = {
+  UNSUBSCRIBE: "Baja solicitada",
+  BOUNCE: "Rebote",
+  MANUAL: "Bloqueo manual",
+  ERASURE: "Datos eliminados",
+};
+const RESTRICTION_SCOPE_LABELS: Record<string, string> = {
+  CONTACT: "Todo el contacto",
+  EMAIL: "Solo este email",
+};
+
 function formatDate(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : "—";
 }
@@ -140,7 +151,7 @@ export default function ContactDetailPage() {
 
       <Card title="Datos principales">
         <Descriptions column={{ xs: 1, sm: 2 }}>
-          <Descriptions.Item label="Organización">{contact.organization_name}</Descriptions.Item>
+          <Descriptions.Item label="Organización">{contact.organization_name || "—"}</Descriptions.Item>
           <Descriptions.Item label="Email preferido">
             {contact.preferred_email ?? "—"}
           </Descriptions.Item>
@@ -211,7 +222,7 @@ export default function ContactDetailPage() {
             renderItem={(restriction) => (
               <List.Item>
                 <List.Item.Meta
-                  title={`${restriction.scope} · ${restriction.kind}`}
+                  title={`${RESTRICTION_KIND_LABELS[restriction.kind] ?? restriction.kind} · ${RESTRICTION_SCOPE_LABELS[restriction.scope] ?? restriction.scope}`}
                   description={restriction.evidence}
                 />
                 <Flex gap="small" align="center">
