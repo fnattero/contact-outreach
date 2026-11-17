@@ -25,7 +25,7 @@ function pageRoutes(): string[] {
 // The pages a seller may open: summary, campaigns, sent mail, contacts and conversations. Anything
 // not listed is administrative and must be refused by the shell. A new page is therefore closed to
 // sellers until someone consciously adds it here.
-const OPEN_TO_EVERYONE = ["/", "/login", "/activate"];
+const OPEN_TO_EVERYONE = ["/", "/login", "/activate", "/privacidad"];
 const OPEN_TO_SELLERS = [
   "/dashboard",
   "/attention",
