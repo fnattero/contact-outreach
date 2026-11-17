@@ -149,7 +149,9 @@ labels congelados. Constraint rechaza releases mixtos; la creación toma sólo R
 
 Empresa canónica del Workspace: nombre/dirección originales y normalizados, website, dominio,
 teléfono, coordenadas, status y provenance. No pertenece a una campaña. Índices de búsqueda y
-constraint de workspace.
+constraint de workspace. `erased_at` marca que sus datos se eliminaron a pedido: los campos de texto
+quedan vacíos, sus identidades conservan sólo `value_hash` y una resolución posterior la reconoce
+sin volver a llenar nada ni crear direcciones nuevas.
 
 ### OrganizationIdentity
 
@@ -166,16 +168,16 @@ entre Organizations requiere resolución admin auditada.
 
 ### Contact
 
-OneToOne Organization: `created_reason=HUMAN_REPLY|MANUAL|MANUAL_RESTRICTION|UNSUBSCRIBE`, status
-comprensible, display name/company override opcional, preferred_email, automation state,
+OneToOne Organization: `created_reason=HUMAN_REPLY|MANUAL|MANUAL_RESTRICTION|UNSUBSCRIBE|ERASURE`,
+status comprensible (`ERASED` = “Datos eliminados”), display name/company override opcional, preferred_email, automation state,
 last_interaction_at y timestamps. Su mera existencia excluye toda Organization de campañas.
 
 ### CommunicationRestriction
 
 Scope `CONTACT|EMAIL`, FK Contact/EmailAddress según scope, kind
-`UNSUBSCRIBE|BOUNCE|MANUAL_NO_CONTACT`, reason/evidence/source message, active, irreversible,
-created/lifted timestamps y actores. Check constraints alinean scope/FKs. UNSUBSCRIBE nunca se
-desactiva; BOUNCE invalida email; sólo manual puede levantarse con motivo admin.
+`UNSUBSCRIBE|BOUNCE|MANUAL_NO_CONTACT|ERASURE`, reason/evidence/source message, active,
+irreversible, created/lifted timestamps y actores. Check constraints alinean scope/FKs. UNSUBSCRIBE
+y ERASURE (sólo scope CONTACT) nunca se desactivan; BOUNCE invalida email; sólo manual puede levantarse con motivo admin.
 
 ### Conversation
 
@@ -332,6 +334,8 @@ prospecto (`prospect`, `input_hash`, `provider`, `model` únicos; estado `VALID|
 `verdict`, motivo de una línea, `vetoed`, tamaños y digests, nunca texto del prompt ni del sitio).
 Es un modelo aparte para que `AIAnalysis` siga siendo sólo lectura. `Prospect` guarda
 `relevance_override_at/by`: una persona conservó ese negocio y el filtro no lo vuelve a evaluar.
+`Prospect.erased_at` acompaña a `Organization.erased_at`: el pipeline (sitio web, filtro, emails)
+no vuelve a escribir sobre ese prospecto y la ingesta lo trata como duplicado sin guardar nada.
 ContactLedger/ContactOverride siguen como barrera legacy hasta validar backfill;
 luego se retiran mediante migración forward. Nunca se borran mensajes/auditorías dependientes ni
 se reescriben campañas completadas.
@@ -357,7 +361,9 @@ contadores en estas filas; se derivan del dominio.
 - LLM sólo referencia candidate/fact IDs incluidos en su request; policy determina efecto.
 - Embeddings sólo seleccionan facts candidatos para el contexto; nunca autorizan un envío.
 - HumanTask OPEN suspende automation; limits/kill switches se leen justo antes de Gmail.
-- Los modelos de history y auditoría no se eliminan desde UI.
+- Los modelos de history y auditoría no se eliminan desde UI. El borrado de datos de un negocio
+  vacía los campos de texto de sus filas y deja ids, estados, hashes y la dirección normalizada;
+  AuditEvent no se modifica y por eso nunca guarda nombres ni textos del negocio.
 
 El cutover arquitectónico no transforma datos. La DB nueva recibe migraciones y seeds deterministas;
 usuarios, contactos, mensajes, PDFs, Overture, credenciales y auditoría se configuran desde cero.

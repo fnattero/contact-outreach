@@ -76,6 +76,7 @@ seguridad no se relajan desde el dashboard.
 | A-069 | La pantalla de zonas con datos lista todas las provincias con su estado y permite cargar una por vez; sin versión explícita usa la última verificada por mantenimiento. | Operación |
 | A-070 | El filtro de audiencia puede usar un servicio de IA distinto del de las respuestas, con dirección y clave propias. La clave de las respuestas solo se comparte si es exactamente el mismo servicio y dirección; si no, hace falta una clave propia. Volver a la conexión compartida borra la clave propia. | Costo / seguridad |
 | A-071 | El modo automático (envío real) de una campaña solo se ofrece si los envíos reales están habilitados (servidor y aplicación); si no, se muestra deshabilitado con el motivo. Exige una confirmación explícita y la campaña igual requiere aprobación de una persona. El borrador de una campaña a medio crear se guarda en el navegador (sessionStorage) y nunca incluye esa confirmación. | Seguridad / UX |
+| A-072 | Borrar los datos de un negocio vacía sus textos en lugar de borrar filas, porque el historial de envíos y la protección contra duplicados las referencian. Se conservan la dirección normalizada y los hashes de identidad para mantener el bloqueo, que no se puede quitar. Los correos en Gmail y los backups existentes quedan fuera de alcance y se informan al usuario. | Privacidad |
 
 ## Calidad de audiencia y scoring pendiente
 

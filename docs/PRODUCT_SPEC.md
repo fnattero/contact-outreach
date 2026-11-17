@@ -86,6 +86,16 @@ canal. `UNSUBSCRIBE` es irreversible. Un bounce invalida sólo la dirección. Un
 sólo puede revertirla un admin con motivo auditado. La antigua página Supresiones desaparece, pero
 las barreras y su historial permanecen visibles dentro de Contactos.
 
+Cuando un negocio pide que se borren sus datos, un admin los elimina desde la ficha del Contacto o
+desde la lista de negocios encontrados, con reautenticación y la palabra `ELIMINAR`. Se vacían
+nombre, dirección, teléfono, web, la persona de contacto, los textos de correos, conversaciones,
+tareas y análisis de IA, y lo que trajo la búsqueda, incluida su fila en la página guardada del
+proveedor. Se conservan la dirección normalizada (supresión) y los hashes de identidad, lo mínimo
+para reconocerlo y no volver a escribirle: queda una restricción `ERASURE` que no se puede quitar,
+y si una búsqueda posterior lo vuelve a encontrar no se guarda nada nuevo. Los registros se vacían
+en lugar de borrarse para que la protección contra duplicados y el historial de envíos sigan
+funcionando. Mientras hay un envío en curso para ese negocio la acción se rechaza.
+
 `Conversation` representa un Contacto más un hilo Gmail. Un Contacto puede tener varios hilos y
 direcciones; una propuesta redirigida abre un hilo nuevo y ambos aparecen en una misma cronología.
 

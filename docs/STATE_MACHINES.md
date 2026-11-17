@@ -143,9 +143,12 @@ HUMAN_REQUIRED|FAILED`.
 La transacción termina antes de publicar `DECISION_PENDING` con `on_commit`. Un reintento sobre el
 mismo Gmail ID reutiliza mensaje, candidatos, Contact y task/decision existentes.
 
-Contacto no es una máquina de campaña: `ACTIVE|NO_CONTACT|UNSUBSCRIBED|INCOMPLETE`. Puede cambiar
-sus datos/preferencias, pero nunca deja de excluir la Organization de campañas. `UNSUBSCRIBED` no
-retrocede. Una restricción manual reversible no elimina Contact.
+Contacto no es una máquina de campaña: `ACTIVE|NO_CONTACT|UNSUBSCRIBED|ERASED|INCOMPLETE`. Puede
+cambiar sus datos/preferencias, pero nunca deja de excluir la Organization de campañas.
+`UNSUBSCRIBED` no retrocede. `ERASED` es terminal: lo pone sólo el servicio de borrado, que en la
+misma transacción cancela mensajes pendientes, desactiva seguimientos, descarta tareas abiertas y
+crea la restricción `ERASURE`; se rechaza si hay un mensaje `SENDING|RECONCILING` o una decisión
+`EXECUTING`. Una restricción manual reversible no elimina Contact.
 
 ## 7. ReplyDecision y automatización
 

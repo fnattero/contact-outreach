@@ -164,7 +164,18 @@ nuevas fallan el preflight hasta tener una partición READY que cubra esa provin
 5. Revisar cobertura/hashes, conteos, contactos, fuentes, licencias, notices, atribución y health.
 6. Ejecutar una campaña pequeña `REVIEW_ONLY` e inspeccionar todos los emails antes de ampliar uso.
 
-## 9. Verificación antes de habilitar envío real
+## 9. Pedido de borrado de datos
+
+Un admin abre el Contacto (o el negocio en la lista de negocios encontrados) y usa “Eliminar datos de
+este negocio”. Si responde que hay un correo saliendo, esperar unos minutos y repetir. Después:
+
+1. borrar a mano en Gmail los hilos con ese negocio: la app sólo tiene permiso de lectura;
+2. tener en cuenta que los backups anteriores conservan los datos hasta que se reemplacen; no se
+   editan backups;
+3. responder al negocio que sus datos se eliminaron y que sólo se conserva su dirección para no
+   volver a escribirle.
+
+## 10. Verificación antes de habilitar envío real
 
 Antes de pasar `SEND_MODE` a `live` o de habilitar respuestas automáticas, correr y revisar:
 
