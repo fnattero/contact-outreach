@@ -519,7 +519,7 @@ def ensure_prospect_enrollment(
     from apps.prospects.models import Prospect
 
     locked = (
-        Prospect.objects.select_for_update()
+        Prospect.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__created_by", "source_run", "organization")
         .prefetch_related("identities", "emails")
         .get(pk=prospect.pk)
@@ -696,7 +696,7 @@ def enrollment_eligibility(enrollment: CampaignEnrollment) -> EnrollmentEligibil
 @transaction.atomic
 def refresh_enrollment_eligibility(enrollment: CampaignEnrollment) -> EnrollmentEligibility:
     locked = (
-        CampaignEnrollment.objects.select_for_update()
+        CampaignEnrollment.objects.select_for_update(of=("self",))
         .select_related("organization", "selected_email")
         .get(pk=enrollment.pk)
     )
@@ -725,7 +725,7 @@ def ensure_outbound_contact_links(message: OutboundMessage) -> CampaignEnrollmen
     from apps.campaigns.models import OutboundMessage
 
     locked = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related(
             "campaign", "campaign__created_by", "prospect", "prospect_email", "campaign_enrollment"
         )
@@ -1115,7 +1115,7 @@ def _apply_direct_contact_inbound(message: InboundMessage) -> InboundContactEffe
         raise ValidationError("El remitente no contiene un email reconocible.")
     normalized = normalize_email(sender_literal)
     selected = (
-        EmailAddress.objects.select_for_update()
+        EmailAddress.objects.select_for_update(of=("self",))
         .select_related("organization", "organization__contact")
         .get(
             workspace=message.connection.workspace,
@@ -1401,7 +1401,7 @@ def add_contact_email_address(
 
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     contact = (
-        Contact.objects.select_for_update()
+        Contact.objects.select_for_update(of=("self",))
         .select_related("organization", "preferred_email")
         .get(pk=contact_id)
     )
@@ -1727,7 +1727,7 @@ def revoke_manual_restriction(
         raise ValidationError("Explicá por qué se quita la restricción.")
     membership = require_user_capability(actor, Capability.MANAGE_CONTACTS)
     restriction = (
-        CommunicationRestriction.objects.select_for_update()
+        CommunicationRestriction.objects.select_for_update(of=("self",))
         .select_related("contact", "email_address")
         .get(pk=restriction_id)
     )

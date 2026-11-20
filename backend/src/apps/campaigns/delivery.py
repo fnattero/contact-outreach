@@ -426,7 +426,7 @@ def _message_bytes(message: OutboundMessage, *, sender: str) -> tuple[bytes, str
 def complete_dry_run(message_id: uuid.UUID | str, *, now: datetime | None = None) -> str:
     moment = now or timezone.now()
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__created_by", "catalog")
         .get(pk=message_id)
     )
@@ -497,7 +497,9 @@ def complete_review_only(message_id: uuid.UUID | str) -> str:
     """Make a review-only candidate terminal without constructing MIME or touching Gmail."""
 
     message = (
-        OutboundMessage.objects.select_for_update().select_related("campaign").get(pk=message_id)
+        OutboundMessage.objects.select_for_update(of=("self",))
+        .select_related("campaign")
+        .get(pk=message_id)
     )
     campaign = message.campaign
     if campaign is None:
@@ -637,7 +639,7 @@ def _mark_message_ineligible(
 @transaction.atomic
 def _prepare_live_effect(message_id: uuid.UUID | str, now: datetime) -> SendEffect | None:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__created_by", "catalog", "prospect_email")
         .get(pk=message_id)
     )
@@ -912,7 +914,9 @@ def _ensure_campaign_reminder(
 @transaction.atomic
 def _confirm_sent(message_id: uuid.UUID, result: GmailSendResult, now: datetime) -> str:
     message = (
-        OutboundMessage.objects.select_for_update().select_related("campaign").get(pk=message_id)
+        OutboundMessage.objects.select_for_update(of=("self",))
+        .select_related("campaign")
+        .get(pk=message_id)
     )
     if message.state == OutboundMessage.State.SENT:
         if message.kind == OutboundMessage.Kind.INITIAL:
@@ -1018,7 +1022,7 @@ def _execute_external_effect(
     # Keeping it through provider.send() makes suppression commit and Gmail send ordered.
     lock_email_eligibility(effect.recipient_normalized)
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__created_by", "prospect_email")
         .get(pk=effect.message_id)
     )
@@ -1166,7 +1170,9 @@ def _record_send_error(
     permanent: bool = False,
 ) -> str:
     message = (
-        OutboundMessage.objects.select_for_update().select_related("campaign").get(pk=message_id)
+        OutboundMessage.objects.select_for_update(of=("self",))
+        .select_related("campaign")
+        .get(pk=message_id)
     )
     if message.state == OutboundMessage.State.SENT:
         return message.state
@@ -1305,7 +1311,7 @@ def reconcile_message(
         return _confirm_sent(message.pk, result, moment)
     with transaction.atomic():
         locked = (
-            OutboundMessage.objects.select_for_update()
+            OutboundMessage.objects.select_for_update(of=("self",))
             .select_related("campaign")
             .get(pk=message.pk)
         )
@@ -1350,7 +1356,7 @@ def reconcile_message(
 @transaction.atomic
 def _queue_candidate_is_ready(message_id: uuid.UUID, now: datetime) -> bool:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__workspace")
         .get(pk=message_id)
     )
@@ -1436,7 +1442,7 @@ def retry_failed_message(
     """Requeue the same logical message only after an explicit, audited operator decision."""
 
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__workspace", "catalog", "prospect_email")
         .get(pk=message_id)
     )
@@ -1519,7 +1525,7 @@ def _complete_campaign_if_drained(campaign_id: uuid.UUID) -> bool:
     ):
         return False
     if campaign.reminder_enabled and campaign.delivery_mode == Campaign.DeliveryMode.LIVE:
-        sent_initials = campaign.messages.select_for_update().filter(
+        sent_initials = campaign.messages.select_for_update(of=("self",)).filter(
             kind=OutboundMessage.Kind.INITIAL,
             state=OutboundMessage.State.SENT,
             campaign_reminder__isnull=True,

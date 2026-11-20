@@ -30,7 +30,7 @@ def _locked_owned_message(
     capability: Capability,
 ) -> OutboundMessage:
     message = (
-        OutboundMessage.objects.select_for_update()
+        OutboundMessage.objects.select_for_update(of=("self",))
         .select_related("campaign", "campaign__workspace", "catalog", "prospect_email")
         .get(pk=message_id)
     )
