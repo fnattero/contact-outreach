@@ -24,6 +24,9 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Pages anyone may open without a session; the privacy policy is linked from Google's consent screen.
+const PUBLIC_PATHS = ["/", "/login", "/activate", "/privacidad"];
+
 export function useAuth(): AuthContextValue {
   const value = useContext(AuthContext);
   if (!value) throw new Error("useAuth debe usarse dentro de AuthProvider");
@@ -79,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({ session, loading, refresh, signOut }), [loading, refresh, session, signOut]);
 
-  if (pathname === "/login" || pathname === "/activate") {
+  if (PUBLIC_PATHS.includes(pathname)) {
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
   }
 

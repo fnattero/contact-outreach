@@ -181,6 +181,13 @@ No hay override de unsubscribe ni Contact exclusion.
 - Un email de alerta humana usa asunto genérico y link seguro; nunca inbound body, subject, contact
   name o dirección. Dashboard task persiste aunque notification falle.
 - Unsubscribe se aplica antes de IA, es irreversible y bloquea todo efecto al scope aplicable.
+- El borrado de datos de un negocio exige ADMIN, reautenticación y `ELIMINAR`. Vacía los textos
+  sin borrar filas y conserva sólo la dirección normalizada (supresión) y hashes de identidad. Su
+  restricción `ERASURE` no se puede levantar ni desde la app ni con un UPDATE (check constraint), y
+  una supresión puente de un bloqueo manual pasa a pertenecerle para que levantar ese bloqueo no
+  la borre. La ingesta, el sitio web, el filtro de audiencia y la página cruda del proveedor no
+  vuelven a guardar datos de un negocio borrado. Fuera de su alcance quedan la casilla Gmail
+  (scope de sólo lectura) y los backups ya generados.
 
 Por decisión de producto, el copy seed no añade `PUBLICIDAD` ni pie `BAJA`. Eso puede ser
 insuficiente legalmente para outreach no consentido; la revisión legal y de deliverability sigue

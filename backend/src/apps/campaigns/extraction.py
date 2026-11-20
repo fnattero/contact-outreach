@@ -17,6 +17,7 @@ from apps.configuration.integrations import (
     redact_provider_error,
     runtime_integration_configuration,
 )
+from apps.contacts.erasure import drop_erased_rows
 from apps.contacts.models import CampaignEnrollment
 from apps.integrations.contracts import (
     AuthenticationError,
@@ -284,8 +285,10 @@ def _persist_provider_response(run_id: uuid.UUID, batch: ExtractionBatch) -> Sea
     request_cursor = str(run.request_json.get("cursor", ""))
     if batch.next_cursor and batch.next_cursor == request_cursor:
         raise PermanentProviderError("El proveedor devolvió un cursor que no avanza.")
-    run.response_json = batch.raw_payload
-    run.response_hash = _payload_hash(batch.raw_payload)
+    # A business whose data was erased is not stored again, not even inside the raw page.
+    payload = drop_erased_rows(run.provider, batch.raw_payload)
+    run.response_json = payload
+    run.response_hash = _payload_hash(payload)
     run.cursor = batch.next_cursor
     run.raw_persisted_at = timezone.now()
     if batch.estimated_cost is not None:

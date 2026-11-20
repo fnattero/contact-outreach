@@ -62,9 +62,11 @@ from apps.api.contacts import (
     ContactDetailView,
     ContactEmailCreateView,
     ContactEmailValidateView,
+    ContactErasureView,
     ContactListView,
     ContactPreferredEmailView,
     ContactRestrictionView,
+    ProspectErasureView,
     RestrictionRevokeView,
 )
 from apps.api.dashboard import DashboardSummaryView
@@ -260,6 +262,11 @@ urlpatterns = [
     path("prospects/", ProspectListView.as_view(), name="api-prospects"),
     path("prospects/export.csv", ProspectExportView.as_view(), name="api-prospect-export"),
     path(
+        "prospects/<uuid:prospect_id>/erase/",
+        ProspectErasureView.as_view(),
+        name="api-prospect-erase",
+    ),
+    path(
         "prospects/<uuid:prospect_id>/restore/",
         ProspectRestoreView.as_view(),
         name="api-prospect-restore",
@@ -351,6 +358,11 @@ urlpatterns = [
     ),
     path("contacts/", ContactListView.as_view(), name="api-contacts"),
     path("contacts/<uuid:contact_id>/", ContactDetailView.as_view(), name="api-contact-detail"),
+    path(
+        "contacts/<uuid:contact_id>/erase/",
+        ContactErasureView.as_view(),
+        name="api-contact-erase",
+    ),
     path(
         "contacts/<uuid:contact_id>/communication-plans/",
         ContactPlanView.as_view(),

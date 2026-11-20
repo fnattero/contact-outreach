@@ -2996,3 +2996,28 @@ div.campaign-choice-group > label {
     transition-duration: 0.01ms;
   }
 }
+
+.legal-page {
+  min-height: 100dvh;
+  padding: 48px 24px;
+  background: var(--canvas);
+}
+
+.legal-page__document {
+  max-width: 680px;
+  margin: 0 auto;
+  color: var(--ink-secondary);
+  line-height: 1.6;
+}
+
+.legal-page__document h1 {
+  margin-bottom: 24px;
+}
+
+.legal-page__document h2 {
+  margin: 32px 0 8px;
+}
+
+.legal-page__footer {
+  margin-top: 40px;
+}

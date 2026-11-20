@@ -4,6 +4,7 @@ import { Alert, Button, Card, Flex, Form, Input, Modal, Select, Table } from "an
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AuthError, useAuth } from "@/components/auth-provider";
+import { EraseBusinessControl } from "@/components/erase-business-control";
 import { DisabledReason } from "@/components/design-system/disabled-reason";
 import { PageHeader } from "@/components/design-system/page-header";
 import { AUDIENCE_TABS } from "@/components/design-system/tabs-config";
@@ -11,6 +12,7 @@ import { SectionTabs } from "@/components/design-system/section-tabs";
 import { EmptyState, LoadingState } from "@/components/design-system/states";
 import { StatusBadge } from "@/components/design-system/status-badge";
 import { can,
+  eraseProspectData,
   getCampaigns,
   getProspects,
   problemMessage,
@@ -56,6 +58,7 @@ export default function ProspectsPage() {
   const [restoreBusy, setRestoreBusy] = useState(false);
 
   const isAdmin = can(session, "manage_campaigns");
+  const canErase = can(session, "manage_contacts");
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -175,14 +178,24 @@ export default function ProspectsPage() {
                 {
                   title: "Negocio",
                   dataIndex: "name",
-                  render: (name: string, row) => <><strong>{name}</strong><br /><span className="data-text">{row.primary_email ?? "Sin correo seleccionado"}</span></>,
+                  render: (name: string, row) =>
+                    row.erased ? (
+                      <span className="muted">Negocio sin datos</span>
+                    ) : (
+                      <><strong>{name}</strong><br /><span className="data-text">{row.primary_email ?? "Sin correo seleccionado"}</span></>
+                    ),
                 },
                 { title: "Campaña", dataIndex: "campaign", render: (campaign: Prospect["campaign"]) => <Link href={`/campaigns/${campaign.id}`}>{campaign.name}</Link> },
                 { title: "Rubro / zona", render: (_: unknown, row) => [row.category, row.neighborhood].filter(Boolean).join(" · ") || "—" },
                 {
                   title: "Estado",
                   dataIndex: "pipeline_state",
-                  render: (state: string, row) => <StatusBadge label={stateLabel(state, row.pipeline_state_label)} level={stateLevel(state)} />,
+                  render: (state: string, row) =>
+                    row.erased ? (
+                      <StatusBadge label="Datos eliminados" level="warning" />
+                    ) : (
+                      <StatusBadge label={stateLabel(state, row.pipeline_state_label)} level={stateLevel(state)} />
+                    ),
                 },
                 {
                   title: "Evaluación",
@@ -200,12 +213,24 @@ export default function ProspectsPage() {
                 {
                   title: "Acciones",
                   render: (_: unknown, row) => {
-                    if (row.pipeline_state !== "SKIPPED_IRRELEVANT") return null;
+                    if (row.erased) return null;
                     const blocked = restoreBlockedReason(row.campaign_state);
                     return (
-                      <DisabledReason disabled={blocked !== null} reason={blocked ?? ""}>
-                        <Button size="small" onClick={() => setRestoring(row)}>Recuperar</Button>
-                      </DisabledReason>
+                      <Flex vertical gap="small" align="start">
+                        {row.pipeline_state === "SKIPPED_IRRELEVANT" ? (
+                          <DisabledReason disabled={blocked !== null} reason={blocked ?? ""}>
+                            <Button size="small" onClick={() => setRestoring(row)}>Recuperar</Button>
+                          </DisabledReason>
+                        ) : null}
+                        {canErase ? (
+                          <EraseBusinessControl
+                            size="small"
+                            label="Eliminar datos"
+                            erase={(word) => eraseProspectData(row.id, word)}
+                            onErased={() => { setLoading(true); setReload((current) => current + 1); }}
+                          />
+                        ) : null}
+                      </Flex>
                     );
                   },
                 },

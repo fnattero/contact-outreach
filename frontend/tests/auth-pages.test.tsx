@@ -234,10 +234,10 @@ describe("auth provider", () => {
     return actual.AuthProvider;
   }
 
-  it("keeps the login and activation pages outside the session check", async () => {
+  it("keeps the public pages outside the session check", async () => {
     const Provider = await realProvider();
     vi.mocked(getSession).mockRejectedValue({ status: 401 });
-    for (const path of ["/login", "/activate"]) {
+    for (const path of ["/", "/login", "/activate", "/privacidad"]) {
       nav.path = path;
       const view = render(createElement(Provider, null, createElement("p", null, `abierta ${path}`)));
       expect(screen.getByText(`abierta ${path}`)).toBeInTheDocument();
