@@ -35,6 +35,9 @@ class Prospect(TimestampedUUIDModel):
         on_delete=models.PROTECT,
         related_name="legacy_prospects",
     )
+    # Mirrors Organization.erased_at: the business's data was erased and the pipeline must not
+    # store anything about it again.
+    erased_at = models.DateTimeField(blank=True, null=True)
     source_run = models.ForeignKey(SearchRun, on_delete=models.PROTECT, related_name="prospects")
     name = models.CharField(max_length=300)
     normalized_name = models.CharField(max_length=300)

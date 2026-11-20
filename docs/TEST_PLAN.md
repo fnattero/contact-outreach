@@ -98,6 +98,9 @@ Coverage nunca sustituye negativos. En CI (`.github/workflows/ci.yml`) cada push
 - “No contactar contacto” bloquea todos emails; “No usar email” sólo canal. Unsubscribe no se
   levanta; bounce sólo invalida email; manual lift exige ADMIN+reason+audit.
 - Supresiones históricas aparecen dentro de Contact y no existe page primaria Supresiones.
+- Borrado de datos: tras borrar un negocio con historia completa, ninguna fila de ningún modelo
+  contiene sus datos; queda bloqueado para siempre, el bloqueo no se levanta, una nueva búsqueda no
+  guarda nada, un trabajo en curso no reescribe datos y la acción se rechaza durante un envío.
 - Cambio de restricción entre preparation/approval/queue/send cancela fail-closed.
 
 ## 5. Geografía y Overture

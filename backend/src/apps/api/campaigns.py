@@ -744,6 +744,7 @@ def _prospect_row(item: Prospect) -> dict[str, object]:
         "relevance_reason": getattr(item, "relevance_reason", None),
         "relevance_checked_at": getattr(item, "relevance_checked_at", None),
         "relevance_override": item.relevance_override_at is not None,
+        "erased": item.erased_at is not None,
         "campaign_state": item.campaign.state,
         "campaign": {"id": str(item.campaign_id), "name": item.campaign.name},
         "provenance": _provenance_data(item),

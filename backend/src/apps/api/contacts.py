@@ -16,13 +16,16 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.accounts.permissions import Capability, has_capability
+from apps.api.auth import _reauthentication_active
 from apps.api.concurrency import add_etag, require_if_match
+from apps.api.errors import raise_domain_error
 from apps.api.permissions import (
     ManageContactsPermission,
     ViewContactsPermission,
     authenticated_user,
 )
 from apps.api.schema import SchemaAPIView
+from apps.contacts.erasure import erase_organization
 from apps.contacts.models import CommunicationRestriction, Contact, EmailAddress
 from apps.contacts.queries import contact_queryset, conversation_timelines
 from apps.contacts.services import (
@@ -465,3 +468,83 @@ class RestrictionRevokeView(SchemaAPIView):
                 ).data
             }
         )
+
+
+ERASURE_CONFIRMATION_WORD = "ELIMINAR"
+
+
+class ErasureConfirmationSerializer(serializers.Serializer[dict[str, object]]):
+    confirmation = serializers.CharField(max_length=40)
+
+    def validate_confirmation(self, value: str) -> str:
+        if value != ERASURE_CONFIRMATION_WORD:
+            raise serializers.ValidationError(
+                f"Escribí {ERASURE_CONFIRMATION_WORD} para confirmar."
+            )
+        return value
+
+
+class ErasureResultSerializer(serializers.Serializer[dict[str, object]]):
+    organization_id = serializers.UUIDField()
+    erased_at = serializers.DateTimeField()
+    already_erased = serializers.BooleanField()
+
+
+def _erase(request: Request, organization_id: UUID) -> Response:
+    if not _reauthentication_active(request):
+        raise ApiPermissionDenied("Volvé a ingresar tu contraseña antes de eliminar datos.")
+    ErasureConfirmationSerializer(data=request.data).is_valid(raise_exception=True)
+    try:
+        result = erase_organization(
+            actor=authenticated_user(request), organization_id=organization_id
+        )
+    except (ValidationError, PermissionDenied) as exc:
+        raise_domain_error(exc)
+    return Response(
+        {
+            "data": ErasureResultSerializer(
+                {
+                    "organization_id": result.organization.pk,
+                    "erased_at": result.organization.erased_at,
+                    "already_erased": result.already_erased,
+                }
+            ).data
+        }
+    )
+
+
+class ContactErasureView(SchemaAPIView):
+    """Erase what we know about a contact's business. The block it leaves can never be lifted."""
+
+    permission_classes = (IsAuthenticated, ManageContactsPermission)
+
+    @extend_schema(request=ErasureConfirmationSerializer, responses=ErasureResultSerializer)
+    def post(self, request: Request, contact_id: UUID) -> Response:
+        contact = _contact(authenticated_user(request), contact_id)
+        return _erase(request, contact.organization_id)
+
+
+class ProspectErasureView(SchemaAPIView):
+    """Erase a business found by a search, before or after it was contacted."""
+
+    permission_classes = (IsAuthenticated, ManageContactsPermission)
+
+    @extend_schema(request=ErasureConfirmationSerializer, responses=ErasureResultSerializer)
+    def post(self, request: Request, prospect_id: UUID) -> Response:
+        from apps.prospects.models import Prospect
+
+        prospect = (
+            Prospect.objects.filter(
+                pk=prospect_id,
+                campaign__workspace_id=authenticated_user(request).membership.workspace_id,
+            )
+            .only("organization_id")
+            .first()
+        )
+        if prospect is None:
+            raise NotFound
+        if prospect.organization_id is None:
+            raise serializers.ValidationError(
+                {"prospect": "Este negocio todavía se está procesando. Probá en unos minutos."}
+            )
+        return _erase(request, prospect.organization_id)

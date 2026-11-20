@@ -132,7 +132,7 @@ permission/idempotency/provider error.
 - Dependency/image/SBOM/secret scans; CSRF/CORS/cookie/proxy/IDOR/XSS/CSP/SSRF/OAuth/PDF/CSV.
 - Gmail ambiguity/duplicate, Beat/restart/Redis loss, Overture import bajo carga.
 - Fresh/upgrade migrations futuras, backup/restore DB+Bucket+key y Railway staging.
-- Registrar la evidencia de estas verificaciones (ver `docs/OPERATIONS.md` §9) en el PR de release.
+- Registrar la evidencia de estas verificaciones (ver `docs/OPERATIONS.md` §10) en el PR de release.
 
 **Terminado:** cero high/critical sin resolver, restore probado, frontend saludable durante import y
 todos los kill switches/rechecks aprobados.
@@ -155,7 +155,7 @@ coinciden con Railway real.
 | Requisito | Fases | Evidencia |
 | --- | --- | --- |
 | FR-01 Workspace/roles/auth | 0, 3, 5, 7 | sesión/CSRF/lockout/reauth/permission matrix; MFA diferido |
-| FR-02 Contactos/restricciones | 4, 5, 7 | API/UI y rechecks de dominio |
+| FR-02 Contactos/restricciones | 4, 5, 7 | API/UI, rechecks de dominio y borrado de datos con bloqueo permanente |
 | FR-03/04 Geografía/Overture | 2, 4, 5, 7 | maintenance, partitions y mapa/lista |
 | FR-05–10 Campaign/Gmail | 2, 4, 5, 7 | durable jobs, delivery/reconciliation y E2E |
 | FR-11–15 IA/automation/relaciones | 4, 5, 7 | manifests/policy/tasks/limits/kill switches |

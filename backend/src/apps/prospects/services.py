@@ -50,7 +50,7 @@ FREE_OR_SHARED_DOMAINS = frozenset(
 MAX_WEBSITE_EMAIL_CANDIDATES = 40
 WEBSITE_EMAIL_SOURCES = frozenset({"mailto", "visible_text"})
 CONTACT_CENTRIC_EXCLUSION_CODES = frozenset(
-    {"EXISTING_CONTACT", "RESTRICTED", "LEGACY_RESTRICTION", "EMAIL_OWNERSHIP"}
+    {"EXISTING_CONTACT", "RESTRICTED", "LEGACY_RESTRICTION", "EMAIL_OWNERSHIP", "ERASED"}
 )
 
 
@@ -319,6 +319,9 @@ def ingest_prepared_business(*, run: SearchRun, prepared: PreparedBusiness) -> I
         existing = existing_email.prospect
     if existing is not None:
         existing = Prospect.objects.select_for_update().get(pk=existing.pk)
+        if existing.erased_at is not None:
+            # Rediscovered after its data was erased: recognised by the kept hashes, never stored.
+            return IngestResult(IngestOutcome.DUPLICATE, existing)
         existing_keys = set(existing.identities.values_list("kind", "value_hash"))
         ProspectIdentity.objects.bulk_create(
             [
@@ -563,6 +566,8 @@ def _skip_website_contact(
     snapshot = WebsiteSnapshot.objects.get(pk=snapshot_id, prospect=prospect)
     if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.erased_at is not None:
+        raise ProspectPipelineInactive("Se eliminaron los datos de este negocio.")
     if prospect.pipeline_state != Prospect.PipelineState.DISCOVERED:
         return prospect
     return _set_contact_terminal_locked(
@@ -601,6 +606,8 @@ def _persist_website_emails(
     snapshot = WebsiteSnapshot.objects.get(pk=snapshot_id, prospect=prospect)
     if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.erased_at is not None:
+        raise ProspectPipelineInactive("Se eliminaron los datos de este negocio.")
     if prospect.pipeline_state != Prospect.PipelineState.DISCOVERED:
         return prospect
 
@@ -691,6 +698,8 @@ def discover_website_email(
     prospect = Prospect.objects.select_related("campaign", "source_run").get(pk=prospect_id)
     if prospect.campaign.state not in {Campaign.State.DISCOVERING, Campaign.State.RUNNING}:
         raise ProspectPipelineInactive("La campaña ya no está activa.")
+    if prospect.erased_at is not None:
+        raise ProspectPipelineInactive("Se eliminaron los datos de este negocio.")
     if prospect.pipeline_state != Prospect.PipelineState.DISCOVERED:
         return prospect
     candidates = _website_candidates(snapshot)

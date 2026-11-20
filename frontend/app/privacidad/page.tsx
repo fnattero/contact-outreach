@@ -59,7 +59,16 @@ export default function PrivacyPage() {
           o «no me escriban». La herramienta lo detecta, bloquea esa dirección para siempre y esa decisión no se
           revierte. Cualquier otra respuesta también detiene los recordatorios de esa campaña.
         </p>
-        <p>Para cualquier consulta sobre tus datos, respondé el correo que te enviamos.</p>
+
+        <h2 className="type-title">Pedir que borremos tus datos</h2>
+        <p>
+          Respondé el correo que te enviamos pidiendo que borremos tus datos. Eliminamos de la herramienta el
+          nombre, la dirección, el teléfono y la web del negocio, el nombre de la persona de contacto, el texto de
+          los correos y lo que analizó la inteligencia artificial, y borramos la conversación de nuestra casilla de
+          Gmail. Conservamos solo tu dirección de correo, para no volver a escribirte nunca. Las copias de seguridad
+          que ya existían pueden conservar esos datos hasta que se reemplacen.
+        </p>
+        <p>Para cualquier otra consulta sobre tus datos, respondé el correo que te enviamos.</p>
 
         <p className="legal-page__footer">
           <Link href="/">Volver al inicio</Link>

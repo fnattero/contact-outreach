@@ -167,8 +167,8 @@ def test_renaming_a_contact_is_audited_and_respects_etag_and_capability(owner: U
     event = AuditEvent.objects.get(action="contact.renamed")
     assert event.entity_id == contact_id
     assert event.actor == owner
-    assert event.before == {"name": ""}
-    assert event.after == {"name": "Ana Pérez"}
+    assert event.before == {"had_name": False}
+    assert event.after == {"has_name": True}
 
     vendor = User.objects.create_user(username="rename-vendor", password="vendor-password-1234")
     vendor_client = Client(enforce_csrf_checks=True)

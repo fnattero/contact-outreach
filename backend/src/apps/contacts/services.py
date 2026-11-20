@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from email.utils import parseaddr
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -421,6 +421,16 @@ def resolve_organization(
         )
     if organization.workspace_id != workspace.pk:
         raise OrganizationResolutionConflict("La organización pertenece a otro espacio de trabajo.")
+    if organization.erased_at is not None:
+        # The business asked to be forgotten: its hashes keep recognising it, but nothing readable
+        # about it is stored again.
+        for claim in prepared:
+            _get_or_create_identity(
+                workspace=workspace,
+                organization=organization,
+                claim=replace(claim, value="", provenance={}),
+            )
+        return OrganizationResolution(organization=organization, email_address=existing_email)
     _fill_organization_fields(
         organization,
         name=name,
@@ -610,6 +620,10 @@ def ensure_prospect_enrollment(
     if target_campaign.pk == locked.campaign_id and locked.campaign_enrollment_id != enrollment.pk:
         locked.campaign_enrollment = enrollment
         locked.save(update_fields=("campaign_enrollment", "updated_at"))
+    if organization.erased_at is not None and locked.erased_at is None:
+        from apps.contacts.erasure import erase_prospect_data
+
+        erase_prospect_data(Prospect.objects.filter(pk=locked.pk))
     refresh_enrollment_eligibility(enrollment)
     enrollment.refresh_from_db()
     return enrollment
@@ -635,6 +649,12 @@ def enrollment_eligibility(enrollment: CampaignEnrollment) -> EnrollmentEligibil
             False,
             "INVALID_EMAIL",
             "El email elegido no está validado para enviar.",
+        )
+    if enrollment.organization.erased_at is not None:
+        return EnrollmentEligibility(
+            False,
+            "ERASED",
+            "Se eliminaron los datos de este negocio y no se le puede volver a escribir.",
         )
     if Contact.objects.filter(organization_id=enrollment.organization_id).exists():
         return EnrollmentEligibility(
@@ -1544,7 +1564,9 @@ def rename_contact(
         raise PermissionDenied
     new_name = name.strip()
     if new_name != contact.name:
-        before = {"name": contact.name}
+        # The audit log cannot be edited, so it records that the name changed and never the name:
+        # a person's name must be erasable.
+        before = {"had_name": bool(contact.name)}
         contact.name = new_name
         contact.save(update_fields=("name", "updated_at"))
         record_event(
@@ -1552,7 +1574,7 @@ def rename_contact(
             entity=contact,
             actor=actor,
             before=before,
-            after={"name": new_name},
+            after={"has_name": bool(new_name)},
         )
     return contact
 
