@@ -94,7 +94,9 @@ permission/idempotency/provider error.
 
 - Proxy Node streaming `/api/v1/*`, sólo server env, strip headers y neutral 502.
 - Auth/session provider con CSRF sólo memoria y handling 401/403/409/412/429/5xx.
-- Rutas: login/activate, dashboard, contacts/attention, campaigns, outbound, responses, catalogs,
+- Rutas públicas: inicio, login/activate y política de privacidad (`/privacidad`, enlazada desde la
+  pantalla de consentimiento de Google). Privadas: dashboard, contacts/attention, campaigns,
+  outbound, responses, catalogs,
   automation (estado, writing, knowledge; `settings/prompts` redirige a writing), prospects y settings
   relevance (pestañas de Audiencia), settings profile/templates/integrations/categories/overture/
   suppressions/users, audit/jobs.
